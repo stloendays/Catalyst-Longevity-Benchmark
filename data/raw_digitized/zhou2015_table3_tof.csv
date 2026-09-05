@@ -1,0 +1,13 @@
+paper_id,catalyst,calcination_C,time_h,tof_ch4_s_inv,coking_wt_pct_100h,reaction_temperature_C,feed_N2_CH4_CO2,F_over_W_L_gcat_h,source_location,source_url,notes
+P2015_ZHOU,Ni/Al2O3(350),350,0.5,6.5,36.97,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,First observed TOF; not assumed to be true t=0 activity.
+P2015_ZHOU,Ni/Al2O3(350),350,15,3.2,36.97,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(350),350,40,2.6,36.97,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(350),350,100,1.7,36.97,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(700),700,0.5,5.9,16.33,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,First observed TOF; not assumed to be true t=0 activity.
+P2015_ZHOU,Ni/Al2O3(700),700,15,3.6,16.33,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(700),700,40,3.2,16.33,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(700),700,100,2.9,16.33,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(900),900,0.5,5.1,7.93,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,First observed TOF; not assumed to be true t=0 activity.
+P2015_ZHOU,Ni/Al2O3(900),900,15,4.5,7.93,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(900),900,40,4.4,7.93,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
+P2015_ZHOU,Ni/Al2O3(900),900,100,4.4,7.93,700,2:1:1,480,Table 3,https://repository.kaust.edu.sa/bitstreams/1f6e62ae-92fa-4540-9fc8-fe8fd41c6b68/download,
