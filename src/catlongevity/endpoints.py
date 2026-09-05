@@ -22,7 +22,7 @@ def threshold_observation(
     activity: Iterable[float],
     threshold: float,
 ) -> ThresholdObservation:
-    """Return exact/interval/right/left-censored first-passage information.
+    """Return interval/right/left-censored first-passage information.
 
     Parameters
     ----------
@@ -35,8 +35,14 @@ def threshold_observation(
 
     Notes
     -----
-    The primary endpoint is based only on observed samples. A crossing between
-    adjacent samples is interval-censored; no interpolation is imposed.
+    This function intentionally does *not* infer an ``exact`` crossing from a
+    sampled point that happens to equal the threshold. With discrete TOS data,
+    the first-passage time is only known to lie between the previous
+    above-threshold sample and the first at-or-below-threshold sample.
+
+    ``exact`` is reserved for source-reported crossing times or other direct
+    observations and should be constructed explicitly by the caller rather
+    than inferred from sampled trajectories.
     """
     t = [float(x) for x in time_h]
     a = [float(x) for x in activity]
@@ -47,20 +53,29 @@ def threshold_observation(
     if not 0 < threshold <= 1:
         raise ValueError("threshold must be in (0, 1]")
 
-    # If the first usable sample is already below threshold, the crossing is
-    # known only to have occurred at or before that observation.
-    if a[0] < threshold:
+    # If the first usable sample is already at or below threshold, the crossing
+    # is known only to have occurred at or before that observation.
+    if a[0] <= threshold:
         return ThresholdObservation(threshold, "left_censored", 0.0, t[0])
-    if a[0] == threshold:
-        return ThresholdObservation(threshold, "exact", t[0], t[0])
 
+    # First observed sample at or below the threshold brackets the first
+    # crossing. Equality at a sampled point is still interval-censored because
+    # an earlier unobserved crossing/recovery cannot be excluded from the data
+    # alone.
     for i in range(1, len(t)):
-        if a[i] == threshold:
-            return ThresholdObservation(threshold, "exact", t[i], t[i])
-        if a[i] < threshold <= a[i - 1]:
+        if a[i] <= threshold < a[i - 1] or a[i] <= threshold <= a[i - 1]:
             return ThresholdObservation(threshold, "interval", t[i - 1], t[i])
 
     return ThresholdObservation(threshold, "right_censored", t[-1], None)
+
+
+def exact_threshold_observation(threshold: float, time_h: float) -> ThresholdObservation:
+    """Construct an exact threshold observation when the source reports it."""
+    if not 0 < threshold <= 1:
+        raise ValueError("threshold must be in (0, 1]")
+    if time_h < 0:
+        raise ValueError("time_h must be non-negative")
+    return ThresholdObservation(threshold, "exact", float(time_h), float(time_h))
 
 
 def standard_thresholds(time_h: Iterable[float], activity: Iterable[float]):
