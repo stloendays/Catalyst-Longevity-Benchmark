@@ -3,6 +3,7 @@ from src.catlongevity.ranking import (
     descending_rank,
     first_pairwise_crossover_bracket,
     linear_crossover_estimate,
+    piecewise_linear_cumulative_crossover_estimate,
 )
 
 
@@ -67,8 +68,21 @@ def test_zhou2015_cumulative_rank_lags_instantaneous_rank():
     assert auc["700"] == [0.0, 68.875, 153.875, 336.875]
     assert auc["900"] == [0.0, 69.6, 180.85, 444.85]
 
-    # At 15 h, instantaneous ranking has already reversed to 900 > 700 > 350,
-    # but cumulative production still carries an early-activity advantage.
     assert descending_rank({name: vals[1] for name, vals in auc.items()}) == ["350", "900", "700"]
     assert descending_rank({name: vals[2] for name, vals in auc.items()}) == ["900", "700", "350"]
     assert descending_rank({name: vals[3] for name, vals in auc.items()}) == ["900", "700", "350"]
+
+
+def test_zhou2015_cumulative_crossover_sensitivity_estimates():
+    t = [0.5, 15, 40, 100]
+    y350 = [6.5, 3.2, 2.6, 1.7]
+    y700 = [5.9, 3.6, 3.2, 2.9]
+    y900 = [5.1, 4.5, 4.4, 4.4]
+
+    t_700_900 = piecewise_linear_cumulative_crossover_estimate(t, y700, y900)
+    t_350_900 = piecewise_linear_cumulative_crossover_estimate(t, y350, y900)
+    t_350_700 = piecewise_linear_cumulative_crossover_estimate(t, y350, y700)
+
+    assert abs(t_700_900 - 14.1470588235294) < 1e-10
+    assert abs(t_350_900 - 15.5553201502363) < 1e-10
+    assert abs(t_350_700 - 18.5023363975817) < 1e-10
