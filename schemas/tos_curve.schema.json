@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Catalyst Longevity TOS Curve Record v0.1",
+  "title": "Catalyst Longevity TOS Curve Record v0.2",
   "type": "object",
   "required": ["curve_id", "paper_id", "catalyst_label", "metric", "time_h", "value"],
   "properties": {
@@ -23,6 +23,42 @@
     "extraction_method": {"enum": ["table", "manual_digitization", "author_data", "other"]},
     "mechanism_label": {"enum": ["coking", "sintering", "mixed", "other", "unknown"]},
     "mechanism_evidence": {"type": "array", "items": {"type": "string"}},
+    "threshold_endpoints": {
+      "type": "object",
+      "properties": {
+        "t95": {"$ref": "#/$defs/thresholdEndpoint"},
+        "t90": {"$ref": "#/$defs/thresholdEndpoint"},
+        "t80": {"$ref": "#/$defs/thresholdEndpoint"}
+      },
+      "additionalProperties": false
+    },
+    "reported_deactivation_parameters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "value"],
+        "properties": {
+          "name": {"type": "string"},
+          "value": {"type": "number"},
+          "unit": {"type": ["string", "null"]},
+          "definition": {"type": ["string", "null"]},
+          "source_location": {"type": ["string", "null"]}
+        }
+      }
+    },
     "notes": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "thresholdEndpoint": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["exact", "interval", "right_censored", "left_censored", "unknown"]},
+        "lower_h": {"type": ["number", "null"], "minimum": 0},
+        "upper_h": {"type": ["number", "null"], "minimum": 0},
+        "derived_point_estimate_h": {"type": ["number", "null"], "minimum": 0},
+        "derivation_method": {"type": ["string", "null"]}
+      }
+    }
   }
 }
