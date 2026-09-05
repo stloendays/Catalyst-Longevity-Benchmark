@@ -1,8 +1,8 @@
 """Utilities for operation-horizon-dependent catalyst ranking.
 
 Observed ranking reversals are separated from interpolation-based crossover
-estimates. The former are source-supported brackets; the latter are derived
-sensitivity quantities.
+estimates. Instantaneous ranking and cumulative-performance ranking are also
+kept distinct because they can reverse at different operation horizons.
 """
 from __future__ import annotations
 
@@ -45,9 +45,6 @@ def first_pairwise_crossover_bracket(
         if d[i - 1] < 0 and d[i] > 0:
             return CrossoverBracket("interval", t[i - 1], t[i], "B_to_A")
         if d[i] == 0 and d[i - 1] != 0:
-            # A sampled tie proves that a crossing occurred no later than this
-            # sample, but does not prove the first crossing happened exactly at
-            # the sample time.
             direction = "A_to_B" if d[i - 1] > 0 else "B_to_A"
             return CrossoverBracket("interval", t[i - 1], t[i], direction)
 
@@ -75,3 +72,39 @@ def linear_crossover_estimate(
         raise ValueError("endpoint differences must have opposite signs and be non-zero")
     fraction = d0 / (d0 - d1)
     return float(t0) + fraction * (float(t1) - float(t0))
+
+
+def cumulative_trapezoid_at_observed_times(
+    time_h: Iterable[float],
+    performance: Iterable[float],
+) -> list[float]:
+    """Return cumulative piecewise-linear AUC at each observed time.
+
+    The first returned value is zero because integration begins at the first
+    source-supported observation, not at an inferred t=0 value. Between source
+    observations, linear interpolation is assumed. Therefore cumulative AUC is
+    a derived sensitivity quantity unless the source itself supplies a dense
+    or continuously recorded trajectory.
+    """
+    t = [float(x) for x in time_h]
+    y = [float(x) for x in performance]
+    if not t or len(t) != len(y):
+        raise ValueError("time_h and performance must have the same non-zero length")
+    if any(t[i] >= t[i + 1] for i in range(len(t) - 1)):
+        raise ValueError("time_h must be strictly increasing")
+
+    cumulative = [0.0]
+    total = 0.0
+    for i in range(1, len(t)):
+        total += 0.5 * (y[i - 1] + y[i]) * (t[i] - t[i - 1])
+        cumulative.append(total)
+    return cumulative
+
+
+def descending_rank(values: dict[str, float]) -> list[str]:
+    """Return labels ordered from highest to lowest performance.
+
+    Equal values are secondarily ordered by label for deterministic output.
+    This helper does not assign statistical significance to small differences.
+    """
+    return [label for label, _ in sorted(values.items(), key=lambda kv: (-float(kv[1]), kv[0]))]
