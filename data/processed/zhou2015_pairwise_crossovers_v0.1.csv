@@ -1,0 +1,4 @@
+paper_id,catalyst_a,catalyst_b,observed_instantaneous_crossover_lower_h,observed_instantaneous_crossover_upper_h,instantaneous_linear_estimate_h,cumulative_piecewise_linear_estimate_h,primary_vs_sensitivity,notes
+P2015_ZHOU,Ni/Al2O3(350),Ni/Al2O3(700),0.5,15,9.2000000000,18.5023363976,"observed bracket primary; both point estimates sensitivity","A starts above B at 0.5 h; B is above A at 15 h. Cumulative estimate integrates from first observation at 0.5 h."
+P2015_ZHOU,Ni/Al2O3(350),Ni/Al2O3(900),0.5,15,8.0185185185,15.5553201502,"observed bracket primary; both point estimates sensitivity","A starts above B at 0.5 h; B is above A at 15 h."
+P2015_ZHOU,Ni/Al2O3(700),Ni/Al2O3(900),0.5,15,7.3235294118,14.1470588235,"observed bracket primary; both point estimates sensitivity","A starts above B at 0.5 h; B is above A at 15 h."
