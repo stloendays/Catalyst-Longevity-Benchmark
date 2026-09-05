@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Catalyst Longevity TOS Curve Record v0.1",
+  "type": "object",
+  "required": ["curve_id", "paper_id", "catalyst_label", "metric", "time_h", "value"],
+  "properties": {
+    "curve_id": {"type": "string"},
+    "paper_id": {"type": "string"},
+    "catalyst_label": {"type": "string"},
+    "metric": {"enum": ["CH4_conversion", "CO2_conversion", "activity", "rate"]},
+    "time_h": {"type": "array", "items": {"type": "number", "minimum": 0}, "minItems": 2},
+    "value": {"type": "array", "items": {"type": "number"}, "minItems": 2},
+    "value_unit": {"type": ["string", "null"]},
+    "reaction_temperature_C": {"type": ["number", "null"]},
+    "pressure_bar": {"type": ["number", "null"]},
+    "feed_CH4_CO2": {"type": ["string", "null"]},
+    "ghsv": {"type": ["number", "null"]},
+    "ghsv_unit": {"type": ["string", "null"]},
+    "ni_loading_wt_pct": {"type": ["number", "null"]},
+    "support": {"type": ["string", "null"]},
+    "promoter": {"type": ["string", "null"]},
+    "figure_table": {"type": ["string", "null"]},
+    "extraction_method": {"enum": ["table", "manual_digitization", "author_data", "other"]},
+    "mechanism_label": {"enum": ["coking", "sintering", "mixed", "other", "unknown"]},
+    "mechanism_evidence": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": ["string", "null"]}
+  }
+}
