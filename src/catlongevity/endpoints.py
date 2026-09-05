@@ -53,17 +53,11 @@ def threshold_observation(
     if not 0 < threshold <= 1:
         raise ValueError("threshold must be in (0, 1]")
 
-    # If the first usable sample is already at or below threshold, the crossing
-    # is known only to have occurred at or before that observation.
     if a[0] <= threshold:
         return ThresholdObservation(threshold, "left_censored", 0.0, t[0])
 
-    # First observed sample at or below the threshold brackets the first
-    # crossing. Equality at a sampled point is still interval-censored because
-    # an earlier unobserved crossing/recovery cannot be excluded from the data
-    # alone.
     for i in range(1, len(t)):
-        if a[i] <= threshold < a[i - 1] or a[i] <= threshold <= a[i - 1]:
+        if a[i] <= threshold <= a[i - 1]:
             return ThresholdObservation(threshold, "interval", t[i - 1], t[i])
 
     return ThresholdObservation(threshold, "right_censored", t[-1], None)
