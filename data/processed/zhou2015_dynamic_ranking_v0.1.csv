@@ -1,0 +1,5 @@
+paper_id,time_h,tof_350_s_inv,tof_700_s_inv,tof_900_s_inv,instantaneous_rank,auc_350_tof_h,auc_700_tof_h,auc_900_tof_h,cumulative_rank,auc_method,interpretation
+P2015_ZHOU,0.5,6.5,5.9,5.1,350>700>900,0,0,0,not_defined_at_reference,piecewise_linear_trapezoid_from_first_observation,First source-supported observation; cumulative integration starts here and does not infer t=0 behavior.
+P2015_ZHOU,15,3.2,3.6,4.5,900>700>350,70.325,68.875,69.600,350>900>700,piecewise_linear_trapezoid_from_first_observation,Instantaneous ranking has fully reversed but cumulative ranking still carries the early-activity advantage.
+P2015_ZHOU,40,2.6,3.2,4.4,900>700>350,142.825,153.875,180.850,900>700>350,piecewise_linear_trapezoid_from_first_observation,By 40 h both instantaneous and reconstructed cumulative rankings favor the 900 C catalyst.
+P2015_ZHOU,100,1.7,2.9,4.4,900>700>350,271.825,336.875,444.850,900>700>350,piecewise_linear_trapezoid_from_first_observation,Long-horizon cumulative ranking is the reverse of the first-observation instantaneous ranking.
