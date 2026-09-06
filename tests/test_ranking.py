@@ -1,7 +1,9 @@
 from src.catlongevity.ranking import (
+    PerformanceInterval,
     cumulative_trapezoid_at_observed_times,
     descending_rank,
     first_pairwise_crossover_bracket,
+    first_proven_interval_crossover_bracket,
     linear_crossover_estimate,
     piecewise_linear_cumulative_crossover_estimate,
 )
@@ -37,6 +39,51 @@ def test_no_observed_reversal():
     assert obs.status == "not_observed"
     assert obs.lower_h == 20
     assert obs.upper_h is None
+
+
+def test_interval_uncertainty_widens_crossover_bracket():
+    obs = first_proven_interval_crossover_bracket(
+        [0, 5, 10],
+        [(19, 21), (14, 16), (12, 14)],
+        [(16, 18), (15, 17), (15, 17)],
+    )
+    assert obs.status == "interval"
+    assert obs.lower_h == 0
+    assert obs.upper_h == 10
+    assert obs.direction == "A_to_B"
+
+
+def test_overlapping_uncertainty_cannot_create_reversal_claim():
+    obs = first_proven_interval_crossover_bracket(
+        [0, 5],
+        [PerformanceInterval(19, 21), PerformanceInterval(14, 16)],
+        [PerformanceInterval(16, 18), PerformanceInterval(15, 17)],
+    )
+    assert obs.status == "not_proven"
+    assert obs.lower_h == 0
+    assert obs.upper_h == 5
+    assert obs.direction is None
+
+
+def test_point_intervals_recover_zhou2015_observed_reversal():
+    obs = first_proven_interval_crossover_bracket(
+        [0.5, 15, 40, 100],
+        [(6.5, 6.5), (3.2, 3.2), (2.6, 2.6), (1.7, 1.7)],
+        [(5.1, 5.1), (4.5, 4.5), (4.4, 4.4), (4.4, 4.4)],
+    )
+    assert obs.status == "interval"
+    assert obs.lower_h == 0.5
+    assert obs.upper_h == 15
+    assert obs.direction == "A_to_B"
+
+
+def test_invalid_performance_interval_fails_closed():
+    try:
+        PerformanceInterval(5, 4)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid uncertainty bounds must fail closed")
 
 
 def test_zhou2015_full_instantaneous_rank_reversal():
