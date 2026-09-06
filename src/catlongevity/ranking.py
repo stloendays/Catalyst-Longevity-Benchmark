@@ -3,6 +3,8 @@
 Observed ranking reversals are separated from interpolation-based crossover
 estimates. Instantaneous ranking and cumulative-performance ranking are also
 kept distinct because they can reverse at different operation horizons.
+Digitization/source uncertainty can be represented as value intervals so that
+rank reversals are only called when the ordering is actually proven.
 """
 from __future__ import annotations
 
@@ -19,6 +21,18 @@ class CrossoverBracket:
     direction: Optional[str]
 
 
+@dataclass(frozen=True)
+class PerformanceInterval:
+    """Closed uncertainty interval for one performance observation."""
+
+    lower: float
+    upper: float
+
+    def __post_init__(self) -> None:
+        if self.lower > self.upper:
+            raise ValueError("performance interval lower bound must not exceed upper bound")
+
+
 def _validated_pair(
     time_h: Iterable[float],
     performance_a: Iterable[float],
@@ -29,6 +43,32 @@ def _validated_pair(
     b = [float(x) for x in performance_b]
     if not t or len(t) != len(a) or len(t) != len(b):
         raise ValueError("time_h and both performance arrays must have the same non-zero length")
+    if any(t[i] >= t[i + 1] for i in range(len(t) - 1)):
+        raise ValueError("time_h must be strictly increasing")
+    return t, a, b
+
+
+def _validated_interval_pair(
+    time_h: Iterable[float],
+    performance_a: Iterable[PerformanceInterval | tuple[float, float]],
+    performance_b: Iterable[PerformanceInterval | tuple[float, float]],
+) -> tuple[list[float], list[PerformanceInterval], list[PerformanceInterval]]:
+    t = [float(x) for x in time_h]
+
+    def coerce(values: Iterable[PerformanceInterval | tuple[float, float]]) -> list[PerformanceInterval]:
+        out: list[PerformanceInterval] = []
+        for value in values:
+            if isinstance(value, PerformanceInterval):
+                out.append(value)
+            else:
+                lo, hi = value
+                out.append(PerformanceInterval(float(lo), float(hi)))
+        return out
+
+    a = coerce(performance_a)
+    b = coerce(performance_b)
+    if not t or len(t) != len(a) or len(t) != len(b):
+        raise ValueError("time_h and both performance-interval arrays must have the same non-zero length")
     if any(t[i] >= t[i + 1] for i in range(len(t) - 1)):
         raise ValueError("time_h must be strictly increasing")
     return t, a, b
@@ -58,6 +98,51 @@ def first_pairwise_crossover_bracket(
             return CrossoverBracket("interval", t[i - 1], t[i], direction)
 
     return CrossoverBracket("not_observed", t[-1], None, None)
+
+
+def first_proven_interval_crossover_bracket(
+    time_h: Iterable[float],
+    performance_a: Iterable[PerformanceInterval | tuple[float, float]],
+    performance_b: Iterable[PerformanceInterval | tuple[float, float]],
+) -> CrossoverBracket:
+    """Return the first *proven* crossover bracket with interval-valued data.
+
+    At a given observation time A is proven better than B only when A.lower is
+    strictly greater than B.upper; B is proven better than A only when B.lower
+    is strictly greater than A.upper. Overlapping intervals are treated as
+    ambiguous and can never create a rank-reversal claim by themselves.
+
+    If opposite proven orderings occur at two observation times, at least one
+    crossover lies between those times under continuity. Ambiguous intermediate
+    observations widen, rather than artificially sharpen, the bracket.
+
+    If no opposite proven ordering is found, status is ``not_proven``. This is
+    deliberately weaker than ``not_observed`` because overlapping uncertainty
+    intervals may conceal a reversal.
+    """
+    t, a, b = _validated_interval_pair(time_h, performance_a, performance_b)
+
+    def relation(x: PerformanceInterval, y: PerformanceInterval) -> Optional[str]:
+        if x.lower > y.upper:
+            return "A_over_B"
+        if y.lower > x.upper:
+            return "B_over_A"
+        return None
+
+    last_relation: Optional[str] = None
+    last_relation_time: Optional[float] = None
+
+    for ti, ai, bi in zip(t, a, b):
+        current = relation(ai, bi)
+        if current is None:
+            continue
+        if last_relation is not None and current != last_relation:
+            direction = "A_to_B" if last_relation == "A_over_B" else "B_to_A"
+            return CrossoverBracket("interval", last_relation_time, ti, direction)
+        last_relation = current
+        last_relation_time = ti
+
+    return CrossoverBracket("not_proven", last_relation_time, t[-1], None)
 
 
 def linear_crossover_estimate(
