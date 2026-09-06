@@ -1,0 +1,3 @@
+paper_id,catalyst_label,reaction_t_c,whsv_ml_h_g,tos_min,tos_h,ch4_conversion_pct,co2_conversion_pct,h2_co,source_locator,extraction_method,provenance_note
+P2024_LUO_B,Ni/Al2O3,700,18000,6000,100,76.6,83.4,0.86,Table S4,table,"Exact displayed Supporting Information table value; no interpolation or plot digitization."
+P2024_LUO_B,Ni-0.16B/Al2O3,700,18000,6000,100,80.6,86.9,0.89,Table S4,table,"Exact displayed Supporting Information table value. Publisher abstract separately reports approximately 81.6% CH4; conflict preserved in source_value_conflicts_v0.1.csv."
