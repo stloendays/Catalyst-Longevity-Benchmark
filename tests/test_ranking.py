@@ -1,3 +1,5 @@
+import pytest
+
 from src.catlongevity.ranking import (
     PerformanceInterval,
     cumulative_trapezoid_at_observed_times,
@@ -78,12 +80,8 @@ def test_point_intervals_recover_zhou2015_observed_reversal():
 
 
 def test_invalid_performance_interval_fails_closed():
-    try:
+    with pytest.raises(ValueError):
         PerformanceInterval(5, 4)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("invalid uncertainty bounds must fail closed")
 
 
 def test_zhou2015_full_instantaneous_rank_reversal():
@@ -111,9 +109,9 @@ def test_zhou2015_cumulative_rank_lags_instantaneous_rank():
     }
     auc = {name: cumulative_trapezoid_at_observed_times(t, y) for name, y in curves.items()}
 
-    assert auc["350"] == [0.0, 70.325, 142.825, 271.825]
-    assert auc["700"] == [0.0, 68.875, 153.875, 336.875]
-    assert auc["900"] == [0.0, 69.6, 180.85, 444.85]
+    assert auc["350"] == pytest.approx([0.0, 70.325, 142.825, 271.825])
+    assert auc["700"] == pytest.approx([0.0, 68.875, 153.875, 336.875])
+    assert auc["900"] == pytest.approx([0.0, 69.6, 180.85, 444.85])
 
     assert descending_rank({name: vals[1] for name, vals in auc.items()}) == ["350", "900", "700"]
     assert descending_rank({name: vals[2] for name, vals in auc.items()}) == ["900", "700", "350"]
