@@ -1,0 +1,7 @@
+paper_id,curve_id,catalyst,metric,time_h,time_lower_h,time_upper_h,value,value_unit,value_origin,source_location,provenance_status,notes
+P2021_FRANZ,FRANZ2021_REF_CH4,REF,CH4_conversion,0,0,0,40,percent,author_text,Section_2.2,source_observed_approx,"Paper states initial methane conversion approx. 40%."
+P2021_FRANZ,FRANZ2021_REF_CH4,REF,CH4_conversion,,6,8,25,percent,author_text,Section_2.2,source_observed_approx_interval_time,"Paper states deactivation within first 6-8 h leading to ca. 25% conversion."
+P2021_FRANZ,FRANZ2021_REF_CH4,REF,CH4_conversion,24,24,24,22,percent,visual_digitization,Figure_6A,model_independent_provisional,"Figure read is provisional; text only says final conversion slightly higher than 20%."
+P2021_FRANZ,FRANZ2021_1FE1NI_CH4,1Fe1Ni,CH4_conversion,0,0,0,24,percent,visual_digitization,Figure_6A,model_independent_provisional,"Initial value visually estimated from Figure 6A; retain as digitized, not author-reported exact value."
+P2021_FRANZ,FRANZ2021_1FE1NI_CH4,1Fe1Ni,CH4_conversion,2,2,2,30,percent,author_text,Section_2.2,source_observed_approx,"Paper states ca. 2 h are required to reach a stable conversion of only 30%."
+P2021_FRANZ,FRANZ2021_1FE1NI_CH4,1Fe1Ni,CH4_conversion,24,24,24,30,percent,author_text,Section_2.2,source_observed_approx,"Paper states the 30% conversion remains unchanged during the subsequent 22 h."
