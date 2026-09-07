@@ -1,0 +1,41 @@
+name: Terminate stuck llama installer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/terminate-stuck-llama-install.yml
+
+permissions:
+  contents: read
+
+jobs:
+  terminate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Terminate only the stuck Hugging Face installer curl
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -u
+          echo 'Before:'
+          pgrep -af 'huggingface.co/buckets/ggml-org/install.sh/resolve/latest' || true
+          pids=$(pgrep -f 'curl -fsSL https://huggingface.co/buckets/ggml-org/install.sh/resolve/latest' || true)
+          if [ -n "$pids" ]; then
+            kill $pids || true
+            sleep 2
+          fi
+          echo 'After:'
+          pgrep -af 'huggingface.co/buckets/ggml-org/install.sh/resolve/latest' || true
+          REMOTE
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
