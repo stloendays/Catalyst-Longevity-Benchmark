@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller recipe for the Windows portable single-file test release."""
+"""PyInstaller single-file recipe kept as a compatibility/fallback build.
+
+The portable one-folder build is the recommended end-user package. This
+single-file build remains available for convenience, with UPX disabled to
+reduce antivirus false positives and startup friction.
+"""
 
 from pathlib import Path
 
@@ -26,9 +31,6 @@ datas = [
 binaries = []
 hiddenimports = []
 
-# Streamlit needs its frontend/static assets at runtime. Materials Project is
-# imported lazily by the application, so collect it explicitly for the frozen
-# build rather than relying on static import discovery alone.
 for package_name in ("streamlit", "mp_api", "pymatgen"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package_name)
     datas += package_datas
@@ -61,7 +63,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
