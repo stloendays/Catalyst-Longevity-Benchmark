@@ -1,0 +1,160 @@
+name: Windows Qt C++ Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "native/qt/**"
+      - ".github/workflows/windows-qt.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalyst-longevity-qt-desktop
+  cancel-in-progress: true
+
+jobs:
+  build-qt-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: ""
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+
+      - name: Build native C++ application
+        shell: pwsh
+        run: |
+          cmake --build build-qt --config Release --parallel
+          $exe = "build-qt\Release\Catalyst Longevity Research.exe"
+          if (-not (Test-Path $exe)) { throw "Native Qt executable was not produced: $exe" }
+          Get-Item $exe | Select-Object Name, Length
+
+      - name: Run native analysis self-test
+        shell: pwsh
+        run: |
+          & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Native analysis self-test failed with exit code $LASTEXITCODE" }
+
+      - name: Smoke-test native desktop window
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) {
+              throw "Native Qt desktop app exited unexpectedly with code $($process.ExitCode)"
+            }
+            Write-Host "Native Qt desktop window stayed alive for the smoke-test interval."
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Deploy Qt runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist-qt\app" | Out-Null
+          Copy-Item "build-qt\Release\Catalyst Longevity Research.exe" "dist-qt\app\Catalyst Longevity Research.exe" -Force
+          windeployqt --release --no-translations --compiler-runtime "dist-qt\app\Catalyst Longevity Research.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+
+      - name: Validate deployed application without Qt SDK on PATH
+        shell: pwsh
+        run: |
+          $originalPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          try {
+            & "dist-qt\app\Catalyst Longevity Research.exe" --self-test
+            if ($LASTEXITCODE -ne 0) { throw "Deployed app self-test failed with exit code $LASTEXITCODE" }
+
+            $exe = (Resolve-Path "dist-qt\app\Catalyst Longevity Research.exe").Path
+            $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            try {
+              Start-Sleep -Seconds 6
+              if ($process.HasExited) {
+                throw "Deployed native app exited unexpectedly with code $($process.ExitCode)"
+              }
+            }
+            finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            }
+          }
+          finally {
+            $env:PATH = $originalPath
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $sourceDir = (Resolve-Path "dist-qt\app").Path
+          $outputDir = (Resolve-Path "release").Path
+          & $iscc "/DSourceDir=$sourceDir" "/DOutputDir=$outputDir" "native\qt\installer\CatalystLongevity.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path "release\Catalyst-Longevity-Research-Setup.exe")) { throw "Installer was not produced" }
+
+      - name: Package portable build and checksums
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist-qt\app\*" -DestinationPath "release\Catalyst-Longevity-Research-Portable.zip" -Force
+          $files = @(
+            "release\Catalyst-Longevity-Research-Setup.exe",
+            "release\Catalyst-Longevity-Research-Portable.zip"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content "release\SHA256SUMS.txt"
+          Get-ChildItem release | Select-Object Name, Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Catalyst-Longevity-Research-Qt-Desktop
+          path: |
+            release/Catalyst-Longevity-Research-Setup.exe
+            release/Catalyst-Longevity-Research-Portable.zip
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish native Qt prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: qt-desktop-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Catalyst Longevity Research Native Desktop ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          body: |
+            First C++ / Qt 6 native Windows desktop preview of Catalyst Longevity Research.
+
+            Recommended: download `Catalyst-Longevity-Research-Setup.exe` and install normally. The installed application opens as a native Windows window — no browser, no Streamlit and no Python runtime.
+
+            Current native modules: CSV import, demo dataset, trajectory chart, retention summary, latest common-time leader, and censor-aware T95/T90/T80 evidence. AI Analyst, Evidence Critic and external database modules remain on the migration roadmap.
+          files: |
+            release/Catalyst-Longevity-Research-Setup.exe
+            release/Catalyst-Longevity-Research-Portable.zip
+            release/SHA256SUMS.txt
