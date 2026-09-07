@@ -1,0 +1,50 @@
+name: Server inspection stage 2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/server-inspection-2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Inspect services and storage
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          echo '=== DISK ==='
+          df -hT /
+          echo '=== PORTS ==='
+          sudo ss -lntp || true
+          echo '=== PROCESSES ==='
+          ps -eo pid,ppid,user,%mem,%cpu,etime,args --sort=-%mem | head -40
+          echo '=== SERVICES ==='
+          systemctl list-units --type=service --state=running --no-pager --plain || true
+          echo '=== ROOT ==='
+          sudo du -xhd2 /root 2>/dev/null | sort -h | tail -40 || true
+          echo '=== VAR ==='
+          sudo du -xhd2 /var 2>/dev/null | sort -h | tail -50 || true
+          echo '=== HOME ==='
+          du -xhd2 /home/ubuntu 2>/dev/null | sort -h | tail -40 || true
+          echo '=== JOURNAL ==='
+          sudo journalctl --disk-usage || true
+          echo '=== DOCKER ==='
+          sudo docker ps -a 2>/dev/null || true
+          sudo docker system df 2>/dev/null || true
+          REMOTE
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
