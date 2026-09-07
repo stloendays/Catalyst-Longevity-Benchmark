@@ -1,105 +1,143 @@
 # Catalyst Longevity Benchmark
 
-A methods-first research software system for catalyst deactivation, censored lifetime analysis, and operation-horizon-dependent catalyst ranking.
+**Catalyst Longevity Analyzer** turns catalyst time-series data into a simple answer: **which catalyst stays useful for longer, and does the best choice change over time?**
 
-## Scientific question
+The repository still contains the underlying research benchmark and evidence registry, but the software interface is designed for users who simply want to upload data and get an interpretable result.
 
-Does catalyst ranking based on initial activity remain valid after explicitly accounting for deactivation kinetics, finite time-on-stream observation windows, censored lifetime measurements, and cumulative long-horizon performance?
+## What you can do
 
-The current scientific scope is restricted to **Ni/Al2O3-based dry reforming of methane (DRM)** catalysts, while the analysis software is designed around generic time-on-stream trajectories.
+Upload a CSV or Excel table and quickly answer:
 
-## What the software does
+- Which catalyst starts with the highest performance?
+- How much performance remains after 20, 50, 100 or more hours?
+- Does an initially weaker catalyst later overtake the leader?
+- Has the 95%, 90% or 80% performance-retention point actually been reached?
+- Is the test long enough to make a lifetime claim?
+- Which comparisons are clear, and which remain uncertain?
 
-```text
-TOS CSV input
-  -> validated provenance-preserving trajectories
-  -> normalized activity
-  -> censor-aware t95 / t90 / t80
-  -> instantaneous ranking and crossover audit
-  -> uncertainty-aware ranking audit
-  -> cumulative AUC sensitivity
-  -> JSON + Markdown report
-```
+## Easiest way to use it
 
-Run the included synthetic example from the repository root:
+Install the browser interface:
 
 ```bash
-python -m src.catlongevity.cli examples/example_tos_input.csv
+pip install -r requirements-ui.txt
 ```
 
-The software writes:
+Launch the app:
 
-```text
-catlongevity_report.json
-catlongevity_report.md
+```bash
+streamlit run app.py
 ```
 
-See `docs/软件操作说明.md` for the formal input specification, workflow, output definitions, error handling, and scientific interpretation boundaries.
+Then use the browser to:
 
-## Core scientific objects
+1. upload CSV / Excel data, or edit a table directly;
+2. preview the data;
+3. click **开始分析**;
+4. inspect conclusions, curves and lifetime information;
+5. download a simple report or full machine-readable output.
 
-For a reported time-on-stream trajectory X(t), normalized activity is defined as:
+See [`docs/快速开始.md`](docs/快速开始.md) for a non-technical walkthrough.
 
-`a(t) = X(t) / X(first observed time)`
+## Your data can be very simple
 
-Primary outputs include:
+Only three concepts are required:
 
-- observed initial activity/conversion or TOF
-- threshold lifetimes `t95`, `t90`, `t80`
-- exact / interval / right-censored / left-censored lifetime status
-- instantaneous ranking `R_inst(H)`
-- pairwise crossover brackets at common observed times
-- uncertainty-aware proven/non-proven ordering
-- cumulative performance `AUC_H`
-- cumulative-production ranking `R_cum(H)` when the comparison is scientifically supported
-- provenance and source-conflict metadata
+| 催化剂 | 时间 | 性能 |
+|---|---:|---:|
+| Catalyst A | 0 | 82 |
+| Catalyst A | 20 | 70 |
+| Catalyst A | 50 | 58 |
+| Catalyst B | 0 | 76 |
+| Catalyst B | 20 | 72 |
+| Catalyst B | 50 | 69 |
 
-## Frozen scientific rules
+The importer accepts common English and Chinese headers, including:
 
-1. Primary system: Ni/Al2O3-based DRM.
-2. Primary trajectory: CH4 conversion vs time-on-stream; CO2 conversion is secondary.
-3. A test that ends before a lifetime threshold is crossed is right-censored, not a measured lifetime.
-4. `exact` lifetime is reserved for directly source-reported crossing times; sparse sampled trajectories do not create exact crossings.
-5. Instantaneous ranking and cumulative-production ranking are separate scientific quantities.
-6. Piecewise-linear interpolation and trapezoidal AUC from sparse literature points are **derived sensitivity quantities**, not source-observed truth.
-7. Ranking reversal under interval-valued uncertainty requires non-overlapping performance intervals to establish opposite orderings.
-8. Primary cross-paper validation is paper-grouped / leave-one-paper-out; random-row splitting is not the main generalization estimate.
-9. Mechanism labels such as coking or sintering require explicit source evidence.
-10. Source-observed, digitized and model-derived values remain distinct.
-11. Conflicting source values are preserved rather than silently averaged.
-12. Observational associations are not interpreted as causal effects without additional design or adjustment.
+- `catalyst_id`, `catalyst`, `sample`, `催化剂`, `样品`
+- `time_h`, `time`, `TOS`, `时间`, `运行时间`
+- `performance`, `value`, `conversion`, `activity`, `性能`, `转化率`, `活性`
 
-## Repository layout
+Optional uncertainty and source columns can be added when available, but are not required for basic use.
+
+A ready-to-edit template is available at [`examples/用户数据模板.csv`](examples/用户数据模板.csv).
+
+## What the result looks like
+
+The user-facing report focuses on plain conclusions:
 
 ```text
-.
-├── README.md
-├── data/
-│   ├── registry/
-│   ├── raw_digitized/
-│   ├── interim/
-│   └── processed/
-├── docs/
-│   └── 软件操作说明.md
+Catalyst A starts higher.
+Catalyst B overtakes Catalyst A between 20 and 50 h.
+At 50 h, Catalyst B retains 90.8% of its initial performance.
+The 90% retention point for Catalyst B has not yet been reached.
+```
+
+The browser interface also provides:
+
+- headline statistics;
+- interactive data preview;
+- performance-over-time curves;
+- catalyst-by-catalyst retention summaries;
+- pairwise overtake conclusions;
+- downloadable Markdown and JSON reports;
+- an advanced-detail tab for users who want to inspect calculation semantics.
+
+## Command-line option
+
+For automated workflows:
+
+```bash
+python -m src.catlongevity.cli examples/用户数据模板.csv
+```
+
+This generates:
+
+```text
+catalyst_longevity_report.md
+catalyst_longevity_report.json
+```
+
+## Software structure
+
+```text
+Catalyst-Longevity-Benchmark/
+├── app.py                         # browser interface
+├── requirements-ui.txt            # UI dependencies
 ├── examples/
+│   ├── 用户数据模板.csv
 │   └── example_tos_input.csv
-├── protocols/
-├── reports/
-├── schemas/
+├── docs/
+│   ├── 快速开始.md
+│   └── 软件操作说明.md
 ├── src/catlongevity/
-│   ├── io.py
-│   ├── endpoints.py
-│   ├── ranking.py
-│   ├── analysis.py
-│   ├── reporting.py
-│   └── cli.py
+│   ├── io.py                      # friendly import + validation
+│   ├── endpoints.py               # lifetime threshold engine
+│   ├── ranking.py                 # ranking and crossover engine
+│   ├── analysis.py                # analysis orchestration
+│   ├── friendly.py                # plain-language summaries
+│   ├── reporting.py               # user-facing report
+│   └── cli.py                     # command-line entry
+├── data/                           # research/evidence data layer
+├── protocols/                      # technical rules
+├── reports/                        # research reports
 └── tests/
 ```
 
-## Evidence status
+## Built-in safeguards
 
-The repository contains confirmed within-paper examples demonstrating that catalyst ordering can change with operation horizon, together with numerical concordant controls where the observed leader remains the leader. Qualitative activity-stability tradeoffs are not promoted to confirmed ranking reversals without numerical end-rank evidence.
+The simple interface does not weaken the calculation rules underneath it.
 
-## Development principle
+- Missing experimental points are never fabricated.
+- A test ending at 100 h is not automatically called a 100 h catalyst lifetime.
+- Sparse points do not create a fake exact crossover time.
+- Uncertain comparisons remain uncertain when the data do not support a firm order.
+- Source data, digitized values and derived calculations remain distinguishable in the advanced layer.
 
-The software is developed under a fail-closed scientific-data policy: missing points are not invented, uncertain ordering is not upgraded to proven ordering, sparse trajectories are not assigned exact crossover times, and synthetic demonstration data are never mixed into the evidence registry.
+In other words, the front end is simple, while the analysis engine remains conservative.
+
+## Current application focus
+
+The research dataset currently focuses on **Ni/Al2O3-based dry reforming of methane (DRM)**, but the software itself works with generic time-series performance data where higher values mean better performance.
+
+This makes the same interface potentially useful for catalyst stability tests, material degradation studies, repeated performance measurements and other long-horizon comparison problems.
