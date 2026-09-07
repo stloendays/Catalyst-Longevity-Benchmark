@@ -3,8 +3,6 @@
 
 from PyInstaller.utils.hooks import collect_all
 
-block_cipher = None
-
 
 datas = [
     ("app.py", "."),
@@ -19,7 +17,7 @@ datas = [
 binaries = []
 hiddenimports = []
 
-# Streamlit needs its frontend/static assets at runtime.  Materials Project is
+# Streamlit needs its frontend/static assets at runtime. Materials Project is
 # imported lazily by the application, so collect it explicitly for the frozen
 # build rather than relying on static import discovery alone.
 for package_name in ("streamlit", "mp_api", "pymatgen"):
@@ -40,14 +38,14 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
+    optimize=0,
 )
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.zipfiles,
     a.datas,
     [],
     name="Catalyst_Intelligence_Workspace",
