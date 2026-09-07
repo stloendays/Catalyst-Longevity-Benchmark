@@ -20,12 +20,22 @@ The native application does not start a browser and does not require Streamlit o
 4. Per-catalyst initial/latest performance and retention.
 5. Latest shared observed time and leader determination.
 6. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
-7. Native pages for overview, data, lifetime analysis, AI migration workspace and settings.
-8. Installer and portable Windows package workflow.
+7. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
+8. Native pages for overview, data, lifetime analysis, AI migration workspace and settings.
+9. Installer and portable Windows package workflow.
+
+## Scientific guardrails already migrated
+
+The C++ engine now preserves two important rules from the research implementation:
+
+- Threshold lifetime claims remain censor-aware instead of inventing exact crossing times between sparse observations.
+- Direct catalyst ranking is blocked when explicit experimental conditions are inconsistent between candidates.
+
+The built-in `--self-test` verifies both a matched-condition demo dataset and a deliberately mismatched-temperature case.
 
 ## Planned migration
 
-The Python implementation remains the scientific reference while modules are migrated. Next native modules are condition comparability auditing, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic, project persistence, report export and audit logging.
+The Python implementation remains the scientific reference while modules are migrated. Next native modules are project persistence, richer condition-audit UI, Excel import, report export, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic and audit logging.
 
 ## Build locally
 
