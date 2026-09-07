@@ -21,6 +21,10 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
 
 private slots:
+    void newProject();
+    void openProject();
+    void saveProject();
+    void saveProjectAs();
     void importCsv();
     void loadDemo();
     void runAnalysis();
@@ -29,27 +33,38 @@ private:
     void buildUi();
     void applyTheme();
     QWidget* buildSidebar();
+    QWidget* buildProjectPage();
     QWidget* buildOverviewPage();
     QWidget* buildDataPage();
     QWidget* buildAnalysisPage();
     QWidget* buildAiPage();
     QWidget* buildSettingsPage();
-    void setRecords(const QVector<Record>& records, const QString& sourceLabel);
+    void setRecords(const QVector<Record>& records, const QString& sourceLabel, bool markDirty = true);
     void refreshRawTable();
     void refreshAnalysisViews();
+    void updateProjectUi();
     void setStatus(const QString& text, bool error = false);
+    bool saveProjectTo(const QString& path);
 
     QVector<Record> records_;
     AnalysisResult analysis_;
     QString sourceLabelText_;
+    QString currentProjectPath_;
+    bool projectDirty_ = false;
 
     QStackedWidget* pages_ = nullptr;
+    QLabel* projectPathLabel_ = nullptr;
+    QLabel* projectStateLabel_ = nullptr;
     QLabel* sourceLabel_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QLabel* metricCatalysts_ = nullptr;
     QLabel* metricPoints_ = nullptr;
     QLabel* metricLongest_ = nullptr;
     QLabel* metricLeader_ = nullptr;
+    QLabel* metricCondition_ = nullptr;
+    QLabel* conditionStatusLabel_ = nullptr;
+    QLabel* conditionMessageLabel_ = nullptr;
+    QTableWidget* conditionMismatchTable_ = nullptr;
     QTableWidget* summaryTable_ = nullptr;
     QTableWidget* rawTable_ = nullptr;
     QTableWidget* thresholdTable_ = nullptr;
