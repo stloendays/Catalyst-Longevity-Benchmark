@@ -1,0 +1,88 @@
+name: Windows EXE Test Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "desktop_launcher.py"
+      - "build/**"
+      - ".github/workflows/windows-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ui.txt pytest pyinstaller
+
+      - name: Run software tests before packaging
+        shell: pwsh
+        run: |
+          python -m compileall -q app.py pages src tests desktop_launcher.py
+          python -m pytest -q
+
+      - name: Build single-file Windows executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm build/CatalystIntelligenceWorkspace.spec
+          if (-not (Test-Path "dist\Catalyst_Intelligence_Workspace.exe")) {
+            throw "Expected Windows executable was not produced."
+          }
+
+      - name: Prepare release files and checksum
+        id: package
+        shell: pwsh
+        run: |
+          $version = "0.9.0-test"
+          $releaseDir = "release"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          $output = "$releaseDir\Catalyst-Intelligence-Workspace-$version.exe"
+          Copy-Item "dist\Catalyst_Intelligence_Workspace.exe" $output -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $output).Hash.ToLower()
+          "$hash  $([IO.Path]::GetFileName($output))" | Set-Content "$releaseDir\SHA256SUMS.txt"
+          "asset=$output" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=windows-test-$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Get-Item $output | Select-Object Name, Length
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Catalyst-Intelligence-Workspace-Windows-Test
+          path: |
+            release/Catalyst-Intelligence-Workspace-0.9.0-test.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish private-repository prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.package.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Catalyst Intelligence Workspace Windows Test ${{ github.run_number }}
+          body: |
+            Windows x64 test build for Catalyst Longevity Research / Catalyst Intelligence Workspace.
+
+            This is a prerelease for local testing before the software-copyright V1.0 freeze. It packages the existing Streamlit multipage application and scientific analysis modules into a single executable. API keys remain runtime-only and are not embedded in the executable.
+          prerelease: true
+          make_latest: false
+          files: |
+            release/Catalyst-Intelligence-Workspace-0.9.0-test.exe
+            release/SHA256SUMS.txt
