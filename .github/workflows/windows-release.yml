@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: catalyst-intelligence-windows-test-release
+  cancel-in-progress: true
+
 jobs:
   build-windows-exe:
     runs-on: windows-latest
@@ -52,10 +56,9 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          $version = "0.9.0-test"
           $releaseDir = "release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          $output = "$releaseDir\Catalyst-Intelligence-Workspace-$version.exe"
+          $output = "$releaseDir\Catalyst-Intelligence-Workspace-Windows-Test.exe"
           Copy-Item "dist\Catalyst_Intelligence_Workspace.exe" $output -Force
           $hash = (Get-FileHash -Algorithm SHA256 $output).Hash.ToLower()
           "$hash  $([IO.Path]::GetFileName($output))" | Set-Content "$releaseDir\SHA256SUMS.txt"
@@ -68,7 +71,7 @@ jobs:
         with:
           name: Catalyst-Intelligence-Workspace-Windows-Test
           path: |
-            release/Catalyst-Intelligence-Workspace-0.9.0-test.exe
+            release/Catalyst-Intelligence-Workspace-Windows-Test.exe
             release/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -81,9 +84,9 @@ jobs:
           body: |
             Windows x64 test build for Catalyst Longevity Research / Catalyst Intelligence Workspace.
 
-            This is a prerelease for local testing before the software-copyright V1.0 freeze. It packages the existing Streamlit multipage application and scientific analysis modules into a single executable. API keys remain runtime-only and are not embedded in the executable.
+            This is a prerelease for local product testing before the software-copyright filing snapshot is frozen. It packages the existing Streamlit multipage application and scientific analysis modules into a single executable. API keys remain runtime-only and are not embedded in the executable.
           prerelease: true
           make_latest: false
           files: |
-            release/Catalyst-Intelligence-Workspace-0.9.0-test.exe
+            release/Catalyst-Intelligence-Workspace-Windows-Test.exe
             release/SHA256SUMS.txt
