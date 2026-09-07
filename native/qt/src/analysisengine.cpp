@@ -1,5 +1,7 @@
 #include "analysisengine.h"
 
+#include "conditionguard.h"
+
 #include <QMap>
 #include <QtMath>
 #include <algorithm>
@@ -68,6 +70,7 @@ ThresholdObservation AnalysisEngine::thresholdObservation(
 AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
     AnalysisResult result;
     result.totalObservations = static_cast<int>(records.size());
+    result.conditionAudit = ConditionGuard::audit(records);
     if (records.isEmpty()) {
         return result;
     }
@@ -148,6 +151,12 @@ AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
             result.latestSharedTimeHours = latestShared;
             result.latestSharedLeader = leader;
         }
+    }
+
+    // A shared-time leader is a direct cross-catalyst ranking claim. Suppress
+    // it whenever explicit experimental conditions make the comparison unsafe.
+    if (result.conditionAudit.blocksDirectRanking()) {
+        result.latestSharedLeader.clear();
     }
 
     return result;
