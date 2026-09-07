@@ -1,18 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller recipe for the Windows portable single-file test release."""
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_all
 
 
+ROOT = Path(SPECPATH).resolve().parent
+
+
+def source(path: str) -> str:
+    return str(ROOT / path)
+
+
 datas = [
-    ("app.py", "."),
-    ("pages", "pages"),
-    ("src", "src"),
-    ("examples", "examples"),
-    ("data", "data"),
-    ("protocols", "protocols"),
-    ("schemas", "schemas"),
-    (".streamlit", ".streamlit"),
+    (source("app.py"), "."),
+    (source("pages"), "pages"),
+    (source("src"), "src"),
+    (source("examples"), "examples"),
+    (source("data"), "data"),
+    (source("protocols"), "protocols"),
+    (source("schemas"), "schemas"),
+    (source(".streamlit"), ".streamlit"),
 ]
 binaries = []
 hiddenimports = []
@@ -28,8 +37,8 @@ for package_name in ("streamlit", "mp_api", "pymatgen"):
 
 
 a = Analysis(
-    ["desktop_launcher.py"],
-    pathex=["."],
+    [source("desktop_launcher.py")],
+    pathex=[str(ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
