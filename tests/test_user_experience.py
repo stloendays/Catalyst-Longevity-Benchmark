@@ -16,7 +16,7 @@ def test_chinese_column_aliases_work():
     assert observations[1].time_h == 10
 
 
-def test_user_summary_reports_rank_change():
+def test_user_summary_reports_rank_change_and_snapshots():
     rows = [
         {"catalyst": "A", "time": 0, "value": 100},
         {"catalyst": "A", "time": 10, "value": 70},
@@ -28,6 +28,10 @@ def test_user_summary_reports_rank_change():
     assert summary["catalyst_count"] == 2
     assert summary["observed_rank_changes"] == 1
     assert "反超" in summary["pairwise_conclusions"][0]
+    assert summary["ranking_snapshots"][0]["ranking_text"] == "A > B"
+    assert summary["ranking_snapshots"][1]["ranking_text"] == "B > A"
+    assert summary["latest_shared_time_h"] == 10
+    assert summary["latest_shared_leader"] == "B"
 
 
 def test_right_censored_threshold_has_plain_language():
