@@ -1,0 +1,101 @@
+name: Windows Native C Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "native/windows/main.c"
+      - ".github/workflows/windows-native-c.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalyst-longevity-native-c
+  cancel-in-progress: true
+
+jobs:
+  build-native-c:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate MSVC
+        id: msvc
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found" }
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw "Visual Studio C++ build tools not found" }
+          $vcvars = Join-Path $vs "VC\Auxiliary\Build\vcvars64.bat"
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found: $vcvars" }
+          "vcvars=$vcvars" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Using Visual Studio at $vs"
+
+      - name: Compile native Win32 C application
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-native | Out-Null
+          $vcvars = '${{ steps.msvc.outputs.vcvars }}'
+          $cmd = '"' + $vcvars + '" && cl.exe /nologo /W4 /O2 /MT /utf-8 /std:c17 /DUNICODE /D_UNICODE native\windows\main.c /Fe:dist-native\Catalyst-Longevity-Research-Native-C.exe /link /SUBSYSTEM:WINDOWS comctl32.lib comdlg32.lib user32.lib gdi32.lib shell32.lib'
+          cmd.exe /d /s /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "MSVC compile failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path "dist-native\Catalyst-Longevity-Research-Native-C.exe")) { throw "Native EXE not produced" }
+          Get-Item "dist-native\Catalyst-Longevity-Research-Native-C.exe" | Select-Object Name, Length
+
+      - name: Smoke-test native desktop process
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "dist-native\Catalyst-Longevity-Research-Native-C.exe").Path
+          $p = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            if ($p.HasExited) { throw "Native app exited unexpectedly with code $($p.ExitCode)" }
+            Write-Host "Native desktop process remained healthy for smoke-test window."
+          }
+          finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $file = "dist-native\Catalyst-Longevity-Research-Native-C.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+          "$hash  Catalyst-Longevity-Research-Native-C.exe" | Set-Content "dist-native\SHA256SUMS.txt"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Catalyst-Longevity-Research-Native-C
+          path: |
+            dist-native/Catalyst-Longevity-Research-Native-C.exe
+            dist-native/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish native C prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: native-c-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Catalyst Longevity Research Native C Test ${{ github.run_number }}
+          prerelease: true
+          make_latest: false
+          body: |
+            Native Windows desktop build written in C with the Win32 API.
+
+            - No browser UI
+            - No Streamlit
+            - No Python runtime
+            - Native Windows controls and GDI chart
+            - CSV import and catalyst longevity summary/retention analysis
+
+            This is the first native desktop test build. The existing Python research engine remains in the repository for advanced modules while they are migrated into the native application.
+          files: |
+            dist-native/Catalyst-Longevity-Research-Native-C.exe
+            dist-native/SHA256SUMS.txt
