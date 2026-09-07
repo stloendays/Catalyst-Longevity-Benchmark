@@ -90,3 +90,14 @@ def test_condition_guard_allows_matched_conditions():
     report = analyze_observations(observations_from_records(rows))
     guarded = apply_condition_guard(report, audit)
     assert guarded["pairwise"][0]["instantaneous_crossover"]["status"] == "interval"
+
+
+def test_condition_normalization_treats_700_and_700_point_zero_as_same():
+    rows = [
+        {"催化剂": "A", "时间": 0, "性能": 100, "温度": 700, "进料比": "1 : 1"},
+        {"催化剂": "A", "时间": 20, "性能": 80, "温度": 700, "进料比": "1 : 1"},
+        {"催化剂": "B", "时间": 0, "性能": 90, "温度": "700.0", "进料比": "1:1"},
+        {"催化剂": "B", "时间": 20, "性能": 85, "温度": "700.0", "进料比": "1:1"},
+    ]
+    audit = audit_conditions(rows)
+    assert audit["status"] == "matched_on_provided_conditions"
