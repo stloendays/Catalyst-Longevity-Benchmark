@@ -1,0 +1,121 @@
+name: Deploy local 2B Q4 LLM
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/deploy-local-llm.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Clean safe caches and install llama.cpp
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -e
+          echo '=== BEFORE CLEANUP ==='
+          df -h /
+          free -h
+
+          sudo journalctl --vacuum-size=250M || true
+          sudo apt-get clean || true
+          npm cache clean --force >/dev/null 2>&1 || true
+
+          echo '=== AFTER CLEANUP ==='
+          df -h /
+
+          if [ ! -x "$HOME/.local/bin/llama" ]; then
+            curl -fsSL https://llama.app/install.sh | SKIP_CUDA=1 SKIP_ROCM=1 SKIP_VULKAN=1 sh
+          fi
+
+          "$HOME/.local/bin/llama" version
+          REMOTE
+
+      - name: Install systemd service and start model
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -e
+
+          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=RhoCodec local Qwen3.5 2B Q4 llama.cpp server
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Environment=HOME=/home/ubuntu
+          Environment=PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart=/home/ubuntu/.local/bin/llama serve -hf openresearchtools/Qwen3.5-2B-GGUF:Q4_K_M --no-mmproj --no-webui --host 127.0.0.1 --port 18080 -c 2048 -t 4
+          Restart=on-failure
+          RestartSec=5
+          TimeoutStartSec=900
+          LimitNOFILE=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable rhocodec-llm.service
+          sudo systemctl restart rhocodec-llm.service
+
+          echo 'Waiting for model download/load...'
+          ok=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/rhocodec-models.json 2>/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          echo '=== SERVICE STATUS ==='
+          sudo systemctl status rhocodec-llm.service --no-pager -l || true
+          echo '=== DISK / MEMORY ==='
+          df -h /
+          free -h
+          echo '=== MODEL LIST ==='
+          cat /tmp/rhocodec-models.json 2>/dev/null || true
+
+          if [ "$ok" -ne 1 ]; then
+            echo 'Model API did not become ready in time.'
+            sudo journalctl -u rhocodec-llm.service -n 120 --no-pager
+            exit 1
+          fi
+          REMOTE
+
+      - name: Smoke-test OpenAI compatible chat API
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -e
+          curl -fsS --max-time 120 http://127.0.0.1:18080/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"openresearchtools/Qwen3.5-2B-GGUF:Q4_K_M","messages":[{"role":"user","content":"Reply with exactly: RHOCODEC_AGENT_OK"}],"max_tokens":24,"temperature":0}' \
+            | tee /tmp/rhocodec-smoke.json
+          echo
+          echo '=== FINAL RESOURCE STATE ==='
+          free -h
+          df -h /
+          sudo ss -lntp | grep -E '(:18080|:8080|:11931|:18789)' || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
