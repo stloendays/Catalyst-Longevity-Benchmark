@@ -52,6 +52,41 @@ jobs:
             throw "Expected Windows executable was not produced."
           }
 
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: |
+          $env:CATALYST_DESKTOP_PORT = "8765"
+          $exe = (Resolve-Path "dist\Catalyst_Intelligence_Workspace.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          $healthy = $false
+          try {
+            for ($i = 0; $i -lt 90; $i++) {
+              Start-Sleep -Seconds 2
+              if ($process.HasExited) {
+                throw "Packaged executable exited before the local server became healthy. Exit code: $($process.ExitCode)"
+              }
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8765/_stcore/health" -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200) {
+                  $healthy = $true
+                  break
+                }
+              }
+              catch {
+                # Server is still starting; keep polling.
+              }
+            }
+            if (-not $healthy) {
+              throw "Packaged executable did not expose a healthy Streamlit server within the timeout."
+            }
+            Write-Host "Packaged executable smoke test passed."
+          }
+          finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force
+            }
+          }
+
       - name: Prepare release files and checksum
         id: package
         shell: pwsh
@@ -84,7 +119,7 @@ jobs:
           body: |
             Windows x64 test build for Catalyst Longevity Research / Catalyst Intelligence Workspace.
 
-            This is a prerelease for local product testing before the software-copyright filing snapshot is frozen. It packages the existing Streamlit multipage application and scientific analysis modules into a single executable. API keys remain runtime-only and are not embedded in the executable.
+            The packaged executable passed the repository test suite and a local Streamlit health-check after freezing. API keys remain runtime-only and are not embedded in the executable.
           prerelease: true
           make_latest: false
           files: |
