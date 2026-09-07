@@ -1,7 +1,7 @@
-催化剂,时间,性能,下限,上限,指标,数据来源
-Catalyst A,0,82,,,CH4 conversion,user_input
-Catalyst A,20,70,,,CH4 conversion,user_input
-Catalyst A,50,58,,,CH4 conversion,user_input
-Catalyst B,0,76,,,CH4 conversion,user_input
-Catalyst B,20,72,,,CH4 conversion,user_input
-Catalyst B,50,69,,,CH4 conversion,user_input
+催化剂,时间,性能,温度,GHSV,WHSV,压力,进料比,下限,上限,指标,数据来源
+Catalyst A,0,82,700,18000,,,1:1,,,CH4 conversion,user_input
+Catalyst A,20,70,700,18000,,,1:1,,,CH4 conversion,user_input
+Catalyst A,50,58,700,18000,,,1:1,,,CH4 conversion,user_input
+Catalyst B,0,76,700,18000,,,1:1,,,CH4 conversion,user_input
+Catalyst B,20,72,700,18000,,,1:1,,,CH4 conversion,user_input
+Catalyst B,50,69,700,18000,,,1:1,,,CH4 conversion,user_input
