@@ -7,11 +7,7 @@ from .friendly import build_user_summary
 
 
 def render_markdown_report(report: dict[str, Any]) -> str:
-    """Render a concise, user-facing Markdown report.
-
-    Technical semantics remain available in the JSON output, while this report
-    prioritizes practical interpretation and plain language.
-    """
+    """Render a concise, user-facing Markdown report."""
     summary = build_user_summary(report)
     lines = [
         "# Catalyst Longevity Analysis Report",
@@ -21,13 +17,24 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         f"- 共分析 **{summary['catalyst_count']}** 个催化剂、**{summary['total_observations']}** 个时间点。",
         f"- 最长观测时间：**{summary['max_time_h']:g} h**。" if summary["max_time_h"] is not None else "- 最长观测时间：未提供。",
         f"- 在现有数据中发现 **{summary['observed_rank_changes']}** 组催化剂发生领先顺序变化。",
-        "",
     ]
+    if summary["latest_shared_leader"] is not None:
+        lines.append(
+            f"- 在最新共同观测时间 **{summary['latest_shared_time_h']:g} h**，"
+            f"当前领先者为 **{summary['latest_shared_leader']}**。"
+        )
+    lines.append("")
 
     if summary["pairwise_conclusions"]:
         lines.extend(["## 催化剂之间的比较", ""])
         for text in summary["pairwise_conclusions"]:
             lines.append(f"- {text}")
+        lines.append("")
+
+    if summary["ranking_snapshots"]:
+        lines.extend(["## 不同时间的排名", ""])
+        for snapshot in summary["ranking_snapshots"]:
+            lines.append(f"- {snapshot['time_h']:g} h：{snapshot['ranking_text']}")
         lines.append("")
 
     lines.extend(["## 各催化剂表现", ""])
@@ -50,7 +57,8 @@ def render_markdown_report(report: dict[str, Any]) -> str:
             "## 如何理解结果",
             "",
             "- **性能保持率**表示最新观测值相对于该催化剂第一次观测值还剩多少。",
-            "- **领先顺序变化**表示两个催化剂在不同时间点出现了前后名次交换。",
+            "- **领先顺序变化**表示两个催化剂在不同实际观测时间点出现了前后名次交换。",
+            "- **不同时间的排名**只使用该时间点实际存在的观测值，不对缺失时间点进行补值排名。",
             "- 当报告写着“测试结束时仍高于某阈值”时，意思是当前实验还没有测到真正的阈值寿命；不能把测试结束时间直接当成寿命。",
             "- 曲线之间的连线和累计面积只用于辅助观察，软件不会自动补造缺失实验点。",
             "",
