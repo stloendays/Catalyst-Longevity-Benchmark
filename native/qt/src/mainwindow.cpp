@@ -2,10 +2,13 @@
 
 #include "analysisengine.h"
 #include "chartwidget.h"
+#include "conditionguard.h"
 #include "csvreader.h"
+#include "projectstore.h"
 
 #include <QButtonGroup>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
@@ -49,6 +52,7 @@ QFrame* metricCard(const QString& title, QLabel** valueLabel) {
     titleLabel->setObjectName(QStringLiteral("metricTitle"));
     auto* value = new QLabel(QStringLiteral("—"));
     value->setObjectName(QStringLiteral("metricValue"));
+    value->setWordWrap(true);
     layout->addWidget(titleLabel);
     layout->addWidget(value);
     *valueLabel = value;
@@ -65,6 +69,24 @@ QTableWidgetItem* item(const QString& text) {
     return cell;
 }
 
+QString conditionFieldLabel(const QString& field) {
+    if (field == QStringLiteral("temperature_c")) return QStringLiteral("温度");
+    if (field == QStringLiteral("ghsv")) return QStringLiteral("GHSV");
+    if (field == QStringLiteral("whsv")) return QStringLiteral("WHSV");
+    if (field == QStringLiteral("pressure_bar")) return QStringLiteral("压力");
+    if (field == QStringLiteral("feed_ratio")) return QStringLiteral("进料比");
+    return field;
+}
+
+QString conditionFieldsText(const QStringList& fields) {
+    QStringList labels;
+    labels.reserve(fields.size());
+    for (const auto& field : fields) {
+        labels.append(conditionFieldLabel(field));
+    }
+    return labels.join(QStringLiteral("、"));
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -74,7 +96,7 @@ MainWindow::MainWindow(QWidget* parent)
     setMinimumSize(1120, 720);
     buildUi();
     applyTheme();
-    loadDemo();
+    newProject();
 }
 
 void MainWindow::buildUi() {
@@ -86,6 +108,7 @@ void MainWindow::buildUi() {
     root->addWidget(buildSidebar());
 
     pages_ = new QStackedWidget;
+    pages_->addWidget(buildProjectPage());
     pages_->addWidget(buildOverviewPage());
     pages_->addWidget(buildDataPage());
     pages_->addWidget(buildAnalysisPage());
@@ -115,6 +138,7 @@ QWidget* MainWindow::buildSidebar() {
     auto* group = new QButtonGroup(sidebar);
     group->setExclusive(true);
     const QStringList labels = {
+        QStringLiteral("项目"),
         QStringLiteral("总览"),
         QStringLiteral("数据导入"),
         QStringLiteral("寿命分析"),
@@ -138,10 +162,66 @@ QWidget* MainWindow::buildSidebar() {
     }
 
     layout->addStretch();
-    auto* version = new QLabel(QStringLiteral("Native Desktop Preview\nC++ / Qt 6"));
-    version->setObjectName(QStringLiteral("sidebarFoot"));
-    layout->addWidget(version);
+    auto* buildLabel = new QLabel(QStringLiteral("Native Desktop\nC++ / Qt 6"));
+    buildLabel->setObjectName(QStringLiteral("sidebarFoot"));
+    layout->addWidget(buildLabel);
     return sidebar;
+}
+
+QWidget* MainWindow::buildProjectPage() {
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(34, 28, 34, 28);
+    layout->setSpacing(18);
+
+    layout->addWidget(heading(QStringLiteral("项目工作区")));
+    layout->addWidget(muted(QStringLiteral(
+        "项目文件使用本地 SQLite 保存实验记录与项目元数据。关闭软件后，下次可以直接打开项目继续分析，不需要重新导入 CSV。")));
+
+    auto* actions = new QHBoxLayout;
+    auto* newButton = new QPushButton(QStringLiteral("新建项目"));
+    auto* openButton = new QPushButton(QStringLiteral("打开项目"));
+    auto* saveButton = new QPushButton(QStringLiteral("保存"));
+    auto* saveAsButton = new QPushButton(QStringLiteral("另存为"));
+    newButton->setObjectName(QStringLiteral("secondaryButton"));
+    openButton->setObjectName(QStringLiteral("secondaryButton"));
+    saveButton->setObjectName(QStringLiteral("primaryButton"));
+    saveAsButton->setObjectName(QStringLiteral("secondaryButton"));
+    connect(newButton, &QPushButton::clicked, this, &MainWindow::newProject);
+    connect(openButton, &QPushButton::clicked, this, &MainWindow::openProject);
+    connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveProject);
+    connect(saveAsButton, &QPushButton::clicked, this, &MainWindow::saveProjectAs);
+    actions->addWidget(newButton);
+    actions->addWidget(openButton);
+    actions->addWidget(saveButton);
+    actions->addWidget(saveAsButton);
+    actions->addStretch();
+    layout->addLayout(actions);
+
+    auto* projectCard = new QFrame;
+    projectCard->setObjectName(QStringLiteral("panel"));
+    auto* cardLayout = new QVBoxLayout(projectCard);
+    cardLayout->setContentsMargins(22, 20, 22, 20);
+    cardLayout->setSpacing(10);
+
+    auto* pathTitle = new QLabel(QStringLiteral("当前项目"));
+    pathTitle->setObjectName(QStringLiteral("sectionTitle"));
+    projectPathLabel_ = new QLabel(QStringLiteral("未命名项目"));
+    projectPathLabel_->setObjectName(QStringLiteral("sourcePath"));
+    projectPathLabel_->setWordWrap(true);
+    projectPathLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    projectStateLabel_ = new QLabel(QStringLiteral("尚未保存"));
+    projectStateLabel_->setObjectName(QStringLiteral("mutedText"));
+
+    cardLayout->addWidget(pathTitle);
+    cardLayout->addWidget(projectPathLabel_);
+    cardLayout->addWidget(projectStateLabel_);
+    cardLayout->addSpacing(12);
+    cardLayout->addWidget(muted(QStringLiteral(
+        "项目文件扩展名为 .clrproj。文件内部为 SQLite 数据库，当前保存催化剂时间序列、实验条件、指标和数据来源。")));
+    cardLayout->addStretch();
+    layout->addWidget(projectCard, 1);
+    return page;
 }
 
 QWidget* MainWindow::buildOverviewPage() {
@@ -153,7 +233,7 @@ QWidget* MainWindow::buildOverviewPage() {
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
     titleBox->addWidget(heading(QStringLiteral("催化剂长期表现总览")));
-    titleBox->addWidget(muted(QStringLiteral("原生 Windows 桌面分析。导入实验数据后，直接计算保持率、寿命阈值证据与共同时间点排名。")));
+    titleBox->addWidget(muted(QStringLiteral("原生 Windows 桌面分析。导入实验数据后，直接计算保持率、寿命阈值证据与条件守门结果。")));
     top->addLayout(titleBox, 1);
 
     auto* demoButton = new QPushButton(QStringLiteral("载入示例"));
@@ -175,7 +255,8 @@ QWidget* MainWindow::buildOverviewPage() {
     metrics->addWidget(metricCard(QStringLiteral("催化剂"), &metricCatalysts_), 0, 0);
     metrics->addWidget(metricCard(QStringLiteral("数据点"), &metricPoints_), 0, 1);
     metrics->addWidget(metricCard(QStringLiteral("最长测试"), &metricLongest_), 0, 2);
-    metrics->addWidget(metricCard(QStringLiteral("共同时间领先"), &metricLeader_), 0, 3);
+    metrics->addWidget(metricCard(QStringLiteral("条件守门"), &metricCondition_), 0, 3);
+    metrics->addWidget(metricCard(QStringLiteral("共同时间领先"), &metricLeader_), 0, 4);
     layout->addLayout(metrics);
 
     auto* chartFrame = new QFrame;
@@ -234,6 +315,7 @@ QWidget* MainWindow::buildDataPage() {
     sourceLabel_ = new QLabel(QStringLiteral("—"));
     sourceLabel_->setObjectName(QStringLiteral("sourcePath"));
     sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    sourceLabel_->setWordWrap(true);
     sourceLayout->addWidget(sourceLabel_);
     layout->addWidget(sourceFrame);
 
@@ -256,8 +338,31 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
-    layout->addWidget(heading(QStringLiteral("寿命阈值分析")));
-    layout->addWidget(muted(QStringLiteral("T95 / T90 / T80 使用离散观测的删失语义，不把插值结果冒充直接观测。区间表示首次通过阈值发生在两个实际观测点之间。")));
+    layout->addWidget(heading(QStringLiteral("寿命与条件可比性分析")));
+    layout->addWidget(muted(QStringLiteral("T95 / T90 / T80 使用离散观测的删失语义；直接跨催化剂结论同时受实验条件守门约束。")));
+
+    auto* guardFrame = new QFrame;
+    guardFrame->setObjectName(QStringLiteral("panel"));
+    auto* guardLayout = new QVBoxLayout(guardFrame);
+    guardLayout->setContentsMargins(18, 16, 18, 16);
+    auto* guardTitle = new QLabel(QStringLiteral("实验条件守门"));
+    guardTitle->setObjectName(QStringLiteral("sectionTitle"));
+    conditionStatusLabel_ = new QLabel(QStringLiteral("—"));
+    conditionStatusLabel_->setObjectName(QStringLiteral("guardStatus"));
+    conditionMessageLabel_ = muted(QStringLiteral("尚未分析。"));
+    guardLayout->addWidget(guardTitle);
+    guardLayout->addWidget(conditionStatusLabel_);
+    guardLayout->addWidget(conditionMessageLabel_);
+
+    conditionMismatchTable_ = new QTableWidget(0, 3);
+    conditionMismatchTable_->setHorizontalHeaderLabels({
+        QStringLiteral("催化剂 A"), QStringLiteral("催化剂 B"), QStringLiteral("不匹配条件")});
+    conditionMismatchTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    conditionMismatchTable_->verticalHeader()->setVisible(false);
+    conditionMismatchTable_->setAlternatingRowColors(true);
+    conditionMismatchTable_->setMaximumHeight(180);
+    guardLayout->addWidget(conditionMismatchTable_);
+    layout->addWidget(guardFrame);
 
     thresholdTable_ = new QTableWidget;
     thresholdTable_->setColumnCount(7);
@@ -273,7 +378,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     note->setObjectName(QStringLiteral("infoPanel"));
     auto* noteLayout = new QVBoxLayout(note);
     noteLayout->addWidget(new QLabel(QStringLiteral("证据语义")));
-    noteLayout->addWidget(muted(QStringLiteral("例如 T90 = 20–50 h，表示 20 h 时仍高于 90%，50 h 时已达到或低于 90%。当前桌面版不会把该区间线性插值成一个伪精确寿命。")));
+    noteLayout->addWidget(muted(QStringLiteral("例如 T90 = 20–50 h，表示 20 h 时仍高于 90%，50 h 时已达到或低于 90%。桌面版不会把该区间线性插值成伪精确寿命；若温度、空速、压力或进料比明确不一致，也不会输出直接领先者。")));
     layout->addWidget(note);
     return page;
 }
@@ -284,7 +389,7 @@ QWidget* MainWindow::buildAiPage() {
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
     layout->addWidget(heading(QStringLiteral("AI 工作区")));
-    layout->addWidget(muted(QStringLiteral("C++ 桌面迁移正在进行。下一阶段将把 AI Analyst、Evidence Critic、外部数据库 Hub 和本地/远端模型接口接入这里。")));
+    layout->addWidget(muted(QStringLiteral("C++ 桌面迁移正在进行。后续将把 AI Analyst、Evidence Critic、外部数据库 Hub 和本地/远端模型接口接入这里。")));
 
     auto* card = new QFrame;
     card->setObjectName(QStringLiteral("panel"));
@@ -293,7 +398,7 @@ QWidget* MainWindow::buildAiPage() {
     auto* title = new QLabel(QStringLiteral("Native AI integration roadmap"));
     title->setObjectName(QStringLiteral("sectionTitle"));
     cardLayout->addWidget(title);
-    cardLayout->addWidget(muted(QStringLiteral("1. HTTP/API 客户端  ·  2. Evidence Packet  ·  3. AI Analyst  ·  4. Evidence Critic  ·  5. 审计日志与报告导出")));
+    cardLayout->addWidget(muted(QStringLiteral("HTTP/API 客户端  ·  Evidence Packet  ·  AI Analyst  ·  Evidence Critic  ·  审计日志与报告导出")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -311,10 +416,10 @@ QWidget* MainWindow::buildSettingsPage() {
     auto* cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(22, 20, 22, 20);
     cardLayout->addWidget(new QLabel(QStringLiteral("Catalyst Longevity Research")));
-    cardLayout->addWidget(muted(QStringLiteral("原生 Windows 桌面版 · C++20 + Qt 6 Widgets")));
+    cardLayout->addWidget(muted(QStringLiteral("原生 Windows 桌面版 · C++20 + Qt 6 Widgets + SQLite")));
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
-    cardLayout->addWidget(new QLabel(QStringLiteral("当前阶段：Native Desktop Preview 0.1")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -335,9 +440,10 @@ void MainWindow::applyTheme() {
         #metricCard, #panel { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; }
         #infoPanel { background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 10px; }
         #metricTitle { color: #6B7280; font-size: 12px; }
-        #metricValue { color: #111827; font-size: 22px; font-weight: 700; }
+        #metricValue { color: #111827; font-size: 19px; font-weight: 700; }
         #sectionTitle { color: #111827; font-size: 15px; font-weight: 700; }
         #sourcePath { color: #1D4ED8; }
+        #guardStatus { color: #111827; font-size: 15px; font-weight: 700; padding: 3px 0; }
         #primaryButton { background: #2563EB; color: white; border: none; border-radius: 8px; padding: 10px 17px; font-weight: 600; }
         #primaryButton:hover { background: #1D4ED8; }
         #secondaryButton { background: #FFFFFF; color: #374151; border: 1px solid #D1D5DB; border-radius: 8px; padding: 10px 17px; font-weight: 600; }
@@ -347,6 +453,84 @@ void MainWindow::applyTheme() {
         QTableWidget::item { padding: 6px; }
         QTableWidget::item:selected { background: #DBEAFE; color: #111827; }
     )"));
+}
+
+void MainWindow::newProject() {
+    currentProjectPath_.clear();
+    projectDirty_ = false;
+    records_.clear();
+    sourceLabelText_ = QStringLiteral("未加载数据");
+    analysis_ = AnalysisResult{};
+    if (sourceLabel_) {
+        sourceLabel_->setText(sourceLabelText_);
+    }
+    refreshRawTable();
+    refreshAnalysisViews();
+    updateProjectUi();
+    setStatus(QStringLiteral("已新建空白项目。"));
+}
+
+void MainWindow::openProject() {
+    const QString path = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("打开 Catalyst Longevity Research 项目"),
+        QString(),
+        QStringLiteral("Catalyst Longevity 项目 (*.clrproj);;所有文件 (*.*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QVector<Record> loaded;
+    QString message;
+    if (!ProjectStore::loadProject(path, &loaded, &message)) {
+        QMessageBox::warning(this, QStringLiteral("打开项目失败"), message);
+        setStatus(message, true);
+        return;
+    }
+
+    currentProjectPath_ = path;
+    setRecords(loaded, path, false);
+    projectDirty_ = false;
+    updateProjectUi();
+    setStatus(message);
+    pages_->setCurrentIndex(1);
+}
+
+void MainWindow::saveProject() {
+    if (currentProjectPath_.isEmpty()) {
+        saveProjectAs();
+        return;
+    }
+    saveProjectTo(currentProjectPath_);
+}
+
+void MainWindow::saveProjectAs() {
+    QString path = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("保存 Catalyst Longevity Research 项目"),
+        currentProjectPath_.isEmpty() ? QStringLiteral("Catalyst-Longevity-Research.clrproj") : currentProjectPath_,
+        QStringLiteral("Catalyst Longevity 项目 (*.clrproj)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (QFileInfo(path).suffix().isEmpty()) {
+        path += QStringLiteral(".clrproj");
+    }
+    saveProjectTo(path);
+}
+
+bool MainWindow::saveProjectTo(const QString& path) {
+    QString message;
+    if (!ProjectStore::saveProject(path, records_, &message)) {
+        QMessageBox::warning(this, QStringLiteral("保存项目失败"), message);
+        setStatus(message, true);
+        return false;
+    }
+    currentProjectPath_ = path;
+    projectDirty_ = false;
+    updateProjectUi();
+    setStatus(message);
+    return true;
 }
 
 void MainWindow::importCsv() {
@@ -366,27 +550,38 @@ void MainWindow::importCsv() {
         setStatus(message, true);
         return;
     }
-    setRecords(records, path);
+    setRecords(records, path, true);
     setStatus(message);
 }
 
 void MainWindow::loadDemo() {
-    setRecords(CsvReader::demoData(), QStringLiteral("内置示例数据"));
+    setRecords(CsvReader::demoData(), QStringLiteral("内置示例数据"), true);
     setStatus(QStringLiteral("已载入示例数据。"));
 }
 
-void MainWindow::setRecords(const QVector<Record>& records, const QString& sourceLabel) {
+void MainWindow::setRecords(const QVector<Record>& records, const QString& sourceLabel, bool markDirty) {
     records_ = records;
     sourceLabelText_ = sourceLabel;
+    if (markDirty) {
+        projectDirty_ = true;
+    }
     if (sourceLabel_) {
         sourceLabel_->setText(sourceLabelText_);
     }
     refreshRawTable();
-    runAnalysis();
+    if (records_.isEmpty()) {
+        analysis_ = AnalysisResult{};
+        refreshAnalysisViews();
+    } else {
+        runAnalysis();
+    }
+    updateProjectUi();
 }
 
 void MainWindow::runAnalysis() {
     if (records_.isEmpty()) {
+        analysis_ = AnalysisResult{};
+        refreshAnalysisViews();
         setStatus(QStringLiteral("请先导入数据。"), true);
         return;
     }
@@ -425,17 +620,51 @@ void MainWindow::refreshRawTable() {
 }
 
 void MainWindow::refreshAnalysisViews() {
+    if (!metricCatalysts_) {
+        return;
+    }
+
     metricCatalysts_->setText(QString::number(analysis_.catalysts.size()));
     metricPoints_->setText(QString::number(analysis_.totalObservations));
-    metricLongest_->setText(QStringLiteral("%1 h").arg(QString::number(analysis_.longestTestHours, 'g', 8)));
-    if (analysis_.latestSharedTimeHours.has_value() && !analysis_.latestSharedLeader.isEmpty()) {
+    metricLongest_->setText(analysis_.totalObservations > 0
+        ? QStringLiteral("%1 h").arg(QString::number(analysis_.longestTestHours, 'g', 8))
+        : QStringLiteral("—"));
+    metricCondition_->setText(ConditionGuard::statusText(analysis_.conditionAudit.status));
+
+    if (analysis_.conditionAudit.blocksDirectRanking()) {
+        metricLeader_->setText(QStringLiteral("已阻止"));
+    } else if (analysis_.latestSharedTimeHours.has_value() && !analysis_.latestSharedLeader.isEmpty()) {
         metricLeader_->setText(QStringLiteral("%1 @ %2 h")
             .arg(analysis_.latestSharedLeader, QString::number(*analysis_.latestSharedTimeHours, 'g', 8)));
     } else {
         metricLeader_->setText(QStringLiteral("—"));
     }
 
-    chart_->setRecords(records_);
+    if (chart_) {
+        chart_->setRecords(records_);
+    }
+
+    if (conditionStatusLabel_) {
+        conditionStatusLabel_->setText(ConditionGuard::statusText(analysis_.conditionAudit.status));
+        conditionStatusLabel_->setStyleSheet(analysis_.conditionAudit.blocksDirectRanking()
+            ? QStringLiteral("color: #B91C1C; font-size: 15px; font-weight: 700; padding: 3px 0;")
+            : QStringLiteral("color: #166534; font-size: 15px; font-weight: 700; padding: 3px 0;"));
+    }
+    if (conditionMessageLabel_) {
+        conditionMessageLabel_->setText(
+            analysis_.conditionAudit.message.isEmpty()
+                ? QStringLiteral("尚未提供可审计数据。")
+                : analysis_.conditionAudit.message);
+    }
+    if (conditionMismatchTable_) {
+        conditionMismatchTable_->setRowCount(analysis_.conditionAudit.pairMismatches.size());
+        for (qsizetype row = 0; row < analysis_.conditionAudit.pairMismatches.size(); ++row) {
+            const auto& mismatch = analysis_.conditionAudit.pairMismatches[row];
+            conditionMismatchTable_->setItem(row, 0, item(mismatch.catalystA));
+            conditionMismatchTable_->setItem(row, 1, item(mismatch.catalystB));
+            conditionMismatchTable_->setItem(row, 2, item(conditionFieldsText(mismatch.fields)));
+        }
+    }
 
     summaryTable_->setRowCount(analysis_.catalysts.size());
     thresholdTable_->setRowCount(analysis_.catalysts.size());
@@ -457,6 +686,37 @@ void MainWindow::refreshAnalysisViews() {
         thresholdTable_->setItem(row, 5, item(QString::number(summary.initialPerformance, 'g', 8)));
         thresholdTable_->setItem(row, 6, item(QString::number(summary.latestPerformance, 'g', 8)));
     }
+}
+
+void MainWindow::updateProjectUi() {
+    const QString displayPath = currentProjectPath_.isEmpty()
+        ? QStringLiteral("未命名项目")
+        : currentProjectPath_;
+    if (projectPathLabel_) {
+        projectPathLabel_->setText(displayPath);
+    }
+    if (projectStateLabel_) {
+        if (currentProjectPath_.isEmpty()) {
+            projectStateLabel_->setText(projectDirty_
+                ? QStringLiteral("未保存 · %1 条实验记录").arg(records_.size())
+                : QStringLiteral("尚未保存 · 空白项目"));
+        } else {
+            projectStateLabel_->setText(projectDirty_
+                ? QStringLiteral("有未保存更改 · %1 条实验记录").arg(records_.size())
+                : QStringLiteral("已保存 · %1 条实验记录").arg(records_.size()));
+        }
+    }
+
+    QString title = QStringLiteral("Catalyst Longevity Research");
+    if (currentProjectPath_.isEmpty()) {
+        title += QStringLiteral(" — 未命名项目");
+    } else {
+        title += QStringLiteral(" — %1").arg(QFileInfo(currentProjectPath_).completeBaseName());
+    }
+    if (projectDirty_) {
+        title += QStringLiteral(" *");
+    }
+    setWindowTitle(title);
 }
 
 void MainWindow::setStatus(const QString& text, bool error) {
