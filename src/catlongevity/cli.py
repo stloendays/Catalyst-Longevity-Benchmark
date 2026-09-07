@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .analysis import analyze_observations
 from .io import read_tos_csv
+from .reporting import render_markdown_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,6 +17,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("input_csv", help="Input CSV containing catalyst_id, time_h and performance columns")
     parser.add_argument("-o", "--output", default="catlongevity_report.json", help="Output JSON report path")
+    parser.add_argument(
+        "--markdown",
+        default=None,
+        help="Optional Markdown report path; defaults to the JSON output path with .md suffix",
+    )
     return parser
 
 
@@ -27,7 +33,13 @@ def main(argv: list[str] | None = None) -> int:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Catalyst Longevity report written to {output_path}")
+
+    markdown_path = Path(args.markdown) if args.markdown else output_path.with_suffix(".md")
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_path.write_text(render_markdown_report(report), encoding="utf-8")
+
+    print(f"Catalyst Longevity JSON report written to {output_path}")
+    print(f"Catalyst Longevity Markdown report written to {markdown_path}")
     return 0
 
 
