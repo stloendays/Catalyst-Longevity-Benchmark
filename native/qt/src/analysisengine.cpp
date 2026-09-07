@@ -67,7 +67,7 @@ ThresholdObservation AnalysisEngine::thresholdObservation(
 
 AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
     AnalysisResult result;
-    result.totalObservations = records.size();
+    result.totalObservations = static_cast<int>(records.size());
     if (records.isEmpty()) {
         return result;
     }
@@ -82,11 +82,10 @@ AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
     }
 
     for (auto it = grouped.begin(); it != grouped.end(); ++it) {
-        auto rows = it.value();
+        auto& rows = it.value();
         std::sort(rows.begin(), rows.end(), [](const Record& a, const Record& b) {
             return a.timeHours < b.timeHours;
         });
-        grouped[it.key()] = rows;
 
         if (rows.isEmpty()) {
             continue;
@@ -97,7 +96,7 @@ AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
 
         CatalystSummary summary;
         summary.catalyst = it.key();
-        summary.observations = rows.size();
+        summary.observations = static_cast<int>(rows.size());
         summary.initialTimeHours = rows.front().timeHours;
         summary.initialPerformance = rows.front().performance;
         summary.latestTimeHours = rows.back().timeHours;
@@ -123,8 +122,10 @@ AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
         std::optional<double> latestShared;
         for (const auto& candidate : firstRows) {
             bool shared = true;
-            for (auto it = std::next(grouped.constBegin()); it != grouped.constEnd(); ++it) {
-                if (!performanceAt(it.value(), candidate.timeHours).has_value()) {
+            auto other = grouped.constBegin();
+            ++other;
+            for (; other != grouped.constEnd(); ++other) {
+                if (!performanceAt(other.value(), candidate.timeHours).has_value()) {
                     shared = false;
                     break;
                 }
