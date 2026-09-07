@@ -1,7 +1,7 @@
 #define MyAppName "Catalyst Longevity Research"
 #define MyAppExeName "Catalyst Longevity Research.exe"
 #define MyAppPublisher "Catalyst Longevity Research"
-#define MyAppVersion "0.1.0-preview"
+#define MyAppVersion "Native Desktop Preview"
 
 #ifndef SourceDir
   #define SourceDir "..\..\..\dist-qt\app"
