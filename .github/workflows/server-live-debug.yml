@@ -1,0 +1,39 @@
+name: Server live debug
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/server-live-debug.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Prepare key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Probe live state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          echo '=== TIME ==='; date -Is
+          echo '=== DISK ==='; df -h /
+          echo '=== MEMORY ==='; free -h
+          echo '=== LLAMA FILES ==='; ls -lah ~/.local/bin/llama ~/.llama-app/llama 2>/dev/null || true
+          echo '=== INSTALL/DOWNLOAD PROCESSES ==='
+          ps -eo pid,ppid,user,%mem,%cpu,etime,args | grep -E 'llama|curl|npm|journalctl|ssh.*bash -s' | grep -v grep || true
+          echo '=== LLM SERVICE ==='; systemctl status rhocodec-llm.service --no-pager -l 2>/dev/null || true
+          echo '=== MODEL CACHE ==='; du -sh ~/.cache/huggingface ~/.cache/llama.cpp ~/.cache 2>/dev/null || true
+          REMOTE
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
