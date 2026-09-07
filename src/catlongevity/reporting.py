@@ -1,90 +1,62 @@
-"""Human-readable report rendering for catalyst longevity analyses."""
+"""Human-readable report rendering for Catalyst Longevity Analyzer."""
 from __future__ import annotations
 
 from typing import Any
 
-
-def _format_bound(value) -> str:
-    return "unresolved" if value is None else f"{value:g} h"
+from .friendly import build_user_summary
 
 
 def render_markdown_report(report: dict[str, Any]) -> str:
-    """Render a concise auditable Markdown report from analysis output."""
+    """Render a concise, user-facing Markdown report.
+
+    Technical semantics remain available in the JSON output, while this report
+    prioritizes practical interpretation and plain language.
+    """
+    summary = build_user_summary(report)
     lines = [
         "# Catalyst Longevity Analysis Report",
         "",
-        "## Analysis semantics",
+        "## 一眼看懂",
         "",
-        "- Threshold lifetimes preserve censoring status and do not interpolate primary crossing times.",
-        "- Instantaneous crossover claims use common source-supported observation times.",
-        "- Cumulative AUC values are piecewise-linear sensitivity quantities between observed points.",
-        "- Uncertainty-aware reversal requires non-overlapping intervals to establish ordering.",
-        "",
-        "## Catalyst trajectories",
+        f"- 共分析 **{summary['catalyst_count']}** 个催化剂、**{summary['total_observations']}** 个时间点。",
+        f"- 最长观测时间：**{summary['max_time_h']:g} h**。" if summary["max_time_h"] is not None else "- 最长观测时间：未提供。",
+        f"- 在现有数据中发现 **{summary['observed_rank_changes']}** 组催化剂发生领先顺序变化。",
         "",
     ]
 
-    for catalyst_id, catalyst in report["catalysts"].items():
-        lines.extend(
-            [
-                f"### {catalyst_id}",
-                "",
-                f"- Observations: {catalyst['n_observations']}",
-                f"- Paper IDs: {', '.join(catalyst['paper_ids']) if catalyst['paper_ids'] else 'not supplied'}",
-                f"- Metrics: {', '.join(catalyst['metrics']) if catalyst['metrics'] else 'not supplied'}",
-                f"- Provenance: {', '.join(catalyst['provenance_classes']) if catalyst['provenance_classes'] else 'not supplied'}",
-            ]
-        )
-        for name in ("t95", "t90", "t80"):
-            endpoint = catalyst["threshold_lifetimes"][name]
-            lines.append(
-                f"- {name}: {endpoint['status']} "
-                f"[{_format_bound(endpoint['lower_h'])}, {_format_bound(endpoint['upper_h'])}]"
-            )
-        lines.extend(
-            [
-                "- Cumulative AUC: derived piecewise-linear sensitivity at observed times",
-                "",
-            ]
-        )
-
-    lines.extend(["## Pairwise ranking audit", ""])
-    if not report["pairwise"]:
-        lines.append("No pairwise comparison is available.")
-    for pair in report["pairwise"]:
-        lines.append(f"### {pair['catalyst_a']} vs {pair['catalyst_b']}")
+    if summary["pairwise_conclusions"]:
+        lines.extend(["## 催化剂之间的比较", ""])
+        for text in summary["pairwise_conclusions"]:
+            lines.append(f"- {text}")
         lines.append("")
-        inst = pair["instantaneous_crossover"]
-        if inst["status"] == "interval":
-            lines.append(
-                f"- Instantaneous crossover: interval-supported between "
-                f"{inst['lower_h']:g} and {inst['upper_h']:g} h; direction = {inst['direction']}."
-            )
-        else:
-            lines.append(f"- Instantaneous crossover: {inst['status']}.")
 
-        uncertainty = pair["uncertainty_aware_crossover"]
-        if uncertainty["status"] == "interval":
-            lines.append(
-                f"- Uncertainty-aware crossover: proven interval between "
-                f"{uncertainty['lower_h']:g} and {uncertainty['upper_h']:g} h; "
-                f"direction = {uncertainty['direction']}."
-            )
-        else:
-            reason = uncertainty.get("reason")
-            lines.append(
-                f"- Uncertainty-aware crossover: {uncertainty['status']}"
-                + (f" ({reason})." if reason else ".")
-            )
+    lines.extend(["## 各催化剂表现", ""])
+    for card in summary["catalyst_cards"]:
+        lines.append(f"### {card['catalyst_id']}")
+        lines.append("")
+        if card["initial_performance"] is not None:
+            lines.append(f"- 初始性能：{card['initial_performance']:g}")
+        if card["latest_performance"] is not None and card["latest_time_h"] is not None:
+            lines.append(f"- {card['latest_time_h']:g} h 时性能：{card['latest_performance']:g}")
+        if card["retention_percent"] is not None:
+            lines.append(f"- 性能保持率：{card['retention_percent']:.1f}%")
+        lines.append(f"- 95% 保持情况：{card['t95_text']}")
+        lines.append(f"- 90% 保持情况：{card['t90_text']}")
+        lines.append(f"- 80% 保持情况：{card['t80_text']}")
         lines.append("")
 
     lines.extend(
         [
-            "## Interpretation boundary",
+            "## 如何理解结果",
             "",
-            "This report separates source observations from derived sensitivity quantities. "
-            "It does not infer missing curve points, does not convert sparse samples into exact crossing times, "
-            "and does not assign catalyst-deactivation mechanisms without source evidence.",
+            "- **性能保持率**表示最新观测值相对于该催化剂第一次观测值还剩多少。",
+            "- **领先顺序变化**表示两个催化剂在不同时间点出现了前后名次交换。",
+            "- 当报告写着“测试结束时仍高于某阈值”时，意思是当前实验还没有测到真正的阈值寿命；不能把测试结束时间直接当成寿命。",
+            "- 曲线之间的连线和累计面积只用于辅助观察，软件不会自动补造缺失实验点。",
+            "",
+            "## 数据与计算说明",
+            "",
+            "完整的原始计算状态、不确定性字段、来源信息和机器可读结果保存在 JSON 报告中。",
             "",
         ]
     )
