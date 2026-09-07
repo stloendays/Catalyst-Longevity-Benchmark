@@ -17,25 +17,25 @@ Upload a CSV or Excel table and quickly answer:
 
 ## Easiest way to use it
 
-Install the browser interface:
+First install the browser interface dependencies:
 
 ```bash
-pip install -r requirements-ui.txt
+python -m pip install -r requirements-ui.txt
 ```
 
-Launch the app:
+Then launch the software with one command:
 
 ```bash
-streamlit run app.py
+python launch.py
 ```
 
-Then use the browser to:
+The browser interface will open automatically in most environments. You can then:
 
 1. upload CSV / Excel data, or edit a table directly;
 2. preview the data;
 3. click **开始分析**;
 4. inspect conclusions, curves and lifetime information;
-5. download a simple report or full machine-readable output.
+5. download a spreadsheet summary, a simple report or full machine-readable output.
 
 See [`docs/快速开始.md`](docs/快速开始.md) for a non-technical walkthrough.
 
@@ -60,7 +60,7 @@ The importer accepts common English and Chinese headers, including:
 
 Optional uncertainty and source columns can be added when available, but are not required for basic use.
 
-A ready-to-edit template is available at [`examples/用户数据模板.csv`](examples/用户数据模板.csv).
+A ready-to-edit template is available at [`examples/用户数据模板.csv`](examples/用户数据模板.csv), and the browser interface also includes a **下载数据模板** button.
 
 ## What the result looks like
 
@@ -73,14 +73,14 @@ At 50 h, Catalyst B retains 90.8% of its initial performance.
 The 90% retention point for Catalyst B has not yet been reached.
 ```
 
-The browser interface also provides:
+The browser interface provides:
 
 - headline statistics;
-- interactive data preview;
+- interactive data preview and direct table editing;
 - performance-over-time curves;
 - catalyst-by-catalyst retention summaries;
 - pairwise overtake conclusions;
-- downloadable Markdown and JSON reports;
+- downloadable CSV summary, Markdown report and JSON data;
 - an advanced-detail tab for users who want to inspect calculation semantics.
 
 ## Command-line option
@@ -102,6 +102,7 @@ catalyst_longevity_report.json
 
 ```text
 Catalyst-Longevity-Benchmark/
+├── launch.py                      # one-command launcher
 ├── app.py                         # browser interface
 ├── requirements-ui.txt            # UI dependencies
 ├── examples/
