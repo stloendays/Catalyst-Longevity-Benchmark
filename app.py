@@ -50,6 +50,15 @@ def demo_dataframe() -> pd.DataFrame:
     )
 
 
+template_path = Path(__file__).parent / "examples" / "用户数据模板.csv"
+if template_path.exists():
+    st.download_button(
+        "下载数据模板",
+        data=template_path.read_bytes(),
+        file_name="催化剂长期表现数据模板.csv",
+        mime="text/csv",
+    )
+
 source_mode = st.radio(
     "选择数据来源",
     ["上传文件", "直接编辑数据"],
@@ -97,6 +106,20 @@ if input_df is not None:
 
             tabs = st.tabs(["结论", "性能曲线", "寿命信息", "下载报告", "专业详情"])
 
+            cards = pd.DataFrame(summary["catalyst_cards"])
+            display_cards = cards.rename(
+                columns={
+                    "catalyst_id": "催化剂",
+                    "initial_performance": "初始性能",
+                    "latest_performance": "最新性能",
+                    "latest_time_h": "最新时间(h)",
+                    "retention_percent": "性能保持率(%)",
+                    "t95_text": "95%保持时间",
+                    "t90_text": "90%保持时间",
+                    "t80_text": "80%保持时间",
+                }
+            ) if not cards.empty else cards
+
             with tabs[0]:
                 st.subheader("快速结论")
                 if summary["pairwise_conclusions"]:
@@ -106,21 +129,8 @@ if input_df is not None:
                     st.info("当前只有一个催化剂，暂无催化剂之间的排名比较。")
 
                 st.subheader("各催化剂概览")
-                cards = pd.DataFrame(summary["catalyst_cards"])
-                if not cards.empty:
-                    cards = cards.rename(
-                        columns={
-                            "catalyst_id": "催化剂",
-                            "initial_performance": "初始性能",
-                            "latest_performance": "最新性能",
-                            "latest_time_h": "最新时间(h)",
-                            "retention_percent": "性能保持率(%)",
-                            "t95_text": "95%保持时间",
-                            "t90_text": "90%保持时间",
-                            "t80_text": "80%保持时间",
-                        }
-                    )
-                    st.dataframe(cards, use_container_width=True, hide_index=True)
+                if not display_cards.empty:
+                    st.dataframe(display_cards, use_container_width=True, hide_index=True)
 
             with tabs[1]:
                 st.subheader("性能随时间变化")
@@ -148,6 +158,14 @@ if input_df is not None:
 
             with tabs[3]:
                 markdown_report = render_markdown_report(report)
+                if not display_cards.empty:
+                    st.download_button(
+                        "下载结果汇总表 (.csv)",
+                        data=display_cards.to_csv(index=False).encode("utf-8-sig"),
+                        file_name="催化剂长期表现汇总.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
                 st.download_button(
                     "下载简明分析报告 (.md)",
                     data=markdown_report,
