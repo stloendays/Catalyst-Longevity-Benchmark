@@ -1,29 +1,39 @@
-"""External database connectors used by the catalyst intelligence workspace.
+"""External database connectors for the catalyst intelligence workspace.
 
-The connectors deliberately return normalized dictionaries instead of leaking
-provider-specific response shapes into the UI. Network failures are surfaced as
-clear exceptions so the application can fail gracefully.
+All connectors return normalized dictionaries so provider-specific response
+formats do not leak into the analysis layer. API keys are accepted only as
+runtime arguments or environment variables and are never persisted here.
 """
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 
-USER_AGENT = "Catalyst-Longevity-Analyzer/1.0 (+https://github.com/stloendays/Catalyst-Longevity-Benchmark)"
+USER_AGENT = "Catalyst-Longevity-Analyzer (+https://github.com/stloendays/Catalyst-Longevity-Benchmark)"
 
 
-def _http_json(url: str, *, data: bytes | None = None, timeout: float = 15.0) -> dict[str, Any]:
+def _http_json(
+    url: str,
+    *,
+    data: bytes | None = None,
+    timeout: float = 20.0,
+    extra_headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
     request = Request(
         url,
         data=data,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        headers=headers,
         method="POST" if data is not None else "GET",
     )
     with urlopen(request, timeout=timeout) as response:
@@ -32,8 +42,9 @@ def _http_json(url: str, *, data: bytes | None = None, timeout: float = 15.0) ->
 
 def normalize_doi(value: str) -> str:
     text = value.strip()
-    for prefix in ("https://doi.org/", "http://doi.org/", "doi:", "DOI:"):
-        if text.startswith(prefix):
+    lowered = text.casefold()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if lowered.startswith(prefix.casefold()):
             text = text[len(prefix):]
             break
     return text.strip()
@@ -98,6 +109,149 @@ def search_crossref(query: str, *, rows: int = 8, mailto: str | None = None) -> 
                 "publisher": item.get("publisher"),
                 "url": item.get("URL"),
                 "score": item.get("score"),
+            }
+        )
+    return results
+
+
+def _semantic_scholar_headers(api_key: str | None = None) -> dict[str, str]:
+    key = (api_key or os.getenv("SEMANTIC_SCHOLAR_API_KEY") or "").strip()
+    return {"x-api-key": key} if key else {}
+
+
+def search_semantic_scholar(query: str, *, limit: int = 8, api_key: str | None = None) -> list[dict[str, Any]]:
+    """Search Semantic Scholar Academic Graph for related literature."""
+    if not query.strip():
+        return []
+    fields = "paperId,title,year,authors,venue,abstract,citationCount,referenceCount,externalIds,url,openAccessPdf"
+    params = {"query": query.strip(), "limit": max(1, min(limit, 20)), "fields": fields}
+    payload = _http_json(
+        "https://api.semanticscholar.org/graph/v1/paper/search?" + urlencode(params),
+        extra_headers=_semantic_scholar_headers(api_key),
+    )
+    return [_normalize_semantic_scholar_paper(item) for item in payload.get("data", []) or []]
+
+
+def lookup_semantic_scholar_doi(doi: str, *, api_key: str | None = None) -> dict[str, Any]:
+    """Retrieve one Semantic Scholar paper by DOI."""
+    normalized = normalize_doi(doi)
+    if not normalized or "/" not in normalized:
+        raise ValueError("DOI 格式不完整")
+    fields = "paperId,title,year,authors,venue,abstract,citationCount,referenceCount,externalIds,url,openAccessPdf"
+    identifier = quote(f"DOI:{normalized}", safe=":")
+    payload = _http_json(
+        f"https://api.semanticscholar.org/graph/v1/paper/{identifier}?" + urlencode({"fields": fields}),
+        extra_headers=_semantic_scholar_headers(api_key),
+    )
+    return _normalize_semantic_scholar_paper(payload)
+
+
+def _normalize_semantic_scholar_paper(item: dict[str, Any]) -> dict[str, Any]:
+    external_ids = item.get("externalIds") or {}
+    open_pdf = item.get("openAccessPdf") or {}
+    return {
+        "source": "Semantic Scholar",
+        "paper_id": item.get("paperId"),
+        "doi": external_ids.get("DOI"),
+        "title": item.get("title"),
+        "year": item.get("year"),
+        "venue": item.get("venue"),
+        "authors": [author.get("name") for author in (item.get("authors") or []) if author.get("name")],
+        "abstract": item.get("abstract"),
+        "citation_count": item.get("citationCount"),
+        "reference_count": item.get("referenceCount"),
+        "url": item.get("url"),
+        "open_access_pdf": open_pdf.get("url"),
+        "external_ids": external_ids,
+    }
+
+
+def lookup_pubchem_compound(name: str) -> dict[str, Any]:
+    """Resolve a compound name through PubChem PUG REST."""
+    query = name.strip()
+    if not query:
+        raise ValueError("请输入化合物名称")
+    properties = "Title,MolecularFormula,MolecularWeight,CanonicalSMILES,IsomericSMILES,InChI,InChIKey"
+    url = (
+        "https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/"
+        + quote(query, safe="")
+        + f"/property/{properties}/JSON"
+    )
+    payload = _http_json(url)
+    rows = payload.get("PropertyTable", {}).get("Properties", []) or []
+    if not rows:
+        raise LookupError(f"PubChem 未找到化合物：{query}")
+    item = rows[0]
+    return {
+        "source": "PubChem",
+        "query": query,
+        "cid": item.get("CID"),
+        "title": item.get("Title"),
+        "molecular_formula": item.get("MolecularFormula"),
+        "molecular_weight": item.get("MolecularWeight"),
+        "canonical_smiles": item.get("ConnectivitySMILES") or item.get("CanonicalSMILES"),
+        "isomeric_smiles": item.get("SMILES") or item.get("IsomericSMILES"),
+        "inchi": item.get("InChI"),
+        "inchikey": item.get("InChIKey"),
+        "url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{item.get('CID')}" if item.get("CID") else None,
+    }
+
+
+def search_materials_project_formula(
+    formula: str,
+    *,
+    api_key: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Search Materials Project summary records by chemical formula.
+
+    Materials Project requires an API key. The official ``mp-api`` Python client
+    is loaded lazily so users who do not use this integration do not need it.
+    """
+    query = formula.strip()
+    if not query:
+        return []
+    key = (api_key or os.getenv("MP_API_KEY") or "").strip()
+    if not key:
+        raise ValueError("Materials Project 需要 API Key；请在界面临时输入或设置 MP_API_KEY 环境变量。")
+    try:
+        from mp_api.client import MPRester
+    except ImportError as exc:
+        raise RuntimeError("未安装 Materials Project 官方客户端。请运行：pip install mp-api") from exc
+
+    fields = [
+        "material_id",
+        "formula_pretty",
+        "energy_above_hull",
+        "band_gap",
+        "is_stable",
+        "density",
+        "volume",
+        "symmetry",
+    ]
+    with MPRester(key) as mpr:
+        docs = mpr.materials.summary.search(formula=query, fields=fields)
+
+    results: list[dict[str, Any]] = []
+    for doc in list(docs)[: max(1, min(limit, 25))]:
+        symmetry = getattr(doc, "symmetry", None)
+        results.append(
+            {
+                "source": "Materials Project",
+                "material_id": str(getattr(doc, "material_id", "")) or None,
+                "formula": getattr(doc, "formula_pretty", None),
+                "is_stable": getattr(doc, "is_stable", None),
+                "energy_above_hull_eV_atom": getattr(doc, "energy_above_hull", None),
+                "band_gap_eV": getattr(doc, "band_gap", None),
+                "density_g_cm3": getattr(doc, "density", None),
+                "volume_A3": getattr(doc, "volume", None),
+                "crystal_system": getattr(symmetry, "crystal_system", None) if symmetry else None,
+                "space_group": getattr(symmetry, "symbol", None) if symmetry else None,
+                "url": (
+                    f"https://next-gen.materialsproject.org/materials/{getattr(doc, 'material_id', '')}"
+                    if getattr(doc, "material_id", None)
+                    else None
+                ),
             }
         )
     return results
