@@ -45,11 +45,11 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Native Qt executable was not produced: $exe" }
           Get-Item $exe | Select-Object Name, Length
 
-      - name: Run native analysis self-test
+      - name: Run native engine and SQLite self-test
         shell: pwsh
         run: |
           & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Native analysis self-test failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Native self-test failed with exit code $LASTEXITCODE" }
 
       - name: Smoke-test native desktop window
         shell: pwsh
@@ -74,6 +74,9 @@ jobs:
           Copy-Item "build-qt\Release\Catalyst Longevity Research.exe" "dist-qt\app\Catalyst Longevity Research.exe" -Force
           windeployqt --release --no-translations --compiler-runtime "dist-qt\app\Catalyst Longevity Research.exe"
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path "dist-qt\app\sqldrivers\qsqlite.dll")) {
+            throw "Qt SQLite driver was not deployed; .clrproj project persistence would fail on user machines"
+          }
 
       - name: Validate deployed application without Qt SDK on PATH
         shell: pwsh
@@ -149,11 +152,11 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            First C++ / Qt 6 native Windows desktop preview of Catalyst Longevity Research.
+            Native C++ / Qt 6 Windows desktop preview of Catalyst Longevity Research.
 
             Recommended: download `Catalyst-Longevity-Research-Setup.exe` and install normally. The installed application opens as a native Windows window — no browser, no Streamlit and no Python runtime.
 
-            Current native modules: CSV import, demo dataset, trajectory chart, retention summary, latest common-time leader, and censor-aware T95/T90/T80 evidence. AI Analyst, Evidence Critic and external database modules remain on the migration roadmap.
+            Current native modules include `.clrproj` SQLite project save/open, CSV import, trajectory chart, retention summary, condition comparability guard, guarded shared-time ranking, and censor-aware T95/T90/T80 evidence.
           files: |
             release/Catalyst-Longevity-Research-Setup.exe
             release/Catalyst-Longevity-Research-Portable.zip
