@@ -7,6 +7,7 @@ This directory contains the native Windows desktop migration of Catalyst Longevi
 - C++20
 - Qt 6 Widgets
 - Qt SQL with SQLite project files
+- Native PDF report generation through Qt
 - CMake
 - Native Windows executable deployment with `windeployqt`
 - Inno Setup installer
@@ -25,8 +26,9 @@ The native application does not start a browser and does not require Streamlit o
 8. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
 9. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
 10. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
-11. Native pages for project management, overview, data, lifetime analysis, AI migration workspace and settings.
-12. Installer and portable Windows package workflow.
+11. Native PDF analysis report export including catalyst lifetime summaries, condition-audit status, mismatched pairs and guarded direct-comparison status.
+12. Native pages for project management, overview, data, lifetime analysis, AI migration workspace and settings.
+13. Installer and portable Windows package workflow.
 
 ## Project persistence
 
@@ -47,11 +49,11 @@ The C++ engine preserves two important rules from the research implementation:
 - Threshold lifetime claims remain censor-aware instead of inventing exact crossing times between sparse observations.
 - Direct catalyst ranking is blocked when explicit experimental conditions are inconsistent between candidates.
 
-The built-in `--self-test` verifies a matched-condition demo dataset, a deliberately mismatched-temperature case, and SQLite save/load persistence.
+The built-in `--self-test` verifies a matched-condition demo dataset, a deliberately mismatched-temperature case, SQLite save/load persistence, and native PDF report creation.
 
 ## Planned migration
 
-The Python implementation remains the scientific reference while modules are migrated. Next native modules are Excel import, report export, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic and audit logging.
+The Python implementation remains the scientific reference while modules are migrated. Next native modules are Excel import, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic and audit logging.
 
 ## Build locally
 
@@ -62,7 +64,7 @@ cmake --build build-qt --config Release
 
 Qt 6.5+ with the MSVC 2022 x64 kit must be available to CMake.
 
-For a quick engine and persistence check:
+For a quick engine, persistence and report-export check:
 
 ```powershell
 & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
