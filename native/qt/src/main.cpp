@@ -2,8 +2,10 @@
 #include "csvreader.h"
 #include "mainwindow.h"
 #include "projectstore.h"
+#include "reportexporter.h"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QFont>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -54,6 +56,16 @@ int main(int argc, char* argv[]) {
             || loaded.front().catalyst != records.front().catalyst
             || loaded.front().temperatureC != records.front().temperatureC) {
             return 8;
+        }
+
+        const QString reportPath = tempDir.filePath(QStringLiteral("self-test-report.pdf"));
+        QString reportMessage;
+        if (!catalyst::ReportExporter::exportPdf(
+                reportPath, result, QStringLiteral("self-test"), &reportMessage)) {
+            return 9;
+        }
+        if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) {
+            return 10;
         }
         return 0;
     }
