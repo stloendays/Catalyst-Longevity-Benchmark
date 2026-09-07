@@ -1,9 +1,9 @@
 """Windows desktop launcher for Catalyst Intelligence Workspace.
 
 This module is intentionally small: the scientific application remains the
-existing Streamlit multipage project.  When frozen with PyInstaller, bundled
+existing Streamlit multipage project. When frozen with PyInstaller, bundled
 project files are extracted next to this launcher in ``sys._MEIPASS`` and the
-Streamlit server is started locally on a free loopback port.
+Streamlit server is started locally on loopback.
 """
 from __future__ import annotations
 
@@ -36,6 +36,20 @@ def free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def resolve_port() -> int:
+    """Use a requested test port when supplied, otherwise choose a free port."""
+    requested = os.getenv("CATALYST_DESKTOP_PORT", "").strip()
+    if not requested:
+        return free_loopback_port()
+    try:
+        port = int(requested)
+    except ValueError as exc:
+        raise ValueError("CATALYST_DESKTOP_PORT must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("CATALYST_DESKTOP_PORT must be between 1 and 65535")
+    return port
+
+
 def main() -> int:
     root = bundle_root()
     app_path = root / "app.py"
@@ -50,7 +64,7 @@ def main() -> int:
     os.environ.setdefault("STREAMLIT_SERVER_FILE_WATCHER_TYPE", "none")
     os.environ.setdefault("STREAMLIT_GLOBAL_DEVELOPMENT_MODE", "false")
 
-    port = free_loopback_port()
+    port = resolve_port()
     sys.argv = [
         "streamlit",
         "run",
