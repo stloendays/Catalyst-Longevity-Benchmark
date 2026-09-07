@@ -1,0 +1,108 @@
+name: Server SSH diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/server-ssh-diagnostics.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Verify SSH key secret exists
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          if [ -z "$SERVER_SSH_KEY" ]; then
+            echo "SERVER_SSH_KEY is not configured."
+            echo "Add the PEM contents as repository secret SERVER_SSH_KEY, then rerun this job."
+            exit 1
+          fi
+
+      - name: Prepare SSH credentials
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Read-only server diagnostics
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=5 \
+            -o ServerAliveCountMax=2 \
+            -i "$HOME/.ssh/server_key" \
+            ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -u
+
+          echo '=== IDENTITY ==='
+          whoami
+          hostname
+          date -Is
+
+          echo
+          echo '=== OS ==='
+          grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release || true
+          uname -a
+
+          echo
+          echo '=== CPU ==='
+          nproc
+          lscpu | grep -E '^(Model name|CPU\(s\)|Core\(s\) per socket|Thread\(s\) per core):' || true
+
+          echo
+          echo '=== MEMORY ==='
+          free -h
+
+          echo
+          echo '=== SWAP ==='
+          swapon --show || true
+
+          echo
+          echo '=== ROOT DISK ==='
+          df -hT /
+
+          echo
+          echo '=== HOME USAGE ==='
+          du -xhd1 "$HOME" 2>/dev/null | sort -h | tail -20 || true
+
+          echo
+          echo '=== ROOT DIRECTORY USAGE ==='
+          if sudo -n true 2>/dev/null; then
+            sudo du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
+          else
+            du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
+            echo '(sudo requires a password; root-level usage may be incomplete)'
+          fi
+
+          echo
+          echo '=== JOURNAL SIZE ==='
+          journalctl --disk-usage 2>/dev/null || true
+
+          echo
+          echo '=== DOCKER DISK ==='
+          docker system df 2>/dev/null || echo 'Docker unavailable or permission denied'
+
+          echo
+          echo '=== SSH LISTENERS ==='
+          ss -lnt 2>/dev/null | head -30 || true
+
+          echo
+          echo '=== UPTIME ==='
+          uptime
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
