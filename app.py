@@ -59,22 +59,14 @@ if template_path.exists():
         mime="text/csv",
     )
 
-source_mode = st.radio(
-    "选择数据来源",
-    ["上传文件", "直接编辑数据"],
-    horizontal=True,
-)
-
+source_mode = st.radio("选择数据来源", ["上传文件", "直接编辑数据"], horizontal=True)
 input_df: pd.DataFrame | None = None
 
 if source_mode == "上传文件":
     uploaded = st.file_uploader("上传 CSV 或 Excel 文件", type=["csv", "xlsx", "xls"])
     if uploaded is not None:
         try:
-            if uploaded.name.lower().endswith(".csv"):
-                input_df = pd.read_csv(uploaded)
-            else:
-                input_df = pd.read_excel(uploaded)
+            input_df = pd.read_csv(uploaded) if uploaded.name.lower().endswith(".csv") else pd.read_excel(uploaded)
         except Exception as exc:
             st.error(f"文件读取失败：{exc}")
 else:
@@ -98,13 +90,18 @@ if input_df is not None:
         else:
             st.success("分析完成")
 
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("催化剂数量", summary["catalyst_count"])
             c2.metric("数据点", summary["total_observations"])
             c3.metric("最长测试时间", f"{summary['max_time_h']:g} h" if summary["max_time_h"] is not None else "—")
-            c4.metric("发现领先顺序变化", summary["observed_rank_changes"])
+            c4.metric("领先顺序变化", summary["observed_rank_changes"])
+            c5.metric(
+                "最新共同时间领先者",
+                summary["latest_shared_leader"] or "—",
+                help=(f"比较时间：{summary['latest_shared_time_h']:g} h" if summary["latest_shared_time_h"] is not None else None),
+            )
 
-            tabs = st.tabs(["结论", "性能曲线", "寿命信息", "下载报告", "专业详情"])
+            tabs = st.tabs(["结论", "排名变化", "性能曲线", "寿命信息", "下载报告", "专业详情"])
 
             cards = pd.DataFrame(summary["catalyst_cards"])
             display_cards = cards.rename(
@@ -127,12 +124,29 @@ if input_df is not None:
                         st.write(f"• {conclusion}")
                 else:
                     st.info("当前只有一个催化剂，暂无催化剂之间的排名比较。")
-
                 st.subheader("各催化剂概览")
                 if not display_cards.empty:
                     st.dataframe(display_cards, use_container_width=True, hide_index=True)
 
             with tabs[1]:
+                st.subheader("不同观测时间的排名")
+                if summary["ranking_snapshots"]:
+                    rank_df = pd.DataFrame(
+                        [
+                            {
+                                "时间 (h)": snap["time_h"],
+                                "领先者": snap["leader"],
+                                "完整排名": snap["ranking_text"],
+                            }
+                            for snap in summary["ranking_snapshots"]
+                        ]
+                    )
+                    st.dataframe(rank_df, use_container_width=True, hide_index=True)
+                    st.caption("只比较该时间点实际存在数据的催化剂，不对缺失时间点进行插值排名。")
+                else:
+                    st.info("没有至少两个催化剂共享的观测时间，暂时无法生成排名历史。")
+
+            with tabs[2]:
                 st.subheader("性能随时间变化")
                 curve_rows = []
                 for catalyst_id, item in report["catalysts"].items():
@@ -143,7 +157,7 @@ if input_df is not None:
                 st.line_chart(pivot)
                 st.caption("曲线只连接已有观测点；软件不会自动补造缺失的实验数据。")
 
-            with tabs[2]:
+            with tabs[3]:
                 st.subheader("寿命与保持情况")
                 for card in summary["catalyst_cards"]:
                     st.markdown(f"### {card['catalyst_id']}")
@@ -156,7 +170,7 @@ if input_df is not None:
                     st.write(f"- {card['t90_text']}")
                     st.write(f"- {card['t80_text']}")
 
-            with tabs[3]:
+            with tabs[4]:
                 markdown_report = render_markdown_report(report)
                 if not display_cards.empty:
                     st.download_button(
@@ -181,7 +195,7 @@ if input_df is not None:
                     use_container_width=True,
                 )
 
-            with tabs[4]:
+            with tabs[5]:
                 st.caption("这一页保留给需要核查计算细节、数据来源和不确定性状态的高级用户。")
                 st.json(report)
 
