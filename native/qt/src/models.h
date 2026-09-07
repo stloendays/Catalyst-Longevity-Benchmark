@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <optional>
 
@@ -10,6 +11,13 @@ enum class ThresholdStatus {
     LeftCensored,
     Interval,
     RightCensored
+};
+
+enum class ConditionAuditStatus {
+    NoData,
+    ConditionsNotProvided,
+    MatchedOnProvidedConditions,
+    MismatchDetected
 };
 
 struct ThresholdObservation {
@@ -32,6 +40,23 @@ struct Record {
     QString source;
 };
 
+struct PairConditionMismatch {
+    QString catalystA;
+    QString catalystB;
+    QStringList fields;
+};
+
+struct ConditionAudit {
+    ConditionAuditStatus status = ConditionAuditStatus::NoData;
+    QStringList explicitFields;
+    QVector<PairConditionMismatch> pairMismatches;
+    QString message;
+
+    [[nodiscard]] bool blocksDirectRanking() const {
+        return status == ConditionAuditStatus::MismatchDetected && !pairMismatches.isEmpty();
+    }
+};
+
 struct CatalystSummary {
     QString catalyst;
     int observations = 0;
@@ -51,6 +76,7 @@ struct AnalysisResult {
     double longestTestHours = 0.0;
     std::optional<double> latestSharedTimeHours;
     QString latestSharedLeader;
+    ConditionAudit conditionAudit;
 };
 
 } // namespace catalyst
