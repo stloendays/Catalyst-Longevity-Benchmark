@@ -63,6 +63,32 @@ def describe_pairwise(pair: dict[str, Any]) -> str:
     return f"{a} 与 {b} 的领先顺序暂时无法给出明确结论。"
 
 
+def build_ranking_snapshots(report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rank catalysts at observed times shared by at least two catalysts."""
+    catalysts = report.get("catalysts", {})
+    by_time: dict[float, dict[str, float]] = {}
+    for catalyst_id, item in catalysts.items():
+        for time_h, performance in zip(item.get("time_h", []), item.get("performance", [])):
+            by_time.setdefault(float(time_h), {})[catalyst_id] = float(performance)
+
+    snapshots: list[dict[str, Any]] = []
+    for time_h in sorted(by_time):
+        values = by_time[time_h]
+        if len(values) < 2:
+            continue
+        ranking = sorted(values, key=lambda name: (-values[name], name))
+        snapshots.append(
+            {
+                "time_h": time_h,
+                "leader": ranking[0],
+                "ranking": ranking,
+                "ranking_text": " > ".join(ranking),
+                "values": {name: values[name] for name in ranking},
+            }
+        )
+    return snapshots
+
+
 def build_user_summary(report: dict[str, Any]) -> dict[str, Any]:
     """Build dashboard-friendly headline statistics and plain conclusions."""
     catalysts = report.get("catalysts", {})
@@ -102,6 +128,8 @@ def build_user_summary(report: dict[str, Any]) -> dict[str, Any]:
         for pair in report.get("pairwise", [])
         if pair.get("uncertainty_aware_crossover", {}).get("status") == "interval"
     )
+    ranking_snapshots = build_ranking_snapshots(report)
+    latest_shared = ranking_snapshots[-1] if ranking_snapshots else None
 
     return {
         "catalyst_count": len(catalysts),
@@ -111,4 +139,7 @@ def build_user_summary(report: dict[str, Any]) -> dict[str, Any]:
         "uncertainty_proven_rank_changes": uncertainty_proven,
         "catalyst_cards": catalyst_cards,
         "pairwise_conclusions": pairwise_text,
+        "ranking_snapshots": ranking_snapshots,
+        "latest_shared_time_h": latest_shared["time_h"] if latest_shared else None,
+        "latest_shared_leader": latest_shared["leader"] if latest_shared else None,
     }
