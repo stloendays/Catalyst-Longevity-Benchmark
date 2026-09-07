@@ -16,16 +16,17 @@ The native application does not start a browser and does not require Streamlit o
 ## Current native modules
 
 1. Native project workspace with `.clrproj` SQLite save/open support.
-2. CSV data import with Chinese/English column aliases.
-3. Built-in demo dataset.
-4. Catalyst trajectory visualization drawn by a native Qt widget.
-5. Per-catalyst initial/latest performance and retention.
-6. Latest shared observed time and leader determination.
-7. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
-8. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
-9. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
-10. Native pages for project management, overview, data, lifetime analysis, AI migration workspace and settings.
-11. Installer and portable Windows package workflow.
+2. Save / discard / cancel protection before closing, opening another project or starting a new project.
+3. CSV data import with Chinese/English column aliases.
+4. Built-in demo dataset.
+5. Catalyst trajectory visualization drawn by a native Qt widget.
+6. Per-catalyst initial/latest performance and retention.
+7. Latest shared observed time and leader determination.
+8. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
+9. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
+10. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
+11. Native pages for project management, overview, data, lifetime analysis, AI migration workspace and settings.
+12. Installer and portable Windows package workflow.
 
 ## Project persistence
 
@@ -50,7 +51,7 @@ The built-in `--self-test` verifies a matched-condition demo dataset, a delibera
 
 ## Planned migration
 
-The Python implementation remains the scientific reference while modules are migrated. Next native modules are safer unsaved-project lifecycle handling, Excel import, report export, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic and audit logging.
+The Python implementation remains the scientific reference while modules are migrated. Next native modules are Excel import, report export, document/evidence ingestion, external database clients, AI Analyst, Evidence Critic and audit logging.
 
 ## Build locally
 
