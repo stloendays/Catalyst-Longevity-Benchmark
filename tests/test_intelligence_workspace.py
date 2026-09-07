@@ -1,5 +1,6 @@
 from src.catlongevity.advisor import build_document_advice, build_recommendations
 from src.catlongevity.analysis import analyze_observations
+from src.catlongevity.condition_matcher import apply_condition_guard, audit_conditions
 from src.catlongevity.documents import extract_document_signals
 from src.catlongevity.evidence import build_document_evidence_graph
 from src.catlongevity.external_databases import normalize_doi
@@ -60,3 +61,32 @@ def test_document_advice_requests_condition_binding_for_conversion_candidates():
     }
     advice = build_document_advice(signals)
     assert any("绑定到具体催化剂" in item for item in advice)
+
+
+def test_condition_guard_disables_mismatched_temperature_comparison():
+    rows = [
+        {"催化剂": "A", "时间": 0, "性能": 100, "温度": 700},
+        {"催化剂": "A", "时间": 20, "性能": 70, "温度": 700},
+        {"催化剂": "B", "时间": 0, "性能": 90, "温度": 600},
+        {"催化剂": "B", "时间": 20, "性能": 80, "温度": 600},
+    ]
+    audit = audit_conditions(rows)
+    assert audit["status"] == "mismatch_detected"
+    report = analyze_observations(observations_from_records(rows))
+    guarded = apply_condition_guard(report, audit)
+    assert guarded["pairwise"][0]["instantaneous_crossover"]["status"] == "not_evaluable"
+    assert "temperature_c" in guarded["pairwise"][0]["condition_mismatch_fields"]
+
+
+def test_condition_guard_allows_matched_conditions():
+    rows = [
+        {"催化剂": "A", "时间": 0, "性能": 100, "温度": 700, "GHSV": 18000},
+        {"催化剂": "A", "时间": 20, "性能": 70, "温度": 700, "GHSV": 18000},
+        {"催化剂": "B", "时间": 0, "性能": 90, "温度": 700, "GHSV": 18000},
+        {"催化剂": "B", "时间": 20, "性能": 80, "温度": 700, "GHSV": 18000},
+    ]
+    audit = audit_conditions(rows)
+    assert audit["status"] == "matched_on_provided_conditions"
+    report = analyze_observations(observations_from_records(rows))
+    guarded = apply_condition_guard(report, audit)
+    assert guarded["pairwise"][0]["instantaneous_crossover"]["status"] == "interval"
