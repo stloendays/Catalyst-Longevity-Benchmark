@@ -1,4 +1,5 @@
 from src.catlongevity.advisor import build_document_advice, build_recommendations
+from src.catlongevity.ai_analyst import build_evidence_packet, deterministic_precheck
 from src.catlongevity.analysis import analyze_observations
 from src.catlongevity.condition_matcher import apply_condition_guard, audit_conditions
 from src.catlongevity.documents import extract_document_signals
@@ -101,3 +102,54 @@ def test_condition_normalization_treats_700_and_700_point_zero_as_same():
     ]
     audit = audit_conditions(rows)
     assert audit["status"] == "matched_on_provided_conditions"
+
+
+def test_evidence_packet_keeps_external_context_separate_from_analysis():
+    report = {
+        "condition_audit": {"status": "matched_on_provided_conditions"},
+        "catalysts": {"A": {"time_h": [0, 20], "performance": [100, 80]}},
+        "pairwise": [],
+    }
+    packet = build_evidence_packet(
+        report=report,
+        external_records=[{"source": "Materials Project", "formula": "CeO2", "is_stable": True}],
+    )
+    analysis_items = [item for item in packet["evidence"] if item["type"] == "trajectory_analysis"]
+    external_items = [item for item in packet["evidence"] if item["type"] == "external_context"]
+    assert len(analysis_items) == 1
+    assert len(external_items) == 1
+    assert packet["rules"]["external_database_records_are_context_not_longevity_ground_truth"] is True
+
+
+def test_ai_precheck_hard_blocks_explicit_condition_mismatch():
+    report = {
+        "condition_audit": {
+            "status": "mismatch_detected",
+            "pair_mismatches": {"A||B": ["temperature_c"]},
+        },
+        "catalysts": {},
+        "pairwise": [],
+    }
+    packet = build_evidence_packet(report=report)
+    issues = deterministic_precheck(packet)
+    assert issues
+    assert issues[0]["severity"] == "critical"
+    assert issues[0]["evidence_id"] == "analysis:condition_audit"
+
+
+def test_evidence_packet_preserves_document_candidate_confidence():
+    graph = build_document_evidence_graph(
+        "paper.pdf",
+        {
+            "dois": [],
+            "temperatures_c": [700.0],
+            "durations_h": [50.0],
+            "ch4_conversion_percent_candidates": [80.0],
+        },
+    ).to_dict()
+    packet = build_evidence_packet(evidence_graph=graph)
+    candidate = [
+        item for item in packet["evidence"]
+        if item["type"] == "evidence_graph_node" and (item["data"] or {}).get("kind") == "measurement_candidate"
+    ][0]
+    assert candidate["data"]["confidence"] == "candidate_requires_condition_binding"
