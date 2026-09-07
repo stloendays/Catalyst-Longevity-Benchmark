@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(CatalystLongevityResearch VERSION 0.1.0 LANGUAGES CXX)
+project(CatalystLongevityResearch LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,8 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/models.h
     src/analysisengine.h
     src/analysisengine.cpp
+    src/conditionguard.h
+    src/conditionguard.cpp
     src/csvreader.h
     src/csvreader.cpp
     src/chartwidget.h
