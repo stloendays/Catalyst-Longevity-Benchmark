@@ -1,0 +1,7 @@
+paper_id,catalyst_id,metric,time_h,performance,provenance_class,lower,upper
+SYNTHETIC_DEMO,Catalyst_A,CH4_conversion,0,20.0,synthetic_demo,19.5,20.5
+SYNTHETIC_DEMO,Catalyst_A,CH4_conversion,10,16.0,synthetic_demo,15.5,16.5
+SYNTHETIC_DEMO,Catalyst_A,CH4_conversion,20,12.0,synthetic_demo,11.5,12.5
+SYNTHETIC_DEMO,Catalyst_B,CH4_conversion,0,17.0,synthetic_demo,16.5,17.5
+SYNTHETIC_DEMO,Catalyst_B,CH4_conversion,10,16.5,synthetic_demo,16.0,17.0
+SYNTHETIC_DEMO,Catalyst_B,CH4_conversion,20,16.0,synthetic_demo,15.5,16.5
