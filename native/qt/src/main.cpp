@@ -1,10 +1,12 @@
 #include "analysisengine.h"
 #include "csvreader.h"
 #include "mainwindow.h"
+#include "projectstore.h"
 
 #include <QApplication>
 #include <QFont>
 #include <QStringList>
+#include <QTemporaryDir>
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -22,25 +24,36 @@ int main(int argc, char* argv[]) {
         if (!result.latestSharedTimeHours.has_value() || result.latestSharedLeader.isEmpty()) {
             return 3;
         }
-        if (result.conditionAudit.status != catalyst::ConditionAuditStatus::MatchedOnProvidedConditions) {
+
+        auto mismatched = records;
+        for (auto& record : mismatched) {
+            if (record.catalyst == QStringLiteral("Catalyst B")) {
+                record.temperatureC = 750.0;
+            }
+        }
+        const auto mismatchResult = catalyst::AnalysisEngine::analyze(mismatched);
+        if (!mismatchResult.conditionAudit.blocksDirectRanking()
+            || !mismatchResult.latestSharedLeader.isEmpty()) {
             return 4;
         }
 
-        auto mismatched = records;
-        for (auto& row : mismatched) {
-            if (row.catalyst == QStringLiteral("Catalyst B")) {
-                row.temperatureC = 750.0;
-            }
-        }
-        const auto guarded = catalyst::AnalysisEngine::analyze(mismatched);
-        if (guarded.conditionAudit.status != catalyst::ConditionAuditStatus::MismatchDetected) {
+        QTemporaryDir tempDir;
+        if (!tempDir.isValid()) {
             return 5;
         }
-        if (!guarded.latestSharedLeader.isEmpty()) {
+        const QString projectPath = tempDir.filePath(QStringLiteral("self-test.clrproj"));
+        QString persistenceMessage;
+        if (!catalyst::ProjectStore::saveProject(projectPath, records, &persistenceMessage)) {
             return 6;
         }
-        if (guarded.conditionAudit.pairMismatches.isEmpty()) {
+        QVector<catalyst::Record> loaded;
+        if (!catalyst::ProjectStore::loadProject(projectPath, &loaded, &persistenceMessage)) {
             return 7;
+        }
+        if (loaded.size() != records.size()
+            || loaded.front().catalyst != records.front().catalyst
+            || loaded.front().temperatureC != records.front().temperatureC) {
+            return 8;
         }
         return 0;
     }
