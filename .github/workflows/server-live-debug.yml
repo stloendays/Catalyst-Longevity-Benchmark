@@ -37,3 +37,5 @@ jobs:
       - name: Remove key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
+
+# Triggered to observe disk usage while the verified model is transferred.
