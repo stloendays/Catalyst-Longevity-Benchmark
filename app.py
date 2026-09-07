@@ -1,8 +1,4 @@
-"""Browser interface for Catalyst Longevity Analyzer.
-
-Run with:
-    streamlit run app.py
-"""
+"""Catalyst Intelligence Workspace - Chinese-first main interface."""
 from __future__ import annotations
 
 import json
@@ -11,16 +7,23 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.catlongevity.advisor import build_recommendations
 from src.catlongevity.analysis import analyze_observations
 from src.catlongevity.friendly import build_user_summary
 from src.catlongevity.io import observations_from_records
 from src.catlongevity.reporting import render_markdown_report
 
 
-st.set_page_config(page_title="Catalyst Longevity Analyzer", page_icon="⚗️", layout="wide")
+st.set_page_config(page_title="催化剂智能分析平台", page_icon="⚗️", layout="wide")
 
-st.title("Catalyst Longevity Analyzer")
-st.caption("上传催化剂随时间变化的数据，自动比较稳定性、寿命区间和长期领先关系。")
+st.title("催化剂智能分析平台")
+st.caption("先做中文版：上传实验数据或资料，系统帮助比较长期表现、识别反超、判断寿命证据是否充分，并给出下一步建议。")
+
+st.sidebar.header("功能入口")
+st.sidebar.write("**长期表现分析**：当前页面")
+st.sidebar.write("**资料分析**：上传 PDF / 文本并提取证据")
+st.sidebar.write("**外部数据库检索**：Crossref / Catalysis-Hub")
+st.sidebar.info("研究级计算规则保留在后台；前台优先给普通用户看得懂的结论和建议。")
 
 with st.expander("第一次使用？只需要准备 3 列数据", expanded=False):
     st.markdown(
@@ -84,6 +87,7 @@ if input_df is not None:
             observations = observations_from_records(records)
             report = analyze_observations(observations)
             summary = build_user_summary(report)
+            recommendations = build_recommendations(report, summary)
         except Exception as exc:
             st.error(f"无法完成分析：{exc}")
             st.info("请检查每个催化剂是否有重复时间点，以及是否包含催化剂名称、时间和性能三列。")
@@ -101,7 +105,7 @@ if input_df is not None:
                 help=(f"比较时间：{summary['latest_shared_time_h']:g} h" if summary["latest_shared_time_h"] is not None else None),
             )
 
-            tabs = st.tabs(["结论", "排名变化", "性能曲线", "寿命信息", "下载报告", "专业详情"])
+            tabs = st.tabs(["核心结论", "智能建议", "排名变化", "性能曲线", "寿命信息", "下载报告", "技术详情"])
 
             cards = pd.DataFrame(summary["catalyst_cards"])
             display_cards = cards.rename(
@@ -129,6 +133,20 @@ if input_df is not None:
                     st.dataframe(display_cards, use_container_width=True, hide_index=True)
 
             with tabs[1]:
+                st.subheader("系统建议")
+                st.caption("建议由现有数据和规则生成，不会把缺失证据自动补成确定结论。")
+                for item in recommendations:
+                    label = item.get("level", "建议")
+                    title = item.get("title", "")
+                    text = item.get("text", "")
+                    if label == "关键发现":
+                        st.warning(f"**{label}｜{title}**\n\n{text}")
+                    elif label in {"数据质量", "可追溯性"}:
+                        st.info(f"**{label}｜{title}**\n\n{text}")
+                    else:
+                        st.success(f"**{label}｜{title}**\n\n{text}")
+
+            with tabs[2]:
                 st.subheader("不同观测时间的排名")
                 if summary["ranking_snapshots"]:
                     rank_df = pd.DataFrame(
@@ -146,7 +164,7 @@ if input_df is not None:
                 else:
                     st.info("没有至少两个催化剂共享的观测时间，暂时无法生成排名历史。")
 
-            with tabs[2]:
+            with tabs[3]:
                 st.subheader("性能随时间变化")
                 curve_rows = []
                 for catalyst_id, item in report["catalysts"].items():
@@ -157,7 +175,7 @@ if input_df is not None:
                 st.line_chart(pivot)
                 st.caption("曲线只连接已有观测点；软件不会自动补造缺失的实验数据。")
 
-            with tabs[3]:
+            with tabs[4]:
                 st.subheader("寿命与保持情况")
                 for card in summary["catalyst_cards"]:
                     st.markdown(f"### {card['catalyst_id']}")
@@ -170,7 +188,7 @@ if input_df is not None:
                     st.write(f"- {card['t90_text']}")
                     st.write(f"- {card['t80_text']}")
 
-            with tabs[4]:
+            with tabs[5]:
                 markdown_report = render_markdown_report(report)
                 if not display_cards.empty:
                     st.download_button(
@@ -180,6 +198,16 @@ if input_df is not None:
                         mime="text/csv",
                         use_container_width=True,
                     )
+                recommendation_text = "\n\n".join(
+                    f"## {item['level']}｜{item['title']}\n\n{item['text']}" for item in recommendations
+                )
+                st.download_button(
+                    "下载中文建议 (.md)",
+                    data=("# 催化剂分析建议\n\n" + recommendation_text).encode("utf-8"),
+                    file_name="催化剂分析建议.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
                 st.download_button(
                     "下载简明分析报告 (.md)",
                     data=markdown_report,
@@ -195,9 +223,9 @@ if input_df is not None:
                     use_container_width=True,
                 )
 
-            with tabs[5]:
-                st.caption("这一页保留给需要核查计算细节、数据来源和不确定性状态的高级用户。")
-                st.json(report)
+            with tabs[6]:
+                st.caption("这里保留给需要核查计算细节、数据来源和不确定性状态的高级用户。")
+                st.json({"analysis": report, "recommendations": recommendations})
 
 st.divider()
-st.caption("Catalyst Longevity Analyzer · 长期表现比较工具")
+st.caption("催化剂智能分析平台 · 中文界面优先")
