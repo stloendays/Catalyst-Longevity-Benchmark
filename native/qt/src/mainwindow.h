@@ -29,6 +29,7 @@ private slots:
     void openProject();
     void saveProject();
     void saveProjectAs();
+    void exportReport();
     void importCsv();
     void loadDemo();
     void runAnalysis();
