@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(CatalystLongevityResearch LANGUAGES CXX)
+project(CatalystLongevityResearch VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Sql)
 
 qt_standard_project_setup()
 
@@ -20,13 +20,15 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/conditionguard.cpp
     src/csvreader.h
     src/csvreader.cpp
+    src/projectstore.h
+    src/projectstore.cpp
     src/chartwidget.h
     src/chartwidget.cpp
     src/mainwindow.h
     src/mainwindow.cpp
 )
 
-target_link_libraries(CatalystLongevityResearch PRIVATE Qt6::Widgets)
+target_link_libraries(CatalystLongevityResearch PRIVATE Qt6::Widgets Qt6::Sql)
 
 target_compile_definitions(CatalystLongevityResearch PRIVATE
     QT_NO_CAST_FROM_ASCII
