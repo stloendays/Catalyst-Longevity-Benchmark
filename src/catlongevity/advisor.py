@@ -13,6 +13,29 @@ def build_recommendations(report: dict[str, Any], summary: dict[str, Any]) -> li
     recommendations: list[dict[str, str]] = []
     cards = _card_map(summary)
     snapshots = summary.get("ranking_snapshots", [])
+    condition_audit = report.get("condition_audit", {})
+
+    if condition_audit.get("status") == "mismatch_detected":
+        mismatches = condition_audit.get("pair_mismatches", {})
+        examples = []
+        for pair, fields in list(mismatches.items())[:4]:
+            a, b = pair.split("||", 1)
+            examples.append(f"{a} vs {b}: {', '.join(fields)}")
+        recommendations.append(
+            {
+                "level": "数据质量",
+                "title": "先解决实验条件不匹配，再做催化剂排名",
+                "text": "系统检测到显式实验条件不一致，相关催化剂对的排名/反超结论已被禁用。" + (" 例：" + "；".join(examples) if examples else ""),
+            }
+        )
+    elif condition_audit.get("status") == "conditions_not_provided":
+        recommendations.append(
+            {
+                "level": "可比性",
+                "title": "建议补充实验条件",
+                "text": "当前没有温度、空速、压力或进料比字段。现有结果可以用于描述性比较，但关键选材前应确认不同催化剂是在可比条件下测试的。",
+            }
+        )
 
     if len(cards) == 1:
         recommendations.append(
@@ -70,11 +93,12 @@ def build_recommendations(report: dict[str, Any], summary: dict[str, Any]) -> li
                 }
             )
 
-    not_evaluable = [
+    time_only_not_evaluable = [
         pair for pair in report.get("pairwise", [])
         if pair.get("instantaneous_crossover", {}).get("status") == "not_evaluable"
+        and "condition" not in pair.get("instantaneous_crossover", {}).get("reason", "").lower()
     ]
-    if not_evaluable:
+    if time_only_not_evaluable:
         recommendations.append(
             {
                 "level": "数据质量",
