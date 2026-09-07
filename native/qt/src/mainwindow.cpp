@@ -7,6 +7,7 @@
 #include "projectstore.h"
 
 #include <QButtonGroup>
+#include <QCloseEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -456,6 +457,9 @@ void MainWindow::applyTheme() {
 }
 
 void MainWindow::newProject() {
+    if (!confirmProjectTransition()) {
+        return;
+    }
     currentProjectPath_.clear();
     projectDirty_ = false;
     records_.clear();
@@ -477,6 +481,9 @@ void MainWindow::openProject() {
         QString(),
         QStringLiteral("Catalyst Longevity 项目 (*.clrproj);;所有文件 (*.*)"));
     if (path.isEmpty()) {
+        return;
+    }
+    if (!confirmProjectTransition()) {
         return;
     }
 
@@ -531,6 +538,50 @@ bool MainWindow::saveProjectTo(const QString& path) {
     updateProjectUi();
     setStatus(message);
     return true;
+}
+
+bool MainWindow::confirmProjectTransition() {
+    if (!projectDirty_) {
+        return true;
+    }
+
+    const auto choice = QMessageBox::warning(
+        this,
+        QStringLiteral("项目有未保存更改"),
+        QStringLiteral("当前项目有未保存更改。是否先保存再继续？"),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+
+    if (choice == QMessageBox::Cancel) {
+        return false;
+    }
+    if (choice == QMessageBox::Discard) {
+        return true;
+    }
+
+    if (currentProjectPath_.isEmpty()) {
+        QString path = QFileDialog::getSaveFileName(
+            this,
+            QStringLiteral("保存当前项目"),
+            QStringLiteral("Catalyst-Longevity-Research.clrproj"),
+            QStringLiteral("Catalyst Longevity 项目 (*.clrproj)"));
+        if (path.isEmpty()) {
+            return false;
+        }
+        if (QFileInfo(path).suffix().isEmpty()) {
+            path += QStringLiteral(".clrproj");
+        }
+        return saveProjectTo(path);
+    }
+    return saveProjectTo(currentProjectPath_);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    if (confirmProjectTransition()) {
+        event->accept();
+    } else {
+        event->ignore();
+    }
 }
 
 void MainWindow::importCsv() {
