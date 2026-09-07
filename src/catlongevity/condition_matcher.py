@@ -14,6 +14,7 @@ CONDITION_ALIASES = {
     "reaction": ("reaction", "reaction_name", "反应", "反应类型"),
 }
 
+NUMERIC_FIELDS = {"temperature_c", "ghsv", "whsv", "pressure_bar"}
 CATALYST_ALIASES = ("catalyst_id", "catalyst", "catalyst_name", "sample", "sample_name", "催化剂", "样品", "样品名称")
 
 
@@ -33,6 +34,22 @@ def _clean(value: object) -> str | None:
     if not text or text.casefold() in {"nan", "none", "null"}:
         return None
     return text
+
+
+def _normalize_condition(field: str, value: object) -> str | None:
+    text = _clean(value)
+    if text is None:
+        return None
+    if field in NUMERIC_FIELDS:
+        normalized = text.replace(",", "").replace("°C", "").replace("℃", "").strip()
+        try:
+            number = float(normalized)
+        except ValueError:
+            return text.casefold()
+        return f"{number:g}"
+    if field == "feed_ratio":
+        return text.replace(" ", "").replace("：", ":").casefold()
+    return " ".join(text.split()).casefold()
 
 
 def audit_conditions(records: Iterable[Mapping[str, object]]) -> dict[str, Any]:
@@ -67,7 +84,7 @@ def audit_conditions(records: Iterable[Mapping[str, object]]) -> dict[str, Any]:
             continue
         entry = values_by_catalyst.setdefault(catalyst, {field: set() for field in columns})
         for field, source_col in columns.items():
-            value = _clean(row.get(source_col))
+            value = _normalize_condition(field, row.get(source_col))
             if value is not None:
                 entry[field].add(value)
 
