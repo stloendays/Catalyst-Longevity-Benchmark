@@ -22,6 +22,8 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/csvreader.cpp
     src/projectstore.h
     src/projectstore.cpp
+    src/reportexporter.h
+    src/reportexporter.cpp
     src/chartwidget.h
     src/chartwidget.cpp
     src/mainwindow.h
