@@ -5,6 +5,7 @@
 #include "conditionguard.h"
 #include "csvreader.h"
 #include "projectstore.h"
+#include "reportexporter.h"
 
 #include <QButtonGroup>
 #include <QCloseEvent>
@@ -243,12 +244,16 @@ QWidget* MainWindow::buildOverviewPage() {
     importButton->setObjectName(QStringLiteral("primaryButton"));
     auto* analyzeButton = new QPushButton(QStringLiteral("重新分析"));
     analyzeButton->setObjectName(QStringLiteral("primaryButton"));
+    auto* exportButton = new QPushButton(QStringLiteral("导出 PDF"));
+    exportButton->setObjectName(QStringLiteral("secondaryButton"));
     connect(demoButton, &QPushButton::clicked, this, &MainWindow::loadDemo);
     connect(importButton, &QPushButton::clicked, this, &MainWindow::importCsv);
     connect(analyzeButton, &QPushButton::clicked, this, &MainWindow::runAnalysis);
+    connect(exportButton, &QPushButton::clicked, this, &MainWindow::exportReport);
     top->addWidget(demoButton);
     top->addWidget(importButton);
     top->addWidget(analyzeButton);
+    top->addWidget(exportButton);
     layout->addLayout(top);
 
     auto* metrics = new QGridLayout;
@@ -421,6 +426,7 @@ QWidget* MainWindow::buildSettingsPage() {
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件。")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("报告输出：原生 PDF 分析报告。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -538,6 +544,38 @@ bool MainWindow::saveProjectTo(const QString& path) {
     updateProjectUi();
     setStatus(message);
     return true;
+}
+
+void MainWindow::exportReport() {
+    if (analysis_.catalysts.isEmpty()) {
+        const QString message = QStringLiteral("没有可导出的分析结果。请先导入并分析数据。");
+        QMessageBox::information(this, QStringLiteral("导出报告"), message);
+        setStatus(message, true);
+        return;
+    }
+
+    QString suggestedName = currentProjectPath_.isEmpty()
+        ? QStringLiteral("Catalyst-Longevity-Analysis-Report.pdf")
+        : QStringLiteral("%1-Analysis-Report.pdf").arg(QFileInfo(currentProjectPath_).completeBaseName());
+    QString path = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("导出分析 PDF"),
+        suggestedName,
+        QStringLiteral("PDF 报告 (*.pdf)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (QFileInfo(path).suffix().isEmpty()) {
+        path += QStringLiteral(".pdf");
+    }
+
+    QString message;
+    if (!ReportExporter::exportPdf(path, analysis_, sourceLabelText_, &message)) {
+        QMessageBox::warning(this, QStringLiteral("导出失败"), message);
+        setStatus(message, true);
+        return;
+    }
+    setStatus(message);
 }
 
 bool MainWindow::confirmProjectTransition() {
