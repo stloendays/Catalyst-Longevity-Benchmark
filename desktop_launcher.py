@@ -14,13 +14,24 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
+
+# PyInstaller's windowed bootloader intentionally sets the standard streams to
+# None. Streamlit/Click still expect file-like streams during startup, so give
+# them harmless sinks while keeping the desktop build free of a console window.
+if sys.stdin is None:
+    sys.stdin = open(os.devnull, "r", encoding="utf-8")
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 # Make the principal runtime dependencies explicit to PyInstaller. The app and
 # page modules import them again at Streamlit runtime.
-import openpyxl  # noqa: F401
-import pandas  # noqa: F401
-import pypdf  # noqa: F401
-import streamlit  # noqa: F401
-from streamlit.web import cli as streamlit_cli
+import openpyxl  # noqa: E402,F401
+import pandas  # noqa: E402,F401
+import pypdf  # noqa: E402,F401
+import streamlit  # noqa: E402,F401
+from streamlit.web import cli as streamlit_cli  # noqa: E402
 
 
 def log_path() -> Path:
