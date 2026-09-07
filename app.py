@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.catlongevity.advisor import build_recommendations
 from src.catlongevity.analysis import analyze_observations
+from src.catlongevity.condition_matcher import apply_condition_guard, audit_conditions
 from src.catlongevity.friendly import build_user_summary
 from src.catlongevity.io import observations_from_records
 from src.catlongevity.reporting import render_markdown_report
@@ -34,8 +35,7 @@ with st.expander("第一次使用？只需要准备 3 列数据", expanded=False
 - **时间**：单位小时，例如 `0, 10, 20, 50`
 - **性能**：例如 CH4 转化率、活性或 TOF
 
-列名可以直接使用中文，也可以使用 `catalyst_id / time_h / performance`。
-如果有误差上下限，还可以增加 `lower / upper`；没有也可以正常分析。
+如果你有实验条件，建议同时提供：**温度、GHSV/WHSV、压力、进料比**。软件会先检查条件是否可比，再决定能不能输出催化剂排名。
 """
     )
 
@@ -43,12 +43,12 @@ with st.expander("第一次使用？只需要准备 3 列数据", expanded=False
 def demo_dataframe() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"催化剂": "Catalyst A", "时间": 0, "性能": 82.0},
-            {"催化剂": "Catalyst A", "时间": 20, "性能": 70.0},
-            {"催化剂": "Catalyst A", "时间": 50, "性能": 58.0},
-            {"催化剂": "Catalyst B", "时间": 0, "性能": 76.0},
-            {"催化剂": "Catalyst B", "时间": 20, "性能": 72.0},
-            {"催化剂": "Catalyst B", "时间": 50, "性能": 69.0},
+            {"催化剂": "Catalyst A", "时间": 0, "性能": 82.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
+            {"催化剂": "Catalyst A", "时间": 20, "性能": 70.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
+            {"催化剂": "Catalyst A", "时间": 50, "性能": 58.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
+            {"催化剂": "Catalyst B", "时间": 0, "性能": 76.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
+            {"催化剂": "Catalyst B", "时间": 20, "性能": 72.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
+            {"催化剂": "Catalyst B", "时间": 50, "性能": 69.0, "温度": 700, "GHSV": 18000, "进料比": "1:1"},
         ]
     )
 
@@ -84,8 +84,10 @@ if input_df is not None:
         try:
             clean_df = input_df.dropna(how="all").copy()
             records = clean_df.where(pd.notna(clean_df), "").to_dict(orient="records")
+            condition_audit = audit_conditions(records)
             observations = observations_from_records(records)
-            report = analyze_observations(observations)
+            raw_report = analyze_observations(observations)
+            report = apply_condition_guard(raw_report, condition_audit)
             summary = build_user_summary(report)
             recommendations = build_recommendations(report, summary)
         except Exception as exc:
@@ -105,7 +107,14 @@ if input_df is not None:
                 help=(f"比较时间：{summary['latest_shared_time_h']:g} h" if summary["latest_shared_time_h"] is not None else None),
             )
 
-            tabs = st.tabs(["核心结论", "智能建议", "排名变化", "性能曲线", "寿命信息", "下载报告", "技术详情"])
+            if condition_audit.get("status") == "mismatch_detected":
+                st.error("发现实验条件不匹配：相关催化剂对的直接排名和反超结论已自动禁用。")
+            elif condition_audit.get("status") == "matched_on_provided_conditions":
+                st.success("在已提供的实验条件字段上未发现明显不匹配。")
+            elif condition_audit.get("status") == "conditions_not_provided":
+                st.warning("未提供显式实验条件。当前结果适合描述性查看；关键选材前建议补充温度、空速、压力和进料比。")
+
+            tabs = st.tabs(["核心结论", "智能建议", "实验条件", "排名变化", "性能曲线", "寿命信息", "下载报告", "技术详情"])
 
             cards = pd.DataFrame(summary["catalyst_cards"])
             display_cards = cards.rename(
@@ -127,7 +136,7 @@ if input_df is not None:
                     for conclusion in summary["pairwise_conclusions"]:
                         st.write(f"• {conclusion}")
                 else:
-                    st.info("当前只有一个催化剂，暂无催化剂之间的排名比较。")
+                    st.info("当前没有可输出的催化剂排名结论。")
                 st.subheader("各催化剂概览")
                 if not display_cards.empty:
                     st.dataframe(display_cards, use_container_width=True, hide_index=True)
@@ -141,13 +150,32 @@ if input_df is not None:
                     text = item.get("text", "")
                     if label == "关键发现":
                         st.warning(f"**{label}｜{title}**\n\n{text}")
-                    elif label in {"数据质量", "可追溯性"}:
+                    elif label in {"数据质量", "可追溯性", "可比性"}:
                         st.info(f"**{label}｜{title}**\n\n{text}")
                     else:
                         st.success(f"**{label}｜{title}**\n\n{text}")
 
             with tabs[2]:
+                st.subheader("实验条件可比性")
+                st.write(condition_audit.get("message", "未生成条件审计。"))
+                if condition_audit.get("catalysts"):
+                    condition_rows = []
+                    for catalyst, fields in condition_audit["catalysts"].items():
+                        row = {"催化剂": catalyst}
+                        for field, values in fields.items():
+                            row[field] = ", ".join(values)
+                        condition_rows.append(row)
+                    st.dataframe(pd.DataFrame(condition_rows), use_container_width=True, hide_index=True)
+                if condition_audit.get("pair_mismatches"):
+                    st.markdown("### 不建议直接比较的催化剂对")
+                    for pair, fields in condition_audit["pair_mismatches"].items():
+                        a, b = pair.split("||", 1)
+                        st.write(f"- {a} vs {b}：{', '.join(fields)}")
+
+            with tabs[3]:
                 st.subheader("不同观测时间的排名")
+                if condition_audit.get("status") == "mismatch_detected":
+                    st.warning("存在实验条件不匹配，因此这里不建议把排名历史作为选材结论。")
                 if summary["ranking_snapshots"]:
                     rank_df = pd.DataFrame(
                         [
@@ -160,11 +188,11 @@ if input_df is not None:
                         ]
                     )
                     st.dataframe(rank_df, use_container_width=True, hide_index=True)
-                    st.caption("只比较该时间点实际存在数据的催化剂，不对缺失时间点进行插值排名。")
+                    st.caption("排名表仅展示共同观测时间的原始数值顺序；真正的 pairwise 结论仍受实验条件守门规则约束。")
                 else:
                     st.info("没有至少两个催化剂共享的观测时间，暂时无法生成排名历史。")
 
-            with tabs[3]:
+            with tabs[4]:
                 st.subheader("性能随时间变化")
                 curve_rows = []
                 for catalyst_id, item in report["catalysts"].items():
@@ -175,7 +203,7 @@ if input_df is not None:
                 st.line_chart(pivot)
                 st.caption("曲线只连接已有观测点；软件不会自动补造缺失的实验数据。")
 
-            with tabs[4]:
+            with tabs[5]:
                 st.subheader("寿命与保持情况")
                 for card in summary["catalyst_cards"]:
                     st.markdown(f"### {card['catalyst_id']}")
@@ -188,7 +216,7 @@ if input_df is not None:
                     st.write(f"- {card['t90_text']}")
                     st.write(f"- {card['t80_text']}")
 
-            with tabs[5]:
+            with tabs[6]:
                 markdown_report = render_markdown_report(report)
                 if not display_cards.empty:
                     st.download_button(
@@ -223,7 +251,7 @@ if input_df is not None:
                     use_container_width=True,
                 )
 
-            with tabs[6]:
+            with tabs[7]:
                 st.caption("这里保留给需要核查计算细节、数据来源和不确定性状态的高级用户。")
                 st.json({"analysis": report, "recommendations": recommendations})
 
