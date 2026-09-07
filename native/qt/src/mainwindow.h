@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QVector>
 
+class QCloseEvent;
 class QLabel;
 class QStackedWidget;
 class QTableWidget;
@@ -19,6 +20,9 @@ class MainWindow final : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void newProject();
@@ -45,6 +49,7 @@ private:
     void updateProjectUi();
     void setStatus(const QString& text, bool error = false);
     bool saveProjectTo(const QString& path);
+    bool confirmProjectTransition();
 
     QVector<Record> records_;
     AnalysisResult analysis_;
