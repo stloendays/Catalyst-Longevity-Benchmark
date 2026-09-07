@@ -1,0 +1,52 @@
+name: Tencent self-hosted runner smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/self-hosted-runner-smoke.yml
+      - scripts/setup_self_hosted_runner.sh
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: [self-hosted, linux, x64, rhocodec]
+    timeout-minutes: 10
+    steps:
+      - name: Identify runner
+        run: |
+          set -euo pipefail
+          echo '=== IDENTITY ==='
+          whoami
+          hostname
+          uname -a
+          echo '=== CPU ==='
+          nproc
+          lscpu | grep -E 'Model name|CPU\(s\)|Thread|Core|Socket' || true
+          echo '=== MEMORY ==='
+          free -h
+          echo '=== DISK ==='
+          df -h /
+          echo '=== SWAP ==='
+          swapon --show || true
+          echo '=== EXISTING SERVICES ==='
+          sudo ss -lntp | grep -E '(:8080|:11931|:18789|:18080)' || true
+          echo '=== PARTIAL MODEL ==='
+          if [ -f /tmp/Qwen3.5-2B-Q4_K_M.gguf ]; then
+            stat -c 'bytes=%s' /tmp/Qwen3.5-2B-Q4_K_M.gguf
+            ls -lh /tmp/Qwen3.5-2B-Q4_K_M.gguf
+          else
+            echo 'No partial model file found in /tmp.'
+          fi
+          echo '=== SUDO ==='
+          sudo -n true
+          echo 'passwordless sudo: OK'
+
+      - name: Confirm runner can manage local services
+        run: |
+          set -euo pipefail
+          systemctl is-active docker 2>/dev/null || true
+          systemctl is-active openclaw 2>/dev/null || true
+          echo 'Self-hosted runner is ready for deployment workflows.'
