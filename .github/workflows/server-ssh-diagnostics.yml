@@ -106,3 +106,5 @@ jobs:
       - name: Remove SSH key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
+
+# trigger: secret configured 2026-09-07
