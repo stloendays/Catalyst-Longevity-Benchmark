@@ -1,6 +1,7 @@
 """中文版资料分析入口。"""
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pandas as pd
@@ -34,6 +35,11 @@ else:
     text = st.text_area("粘贴论文摘要、实验部分、稳定性描述或其他资料", height=260)
 
 if text.strip():
+    source_key = hashlib.sha256((filename + "\n" + text[:5000]).encode("utf-8", errors="ignore")).hexdigest()
+    if st.session_state.get("document_source_key") != source_key:
+        st.session_state["document_source_key"] = source_key
+        st.session_state.pop("document_crossref", None)
+
     signals = extract_document_signals(text)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -59,14 +65,12 @@ if text.strip():
         else:
             st.warning("暂未提取到可结构化的催化剂稳定性信息。")
 
-    crossref_metadata = None
     with tabs[1]:
         doi_default = signals["dois"][0] if signals["dois"] else ""
         doi = st.text_input("DOI", value=doi_default, placeholder="例如 10.1039/C9CY02093D")
         if st.button("校验论文身份", type="primary") and doi.strip():
             try:
-                crossref_metadata = lookup_crossref_doi(doi)
-                st.session_state["document_crossref"] = crossref_metadata
+                st.session_state["document_crossref"] = lookup_crossref_doi(doi)
             except Exception as exc:
                 st.error(f"Crossref 查询失败：{exc}")
         crossref_metadata = st.session_state.get("document_crossref")
