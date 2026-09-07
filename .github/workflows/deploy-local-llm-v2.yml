@@ -12,7 +12,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Download verified Qwen3.5 2B Q4 model on GitHub runner
         run: |
@@ -53,33 +53,81 @@ jobs:
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Prepare server directories
+      - name: Prepare server directories without deleting partial model
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           sudo systemctl stop rhocodec-llm.service 2>/dev/null || true
           sudo mkdir -p /opt/rhocodec-llm/bin /opt/rhocodec-llm/models
           sudo chown -R ubuntu:ubuntu /opt/rhocodec-llm
           rm -rf /opt/rhocodec-llm/bin/*
-          rm -f /tmp/llama-runtime.tar.gz /tmp/Qwen3.5-2B-Q4_K_M.gguf
+          rm -f /tmp/llama-runtime.tar.gz
           echo '=== PRE-TRANSFER ==='
           df -h /
           free -h
+          echo '=== PARTIAL MODEL ==='
+          if [ -f /tmp/Qwen3.5-2B-Q4_K_M.gguf ]; then
+            stat -c 'bytes=%s' /tmp/Qwen3.5-2B-Q4_K_M.gguf
+            ls -lh /tmp/Qwen3.5-2B-Q4_K_M.gguf
+          else
+            echo 'bytes=0'
+          fi
           REMOTE
 
-      - name: Transfer runtime and model to Tencent server
+      - name: Transfer runtime and resume model to Tencent server
         run: |
           set -euo pipefail
-          scp -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" \
-            /tmp/llama-runtime.tar.gz \
-            ubuntu@150.158.27.206:/tmp/llama-runtime.tar.gz
-          scp -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" \
-            /tmp/Qwen3.5-2B-Q4_K_M.gguf \
-            ubuntu@150.158.27.206:/tmp/Qwen3.5-2B-Q4_K_M.gguf
+          KEY="$HOME/.ssh/server_key"
+          HOST='ubuntu@150.158.27.206'
+          MODEL='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          REMOTE_MODEL='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          EXPECTED_SHA='d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58'
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i $KEY"
+
+          scp -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$KEY" \
+            /tmp/llama-runtime.tar.gz "$HOST:/tmp/llama-runtime.tar.gz"
+
+          LOCAL_SIZE=$(stat -c '%s' "$MODEL")
+          REMOTE_SIZE=$($SSH "$HOST" "stat -c '%s' '$REMOTE_MODEL' 2>/dev/null || echo 0")
+          echo "Local model bytes:  $LOCAL_SIZE"
+          echo "Remote model bytes: $REMOTE_SIZE"
+
+          case "$REMOTE_SIZE" in
+            ''|*[!0-9]*) echo 'Invalid remote size; resetting partial file.'; $SSH "$HOST" "rm -f '$REMOTE_MODEL'"; REMOTE_SIZE=0 ;;
+          esac
+          if [ "$REMOTE_SIZE" -gt "$LOCAL_SIZE" ]; then
+            echo 'Remote partial is larger than source; resetting it.'
+            $SSH "$HOST" "rm -f '$REMOTE_MODEL'"
+            REMOTE_SIZE=0
+          fi
+
+          if [ "$REMOTE_SIZE" -eq "$LOCAL_SIZE" ] && [ "$REMOTE_SIZE" -gt 0 ]; then
+            echo 'Remote file is full-sized; checking SHA-256 before transferring anything.'
+            if $SSH "$HOST" "echo '$EXPECTED_SHA  $REMOTE_MODEL' | sha256sum -c -"; then
+              echo 'Remote model already complete and verified.'
+            else
+              echo 'Full-sized remote file failed checksum; restarting model transfer.'
+              $SSH "$HOST" "rm -f '$REMOTE_MODEL'"
+              REMOTE_SIZE=0
+            fi
+          fi
+
+          if [ "$REMOTE_SIZE" -lt "$LOCAL_SIZE" ]; then
+            START_BYTE=$((REMOTE_SIZE + 1))
+            REMAINING=$((LOCAL_SIZE - REMOTE_SIZE))
+            echo "Resuming at byte $START_BYTE; remaining bytes: $REMAINING"
+            tail -c +"$START_BYTE" "$MODEL" | \
+              $SSH "$HOST" "cat >> '$REMOTE_MODEL'"
+          fi
+
+          FINAL_SIZE=$($SSH "$HOST" "stat -c '%s' '$REMOTE_MODEL'")
+          echo "Final remote bytes: $FINAL_SIZE"
+          test "$FINAL_SIZE" -eq "$LOCAL_SIZE"
+          $SSH "$HOST" "echo '$EXPECTED_SHA  $REMOTE_MODEL' | sha256sum -c -"
 
       - name: Install local files and systemd service
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           tar -xzf /tmp/llama-runtime.tar.gz -C /opt/rhocodec-llm/bin
           chmod +x /opt/rhocodec-llm/bin/llama-server
@@ -117,7 +165,7 @@ jobs:
 
       - name: Wait for local API and smoke test
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           ready=0
           for i in $(seq 1 60); do
