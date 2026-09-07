@@ -1,4 +1,4 @@
-name: Windows EXE Test Release
+name: Windows Portable Test Release
 
 on:
   workflow_dispatch:
@@ -6,6 +6,14 @@ on:
     branches: [main]
     paths:
       - "desktop_launcher.py"
+      - "app.py"
+      - "pages/**"
+      - "src/**"
+      - "examples/**"
+      - "data/**"
+      - "protocols/**"
+      - "schemas/**"
+      - ".streamlit/**"
       - "build/**"
       - "requirements-ui.txt"
       - ".github/workflows/windows-release.yml"
@@ -14,13 +22,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: catalyst-intelligence-windows-test-release
+  group: catalyst-longevity-windows-release
   cancel-in-progress: true
 
 jobs:
-  build-windows-exe:
+  build-windows-packages:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
@@ -45,33 +53,30 @@ jobs:
           python -m compileall -q app.py pages src tests desktop_launcher.py
           python -m pytest -q
 
-      - name: Build single-file Windows executable
+      - name: Build recommended portable folder
         shell: pwsh
         run: |
-          python -m PyInstaller --clean --noconfirm build/CatalystIntelligenceWorkspace.spec
-          if (-not (Test-Path "dist\Catalyst_Intelligence_Workspace.exe")) {
-            throw "Expected Windows executable was not produced."
+          python -m PyInstaller --clean --noconfirm --distpath dist_portable --workpath build/pyinstaller-portable build/CatalystIntelligenceWorkspacePortable.spec
+          $exe = "dist_portable\Catalyst_Longevity_Portable\Catalyst_Intelligence_Workspace.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Expected portable Windows executable was not produced."
           }
 
-      - name: Smoke-test packaged executable
+      - name: Smoke-test portable folder build
         shell: pwsh
         run: |
           $env:CATALYST_DESKTOP_PORT = "8765"
           $env:CATALYST_DESKTOP_HEADLESS = "1"
-          $env:CATALYST_DESKTOP_LOG = (Join-Path $PWD "desktop-smoke.log")
-          $exe = (Resolve-Path "dist\Catalyst_Intelligence_Workspace.exe").Path
+          $env:CATALYST_DESKTOP_LOG = (Join-Path $PWD "desktop-portable-smoke.log")
+          $exe = (Resolve-Path "dist_portable\Catalyst_Longevity_Portable\Catalyst_Intelligence_Workspace.exe").Path
           $process = Start-Process -FilePath $exe -PassThru
           $healthy = $false
           try {
             for ($i = 0; $i -lt 120; $i++) {
               Start-Sleep -Seconds 2
               if ($process.HasExited) {
-                if (Test-Path $env:CATALYST_DESKTOP_LOG) {
-                  Write-Host "----- desktop launcher log -----"
-                  Get-Content $env:CATALYST_DESKTOP_LOG
-                  Write-Host "--------------------------------"
-                }
-                throw "Packaged executable exited before the local server became healthy. Exit code: $($process.ExitCode)"
+                if (Test-Path $env:CATALYST_DESKTOP_LOG) { Get-Content $env:CATALYST_DESKTOP_LOG }
+                throw "Portable executable exited before the local server became healthy. Exit code: $($process.ExitCode)"
               }
               try {
                 $response = Invoke-WebRequest -Uri "http://127.0.0.1:8765/_stcore/health" -UseBasicParsing -TimeoutSec 3
@@ -80,46 +85,135 @@ jobs:
                   break
                 }
               }
-              catch {
-                # Server is still starting; keep polling.
-              }
+              catch { }
             }
             if (-not $healthy) {
-              if (Test-Path $env:CATALYST_DESKTOP_LOG) {
-                Write-Host "----- desktop launcher log -----"
-                Get-Content $env:CATALYST_DESKTOP_LOG
-                Write-Host "--------------------------------"
-              }
-              throw "Packaged executable did not expose a healthy Streamlit server within the timeout."
+              if (Test-Path $env:CATALYST_DESKTOP_LOG) { Get-Content $env:CATALYST_DESKTOP_LOG }
+              throw "Portable executable did not expose a healthy Streamlit server within the timeout."
             }
-            Write-Host "Packaged executable smoke test passed."
+            Write-Host "Portable executable smoke test passed."
           }
           finally {
-            if (-not $process.HasExited) {
-              Stop-Process -Id $process.Id -Force
-            }
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
 
-      - name: Prepare release files and checksum
+      - name: Add portable startup helpers
+        shell: pwsh
+        run: |
+          $portable = "dist_portable\Catalyst_Longevity_Portable"
+          @'
+          Catalyst Longevity Research - Windows Portable Test Build
+          =========================================================
+
+          RECOMMENDED WAY TO RUN
+          1. Extract the ENTIRE ZIP to a normal local folder, for example:
+             C:\CatalystLongevity
+          2. Do not run the EXE directly from inside the ZIP preview.
+          3. Double-click Catalyst_Intelligence_Workspace.exe.
+          4. The program starts a local service on 127.0.0.1 and opens your default browser.
+
+          IF WINDOWS BLOCKS THE FIRST LAUNCH
+          Use Windows "More info" -> "Run anyway" only if you downloaded this build from
+          your own private Catalyst-Longevity-Benchmark GitHub Release.
+
+          STARTUP LOG
+          %LOCALAPPDATA%\Catalyst Longevity Research\launcher.log
+
+          You can also double-click OPEN_STARTUP_LOG.bat in this folder.
+          '@ | Set-Content -Encoding UTF8 "$portable\README_FIRST.txt"
+
+          @'
+          @echo off
+          start "" "%~dp0Catalyst_Intelligence_Workspace.exe"
+          '@ | Set-Content -Encoding ASCII "$portable\RUN_CATALYST.bat"
+
+          @'
+          @echo off
+          set "LOG=%LOCALAPPDATA%\Catalyst Longevity Research\launcher.log"
+          if exist "%LOG%" (
+            start "" notepad.exe "%LOG%"
+          ) else (
+            echo No launcher log exists yet:
+            echo %LOG%
+            pause
+          )
+          '@ | Set-Content -Encoding ASCII "$portable\OPEN_STARTUP_LOG.bat"
+
+      - name: Build single-file fallback executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm --distpath dist_single --workpath build/pyinstaller-single build/CatalystIntelligenceWorkspace.spec
+          if (-not (Test-Path "dist_single\Catalyst_Intelligence_Workspace.exe")) {
+            throw "Expected single-file Windows executable was not produced."
+          }
+
+      - name: Smoke-test single-file fallback
+        shell: pwsh
+        run: |
+          $env:CATALYST_DESKTOP_PORT = "8766"
+          $env:CATALYST_DESKTOP_HEADLESS = "1"
+          $env:CATALYST_DESKTOP_LOG = (Join-Path $PWD "desktop-single-smoke.log")
+          $exe = (Resolve-Path "dist_single\Catalyst_Intelligence_Workspace.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          $healthy = $false
+          try {
+            for ($i = 0; $i -lt 120; $i++) {
+              Start-Sleep -Seconds 2
+              if ($process.HasExited) {
+                if (Test-Path $env:CATALYST_DESKTOP_LOG) { Get-Content $env:CATALYST_DESKTOP_LOG }
+                throw "Single-file executable exited before the local server became healthy. Exit code: $($process.ExitCode)"
+              }
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8766/_stcore/health" -UseBasicParsing -TimeoutSec 3
+                if ($response.StatusCode -eq 200) {
+                  $healthy = $true
+                  break
+                }
+              }
+              catch { }
+            }
+            if (-not $healthy) {
+              if (Test-Path $env:CATALYST_DESKTOP_LOG) { Get-Content $env:CATALYST_DESKTOP_LOG }
+              throw "Single-file executable did not expose a healthy Streamlit server within the timeout."
+            }
+            Write-Host "Single-file executable smoke test passed."
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Prepare release packages and checksums
         id: package
         shell: pwsh
         run: |
           $releaseDir = "release"
           New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          $output = "$releaseDir\Catalyst-Intelligence-Workspace-Windows-Test.exe"
-          Copy-Item "dist\Catalyst_Intelligence_Workspace.exe" $output -Force
-          $hash = (Get-FileHash -Algorithm SHA256 $output).Hash.ToLower()
-          "$hash  $([IO.Path]::GetFileName($output))" | Set-Content "$releaseDir\SHA256SUMS.txt"
-          "asset=$output" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "tag=windows-test-$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Get-Item $output | Select-Object Name, Length
+
+          $portableZip = "$releaseDir\Catalyst-Longevity-Research-Windows-Portable.zip"
+          if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
+          Compress-Archive -Path "dist_portable\Catalyst_Longevity_Portable\*" -DestinationPath $portableZip -CompressionLevel Optimal
+
+          $singleExe = "$releaseDir\Catalyst-Longevity-Research-Windows-Single-EXE.exe"
+          Copy-Item "dist_single\Catalyst_Intelligence_Workspace.exe" $singleExe -Force
+
+          $files = @($portableZip, $singleExe)
+          $checksumLines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $checksumLines | Set-Content "$releaseDir\SHA256SUMS.txt"
+
+          "tag=windows-portable-$env:GITHUB_RUN_NUMBER" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Get-Item $files | Select-Object Name, Length
+          Get-Content "$releaseDir\SHA256SUMS.txt"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Catalyst-Intelligence-Workspace-Windows-Test
+          name: Catalyst-Longevity-Research-Windows-Packages
           path: |
-            release/Catalyst-Intelligence-Workspace-Windows-Test.exe
+            release/Catalyst-Longevity-Research-Windows-Portable.zip
+            release/Catalyst-Longevity-Research-Windows-Single-EXE.exe
             release/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -128,13 +222,16 @@ jobs:
         with:
           tag_name: ${{ steps.package.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Catalyst Intelligence Workspace Windows Test ${{ github.run_number }}
+          name: Catalyst Longevity Research Windows Portable Test ${{ github.run_number }}
           body: |
-            Windows x64 test build for Catalyst Longevity Research / Catalyst Intelligence Workspace.
+            Windows x64 test build for Catalyst Longevity Research.
 
-            The packaged executable passed the repository test suite and a local Streamlit health-check after freezing. API keys remain runtime-only and are not embedded in the executable.
+            **Recommended:** download `Catalyst-Longevity-Research-Windows-Portable.zip`, extract the entire ZIP to a local folder, then double-click `Catalyst_Intelligence_Workspace.exe`.
+
+            This release adds an explicit browser opener, a persistent startup log under `%LOCALAPPDATA%\Catalyst Longevity Research\launcher.log`, native error dialogs, a one-folder portable build that avoids one-file temporary extraction, and a single-file fallback build. Both packaged variants passed the repository test suite and an actual local Streamlit health check on Windows after freezing.
           prerelease: true
           make_latest: false
           files: |
-            release/Catalyst-Intelligence-Workspace-Windows-Test.exe
+            release/Catalyst-Longevity-Research-Windows-Portable.zip
+            release/Catalyst-Longevity-Research-Windows-Single-EXE.exe
             release/SHA256SUMS.txt
