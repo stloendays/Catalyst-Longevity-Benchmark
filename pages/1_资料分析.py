@@ -16,13 +16,11 @@ from src.catlongevity.external_databases import lookup_crossref_doi
 st.set_page_config(page_title="资料分析｜催化剂智能分析平台", page_icon="📄", layout="wide")
 st.title("资料分析")
 st.caption("上传论文、报告或文本资料，系统先提取可核查信息，再连接外部数据库补充元数据。")
-
 st.info("当前采用保守提取：不会把文本中孤立的数字自动当成某个催化剂的实验结果。识别到的候选值必须先绑定到催化剂、时间和条件后才能进入排名分析。")
 
 source_mode = st.radio("资料来源", ["上传文件", "粘贴文本"], horizontal=True)
 text = ""
 filename = "粘贴文本"
-
 if source_mode == "上传文件":
     uploaded = st.file_uploader("上传 PDF、TXT、Markdown、CSV 或 TSV", type=["pdf", "txt", "md", "csv", "tsv"])
     if uploaded is not None:
@@ -39,8 +37,11 @@ if text.strip():
     if st.session_state.get("document_source_key") != source_key:
         st.session_state["document_source_key"] = source_key
         st.session_state.pop("document_crossref", None)
+        st.session_state.pop("document_evidence_graph", None)
 
     signals = extract_document_signals(text)
+    st.session_state["document_signals"] = signals
+    st.session_state["document_filename"] = filename
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("识别 DOI", len(signals["dois"]))
@@ -100,11 +101,12 @@ if text.strip():
         for advice in build_document_advice(signals):
             st.write(f"• {advice}")
         st.markdown("### 下一步分析入口")
-        st.write("1. 先校验 DOI 和论文身份；2. 定位 TOS 图/表；3. 将催化剂—时间—性能值绑定；4. 再进入首页的长期表现分析。")
+        st.write("1. 先校验 DOI 和论文身份；2. 定位 TOS 图/表；3. 将催化剂—时间—性能值绑定；4. 再进入首页的长期表现分析或 AI 智能分析。")
 
     with tabs[4]:
         graph = build_document_evidence_graph(filename, signals, st.session_state.get("document_crossref"))
         graph_dict = graph.to_dict()
+        st.session_state["document_evidence_graph"] = graph_dict
         node_rows = []
         for node in graph_dict["nodes"]:
             node_rows.append(
@@ -118,13 +120,8 @@ if text.strip():
                 }
             )
         st.dataframe(pd.DataFrame(node_rows), use_container_width=True, hide_index=True)
-        st.caption("证据图谱用于保存“资料 → 条件/数值 → 外部元数据”的关系，后续会继续连接分析结论与推荐。")
-        st.download_button(
-            "下载证据图谱 JSON",
-            data=json.dumps(graph_dict, ensure_ascii=False, indent=2),
-            file_name="证据图谱.json",
-            mime="application/json",
-        )
+        st.caption("证据图谱保存“资料 → 条件/候选数值 → 外部元数据”的关系，并可作为 AI Analyst 的输入。")
+        st.download_button("下载证据图谱 JSON", data=json.dumps(graph_dict, ensure_ascii=False, indent=2), file_name="证据图谱.json", mime="application/json")
 
     with tabs[5]:
         st.text_area("已提取文本", value=text[:100000], height=600, disabled=True)
