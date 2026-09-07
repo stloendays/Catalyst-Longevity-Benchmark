@@ -1,0 +1,169 @@
+name: Deploy local 2B Q4 LLM v2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/deploy-local-llm-v2.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download verified Qwen3.5 2B Q4 model on GitHub runner
+        run: |
+          set -euo pipefail
+          MODEL_URL='https://huggingface.co/openresearchtools/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true'
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
+            --output /tmp/Qwen3.5-2B-Q4_K_M.gguf "$MODEL_URL"
+          echo 'd6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58  /tmp/Qwen3.5-2B-Q4_K_M.gguf' | sha256sum -c -
+          ls -lh /tmp/Qwen3.5-2B-Q4_K_M.gguf
+
+      - name: Download official llama.cpp Ubuntu x64 runtime
+        run: |
+          set -euo pipefail
+          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
+            -o /tmp/llama-release.tar.gz \
+            'https://github.com/ggml-org/llama.cpp/releases/download/b10809/llama-b10809-bin-ubuntu-x64.tar.gz'
+          rm -rf /tmp/llama-unpack /tmp/llama-runtime
+          mkdir -p /tmp/llama-unpack /tmp/llama-runtime
+          tar -xzf /tmp/llama-release.tar.gz -C /tmp/llama-unpack
+          SERVER_BIN=$(find /tmp/llama-unpack -type f -name llama-server -print -quit)
+          test -n "$SERVER_BIN"
+          SRC_DIR=$(dirname "$SERVER_BIN")
+          cp -a "$SRC_DIR"/. /tmp/llama-runtime/
+          test -x /tmp/llama-runtime/llama-server
+          tar -C /tmp/llama-runtime -czf /tmp/llama-runtime.tar.gz .
+          /tmp/llama-runtime/llama-server --version || true
+          ls -lh /tmp/llama-runtime.tar.gz
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Prepare server directories
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          sudo systemctl stop rhocodec-llm.service 2>/dev/null || true
+          sudo mkdir -p /opt/rhocodec-llm/bin /opt/rhocodec-llm/models
+          sudo chown -R ubuntu:ubuntu /opt/rhocodec-llm
+          rm -rf /opt/rhocodec-llm/bin/*
+          rm -f /tmp/llama-runtime.tar.gz /tmp/Qwen3.5-2B-Q4_K_M.gguf
+          echo '=== PRE-TRANSFER ==='
+          df -h /
+          free -h
+          REMOTE
+
+      - name: Transfer runtime and model to Tencent server
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" \
+            /tmp/llama-runtime.tar.gz \
+            ubuntu@150.158.27.206:/tmp/llama-runtime.tar.gz
+          scp -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" \
+            /tmp/Qwen3.5-2B-Q4_K_M.gguf \
+            ubuntu@150.158.27.206:/tmp/Qwen3.5-2B-Q4_K_M.gguf
+
+      - name: Install local files and systemd service
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          tar -xzf /tmp/llama-runtime.tar.gz -C /opt/rhocodec-llm/bin
+          chmod +x /opt/rhocodec-llm/bin/llama-server
+          mv /tmp/Qwen3.5-2B-Q4_K_M.gguf /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          rm -f /tmp/llama-runtime.tar.gz
+          echo 'd6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58  /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf' | sha256sum -c -
+
+          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=RhoCodec local Qwen3.5 2B Q4 llama.cpp server
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/opt/rhocodec-llm/bin
+          Environment=HOME=/home/ubuntu
+          Environment=LD_LIBRARY_PATH=/opt/rhocodec-llm/bin
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --host 127.0.0.1 --port 18080 -c 1536 -t 4 -b 128 -ub 128 --parallel 1 --jinja --no-webui
+          Restart=on-failure
+          RestartSec=5
+          TimeoutStartSec=180
+          LimitNOFILE=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable rhocodec-llm.service
+          sudo systemctl restart rhocodec-llm.service
+          REMOTE
+
+      - name: Wait for local API and smoke test
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/rhocodec-models.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'Local model API failed to become ready.'
+            sudo systemctl status rhocodec-llm.service --no-pager -l || true
+            sudo journalctl -u rhocodec-llm.service -n 160 --no-pager || true
+            exit 1
+          fi
+
+          MODEL_ID=$(python3 - <<'PY'
+          import json
+          with open('/tmp/rhocodec-models.json') as f:
+              d=json.load(f)
+          print(d['data'][0]['id'])
+          PY
+          )
+          python3 - "$MODEL_ID" > /tmp/rhocodec-request.json <<'PY'
+          import json,sys
+          print(json.dumps({
+              'model': sys.argv[1],
+              'messages': [{'role':'user','content':'Reply briefly with the words RhoCodec local model is running.'}],
+              'max_tokens': 32,
+              'temperature': 0
+          }))
+          PY
+          curl -fsS --max-time 180 http://127.0.0.1:18080/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/rhocodec-request.json \
+            | tee /tmp/rhocodec-smoke.json
+          echo
+          echo '=== SERVICE ==='
+          sudo systemctl status rhocodec-llm.service --no-pager -l | head -30 || true
+          echo '=== RESOURCES ==='
+          free -h
+          df -h /
+          echo '=== PORTS (existing services preserved) ==='
+          sudo ss -lntp | grep -E '(:18080|:8080|:11931|:18789)' || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
