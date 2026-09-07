@@ -1,29 +1,36 @@
 # 催化剂智能分析平台
 
-**Catalyst Intelligence Workspace** 是一个以中文界面为优先的催化剂长期表现与资料分析工具。
+**Catalyst Intelligence Workspace** 是一个中文版优先的催化剂资料、长期表现与智能决策分析工具。
 
-目标不是要求用户先把所有资料整理成科研标准数据，而是让用户可以直接提供：
+用户不需要先把所有资料整理成科研标准格式。平台可以接收：
 
 - CSV / Excel 实验数据；
-- PDF 论文或报告；
-- 文本资料；
+- PDF 论文、报告和文本资料；
 - DOI；
-- 外部数据库检索条件；
+- 外部数据库检索结果；
+- 用户提出的催化剂选择或下一步实验问题。
 
-然后由系统完成资料识别、证据整理、长期表现分析、排名变化判断和下一步建议。
+系统将这些信息组织成可追溯证据，再进行长期表现分析、条件可比性检查、AI 综合和独立 Evidence Critic 审查。
 
-## 现在可以做什么
+## 用户工作流
 
-### 1. 长期表现分析
+```text
+用户数据 / PDF / DOI / 外部数据库
+              ↓
+        Evidence Packet
+              ↓
+实验条件守门 + 长期表现分析
+              ↓
+          AI Analyst
+              ↓
+       Evidence Critic
+              ↓
+通过 / 需复核 / 阻止
+              ↓
+中文结论 + 风险 + 下一步建议
+```
 
-上传催化剂随时间变化的数据后，可以直接回答：
-
-- 谁的初始性能最高？
-- 谁保持得更久？
-- 初始领先者后来有没有被反超？
-- 95%、90%、80% 保持阈值是否真的被测试到？
-- 当前测试时长是否足够支持寿命结论？
-- 下一次实验应该优先增加哪些时间点？
+## 1. 长期表现分析
 
 最简单的数据只需要三列：
 
@@ -31,184 +38,177 @@
 |---|---:|---:|
 | Catalyst A | 0 | 82 |
 | Catalyst A | 20 | 70 |
-| Catalyst A | 50 | 58 |
 | Catalyst B | 0 | 76 |
 | Catalyst B | 20 | 72 |
-| Catalyst B | 50 | 69 |
 
-### 2. 资料分析
+系统可以回答：谁起点高、谁保持得更久、是否发生反超、t95/t90/t80 是否真的被测试到，以及下一次最值得增加哪些时间点。
 
-左侧进入 **资料分析** 页面，可以上传：
+如果提供 **温度、GHSV/WHSV、压力、进料比、反应类型**，系统会先检查实验条件是否可比。存在明确条件不匹配时，相关催化剂对的直接排名会被自动禁用。
 
-- PDF；
-- TXT；
-- Markdown；
-- CSV / TSV 文本资料。
+## 2. 资料分析
 
-系统会保守提取：
+`资料分析` 页面支持 PDF / TXT / Markdown / CSV / TSV。
+
+当前保守提取：
 
 - DOI；
 - 温度；
 - 测试时长；
 - CH4 转化率候选值；
 - stability / deactivation / coking / sintering 等证据词；
-- 可定位的原文证据片段。
+- 原文证据片段。
 
-候选数值不会自动进入排名。只有在绑定到具体 **催化剂 + 时间 + 条件** 后，才可以进入长期表现分析。
+孤立的数值不会直接变成实验事实。候选值只有绑定到具体 **催化剂 + 时间 + 条件** 后，才允许进入排名计算。
 
-### 3. 外部数据库检索
+资料页生成的 Evidence Graph 会传入 AI 工作区，但保持 `candidate_requires_condition_binding` 等证据状态。
 
-当前已经接入：
+## 3. 外部数据库 Hub
 
-- **Crossref**：DOI 校验、论文标题、作者、期刊、年份等文献元数据；
-- **Catalysis-Hub**：计算催化反应能、活化能和体系信息。
+当前已接入五类来源：
 
-外部数据库只是补充证据层，不会替代用户自己的实验数据或论文中的 TOS 数据。
+- **Crossref**：DOI、标题、作者、期刊、年份等论文身份元数据；
+- **Semantic Scholar**：相关论文、引用/参考数量、摘要和开放获取入口；
+- **Catalysis-Hub**：计算催化反应能、活化能和化学组成；
+- **Materials Project**：材料结构与性质背景，如相稳定性、energy above hull、band gap、density；
+- **PubChem**：化合物 CID、分子式、分子量、SMILES、InChI / InChIKey。
 
-后续计划继续接入：
+数据库结果可以由用户加入 **AI 证据篮**。这些结果统一标记为 `external_context`，不能自动充当催化剂长期稳定性真值。
 
-- Semantic Scholar；
-- Materials Project；
-- PubChem。
+### API Key
 
-## 智能建议能力
+- Crossref：无需 key；
+- PubChem：无需 key；
+- Semantic Scholar：可无 key 尝试，支持用户自己的 API key；
+- Materials Project：需要用户自己的 API key；
+- OpenAI AI Analyst：需要用户自己的 OpenAI API key。
 
-系统现在不只输出计算结果，还会根据现有证据给出操作建议，例如：
+密钥只从运行时界面或环境变量读取，不写入仓库、Evidence Packet 或下载报告。
 
-```text
-A 初始性能高于 B。
-B 在 20–50 h 之间反超 A。
-如果目标运行时间超过 50 h，现有观测更支持 B。
-如果需要更准确确定选择边界，建议在 35 h 左右增加观测，并在 20–50 h 之间加密测试。
-```
-
-建议引擎会主动检查：
-
-- 是否发生排名反转；
-- 是否缺少共同时间点；
-- 是否测试时间仍不足以定义寿命；
-- 是否缺少数据来源标签；
-- 是否应该增加对照样品；
-- 哪个时间区间最值得继续测试。
-
-## Evidence Graph｜证据图谱
-
-平台开始采用统一的证据链：
+支持环境变量：
 
 ```text
-用户上传资料
-    ↓
-DOI / 条件 / 数值候选 / 原文片段
-    ↓
-外部元数据校验
-    ↓
-结构化实验轨迹
-    ↓
-长期表现分析
-    ↓
-结论
-    ↓
-建议
+OPENAI_API_KEY
+OPENAI_MODEL
+SEMANTIC_SCHOLAR_API_KEY
+MP_API_KEY
 ```
 
-每一个重要结论最终都应该能够回答：
+## 4. AI Analyst + Evidence Critic
 
-> 这个结论来自哪篇资料、哪个条件、哪些观测值，以及哪些部分是计算得到的？
+AI 不是独立证据源。
 
-当前资料页已经可以下载 `证据图谱.json`。
+平台先将确定性分析结果、文档 Evidence Graph 和用户选择的外部数据库记录构造成 **Evidence Packet**，每一项都有稳定 Evidence ID。
+
+`AI Analyst` 必须：
+
+- 只依据 Evidence Packet 回答；
+- 每条主要 claim 引用 Evidence ID；
+- 不补造实验值；
+- 不把稀疏点写成精确 crossover time；
+- 不把外部材料/计算数据库直接当 longevity 证据。
+
+随后由独立的 `Evidence Critic` 检查：
+
+- 实验条件是否匹配；
+- evidence ID 是否真实存在；
+- source-observed / digitized / derived / external 是否混淆；
+- censoring 是否被错误解释成精确寿命；
+- 是否发生过度外推；
+- 关键结论是否缺证据。
+
+最终状态只有三类：
+
+```text
+approved      可作为当前证据下的辅助决策建议
+needs_review  需要修改/补证据后再用于决策
+blocked       当前证据不允许形成强决策结论
+```
+
+## 5. Evidence Graph / Evidence Packet
+
+```text
+用户资料
+ ├─ DOI
+ ├─ 实验条件
+ ├─ 数值候选
+ └─ 原文片段
+       ↓
+外部身份/背景数据库
+       ↓
+结构化 TOS 轨迹
+       ↓
+长期表现与条件审计
+       ↓
+Evidence Packet（稳定 Evidence IDs）
+       ↓
+AI Analyst → Evidence Critic
+```
+
+最终目标是让每个重要建议都能回答：
+
+> 这个结论来自哪些资料、哪些观测值、什么实验条件，以及哪些部分是模型/计算得到的？
 
 ## 安装与启动
 
-第一次使用：
-
 ```bash
 python -m pip install -r requirements-ui.txt
-```
-
-启动：
-
-```bash
 python launch.py
 ```
 
-Windows 用户也可以使用：
+Windows 也可以双击：
 
 ```text
 首次安装_Windows.bat
 启动软件_Windows.bat
 ```
 
-启动后，Streamlit 左侧会显示多个功能页面：
+左侧页面：
 
 ```text
 长期表现分析
 资料分析
 外部数据库检索
+AI 智能分析
 ```
-
-## 支持的输入列名
-
-系统兼容常见中英文列名，例如：
-
-- 催化剂：`catalyst_id`、`catalyst`、`sample`、`催化剂`、`样品`
-- 时间：`time_h`、`time`、`TOS`、`时间`、`运行时间`
-- 性能：`performance`、`value`、`conversion`、`activity`、`性能`、`转化率`、`活性`
-
-如果存在误差范围，可以额外提供 `lower / upper`。
-
-数据模板：[`examples/用户数据模板.csv`](examples/用户数据模板.csv)
 
 ## 软件结构
 
 ```text
 Catalyst-Longevity-Benchmark/
-├── app.py                              # 中文主界面：长期表现分析
+├── app.py
 ├── pages/
-│   ├── 1_资料分析.py                   # PDF/文本资料入口
-│   └── 2_外部数据库检索.py             # Crossref / Catalysis-Hub
-├── launch.py                           # 一键启动
-├── requirements-ui.txt
+│   ├── 1_资料分析.py
+│   ├── 2_外部数据库检索.py
+│   └── 3_AI智能分析.py
 ├── src/catlongevity/
-│   ├── io.py                           # 数据导入与校验
-│   ├── endpoints.py                    # 保持阈值/寿命逻辑
-│   ├── ranking.py                      # 排名与反超分析
-│   ├── analysis.py                     # 长期表现分析引擎
-│   ├── friendly.py                     # 中文结果翻译
-│   ├── advisor.py                      # 决策与下一步建议
-│   ├── documents.py                    # PDF/文本资料解析
-│   ├── external_databases.py           # 外部数据库连接器
-│   ├── evidence.py                     # Evidence Graph
-│   └── reporting.py                    # 报告生成
-├── data/                               # 研究证据数据库
-├── protocols/                          # 后台严格规则
-├── docs/                               # 用户说明与架构文档
-└── tests/                              # 自动测试
+│   ├── io.py
+│   ├── endpoints.py
+│   ├── ranking.py
+│   ├── analysis.py
+│   ├── condition_matcher.py
+│   ├── advisor.py
+│   ├── documents.py
+│   ├── evidence.py
+│   ├── external_databases.py
+│   ├── ai_analyst.py
+│   └── reporting.py
+├── data/
+├── protocols/
+├── docs/
+└── tests/
 ```
 
-## 后台保留的严谨规则
+## 后台强制规则
 
-中文版和用户友好界面不会削弱底层判断：
+用户友好界面不会削弱底层约束：
 
 - 不虚构缺失实验点；
 - 测试 100 h 不自动等于寿命 100 h；
-- 稀疏观测不会生成假的精确反超时间；
-- 不确定结果仍然标记为不确定；
-- 外部数据库结果与用户数据分层保存；
-- 文本中孤立的转化率数字必须绑定到催化剂、时间和条件后才能进入比较；
-- source-observed、digitized、external database、derived calculation 保持区分。
+- 稀疏观测不生成假的精确反超时间；
+- 条件不匹配会阻止直接排名；
+- 文档候选数字必须先绑定催化剂/时间/条件；
+- 外部数据库只作背景 enrichment；
+- source-observed、digitized、model-derived、external-context 始终分层；
+- AI 输出必须再次通过 Evidence Critic。
 
-## 当前应用重点
-
-内部研究数据目前仍以 **Ni/Al2O3-based dry reforming of methane (DRM)** 为主要案例，但软件界面本身面向更通用的“性能随时间变化”问题。
-
-最终目标是形成：
-
-```text
-资料 / 实验数据 / DOI / 外部数据库
-              ↓
-        统一证据工作区
-              ↓
-       催化剂分析引擎
-              ↓
-     结论 + 风险 + 下一步建议
-```
+内部研究数据仍以 **Ni/Al2O3-based dry reforming of methane (DRM)** 为主要验证案例，但软件工作流面向更广泛的催化剂稳定性和性能随时间变化问题。
