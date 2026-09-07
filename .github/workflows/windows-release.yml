@@ -57,13 +57,20 @@ jobs:
         shell: pwsh
         run: |
           $env:CATALYST_DESKTOP_PORT = "8765"
+          $env:CATALYST_DESKTOP_HEADLESS = "1"
+          $env:CATALYST_DESKTOP_LOG = (Join-Path $PWD "desktop-smoke.log")
           $exe = (Resolve-Path "dist\Catalyst_Intelligence_Workspace.exe").Path
           $process = Start-Process -FilePath $exe -PassThru
           $healthy = $false
           try {
-            for ($i = 0; $i -lt 90; $i++) {
+            for ($i = 0; $i -lt 120; $i++) {
               Start-Sleep -Seconds 2
               if ($process.HasExited) {
+                if (Test-Path $env:CATALYST_DESKTOP_LOG) {
+                  Write-Host "----- desktop launcher log -----"
+                  Get-Content $env:CATALYST_DESKTOP_LOG
+                  Write-Host "--------------------------------"
+                }
                 throw "Packaged executable exited before the local server became healthy. Exit code: $($process.ExitCode)"
               }
               try {
@@ -78,6 +85,11 @@ jobs:
               }
             }
             if (-not $healthy) {
+              if (Test-Path $env:CATALYST_DESKTOP_LOG) {
+                Write-Host "----- desktop launcher log -----"
+                Get-Content $env:CATALYST_DESKTOP_LOG
+                Write-Host "--------------------------------"
+              }
               throw "Packaged executable did not expose a healthy Streamlit server within the timeout."
             }
             Write-Host "Packaged executable smoke test passed."
