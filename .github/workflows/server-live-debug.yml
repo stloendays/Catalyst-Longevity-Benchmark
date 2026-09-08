@@ -12,7 +12,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 30
     steps:
       - name: Prepare key
         env:
@@ -22,17 +22,90 @@ jobs:
           printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
-      - name: Probe llama.cpp training binaries
+      - name: Build QVAC trainer and run real CPU LoRA smoke test
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
-          set -u
-          echo '=== TIME ==='; date -Is
-          echo '=== LLAMA ROOT ==='; find /opt/rhocodec-llm -maxdepth 2 -type f \( -name '*finetune*' -o -name 'llama-*' \) -printf '%p\n' 2>/dev/null | sort | head -120
-          echo '=== BIN DIR ==='; ls -lah /opt/rhocodec-llm/bin 2>/dev/null || true
-          echo '=== BUILD TOOLS ==='; cmake --version | head -1 || true; g++ --version | head -1 || true; git --version || true
-          echo '=== HOME SOURCE CANDIDATES ==='; find /home/ubuntu -maxdepth 2 -type d \( -name 'llama.cpp' -o -name '*llama*src*' \) -print 2>/dev/null || true
-          echo '=== GGUF META ==='; /opt/rhocodec-llm/bin/llama-cli -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --metadata 2>/dev/null | grep -E 'general.architecture|general.name|quantization_version|file_type' | head -20 || true
-          echo '=== SERVICE ==='; systemctl is-active rhocodec-llm.service || true
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SRC=/home/ubuntu/qvac-fabric-llm.cpp
+          BUILD="$SRC/build-cpu"
+          PIN=657fb2ec6a841f259b4d3d20861864323d5f2737
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          DATA=/tmp/local2b_lora_smoke.jsonl
+          OUT=/tmp/local2b_lora_smoke.gguf
+          LOG=/tmp/local2b_lora_smoke.log
+
+          echo '=== PRECHECK ==='
+          date -Is
+          free -h
+          df -h /
+
+          if [ ! -d "$SRC/.git" ]; then
+            rm -rf "$SRC"
+            git clone --filter=blob:none https://github.com/tetherto/qvac-fabric-llm.cpp.git "$SRC"
+          fi
+          cd "$SRC"
+          git fetch --depth 1 origin "$PIN"
+          git checkout --detach "$PIN"
+          echo "QVAC_COMMIT=$(git rev-parse HEAD)"
+
+          cmake -S . -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DLLAMA_CURL=OFF
+          cmake --build "$BUILD" --target llama-finetune-lora -j 2
+          TRAINER="$BUILD/bin/llama-finetune-lora"
+          test -x "$TRAINER"
+          "$TRAINER" --help | grep -E 'lora-rank|assistant-loss-only|num-epochs' | head -20
+
+          cat > "$DATA" <<'JSONL'
+          {"messages":[{"role":"system","content":"You are a compact local work agent."},{"role":"user","content":"Reply exactly OK."},{"role":"assistant","content":"OK"}]}
+          JSONL
+
+          rm -f "$OUT" "$LOG"
+          WAS_ACTIVE=0
+          if systemctl is-active --quiet rhocodec-llm.service; then
+            WAS_ACTIVE=1
+            sudo systemctl stop rhocodec-llm.service
+          fi
+          restore_service() {
+            if [ "$WAS_ACTIVE" -eq 1 ]; then
+              sudo systemctl start rhocodec-llm.service || true
+            fi
+          }
+          trap restore_service EXIT
+
+          echo '=== TRAIN START ==='
+          free -h
+          set +e
+          timeout 900 "$TRAINER" \
+            -m "$MODEL" \
+            -f "$DATA" \
+            --assistant-loss-only \
+            --num-epochs 1 \
+            --lora-rank 4 \
+            --lora-alpha 8 \
+            --lora-modules attn_q,attn_v \
+            --lora-seed 20260908 \
+            --learning-rate 1e-5 \
+            --weight-decay 0 \
+            --output-adapter "$OUT" \
+            -c 128 -b 32 -ub 32 -ngl 0 -fa off \
+            2>&1 | tee "$LOG"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "TRAIN_RC=$RC"
+          echo '=== TRAIN END ==='
+          tail -80 "$LOG" || true
+          ls -lh "$OUT" 2>/dev/null || true
+          free -h
+
+          restore_service
+          WAS_ACTIVE=0
+          trap - EXIT
+          echo "SERVICE=$(systemctl is-active rhocodec-llm.service || true)"
+
+          if [ "$RC" -ne 0 ]; then
+            exit "$RC"
+          fi
+          test -s "$OUT"
+          echo 'SERVER_NATIVE_LORA_SMOKE=PASS'
           REMOTE
       - name: Remove key
         if: always()
