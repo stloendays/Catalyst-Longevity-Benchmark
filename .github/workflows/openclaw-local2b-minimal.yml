@@ -1,0 +1,69 @@
+name: Configure minimal Local2B agent
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-local2b-minimal.yml
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Configure Local2B agent
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          WORKSPACE='/home/ubuntu/.openclaw/workspace-local2b'
+
+          "$OC" --version | grep '2026.9.2'
+          mkdir -p "$WORKSPACE"
+          printf '%s\n' 'Answer lightweight text requests directly and concisely.' > "$WORKSPACE/AGENTS.md"
+
+          ENTRY='{"name":"Local 2B","workspace":"/home/ubuntu/.openclaw/workspace-local2b","model":"llama-cpp/qwen3.5-2b-q4","skills":[],"thinkingDefault":"off","experimental":{"localModelLean":true},"tools":{"profile":"minimal"}}'
+          "$OC" config set agents.entries.local2b "$ENTRY" --strict-json --dry-run
+          "$OC" config set agents.entries.local2b "$ENTRY" --strict-json
+          "$OC" config validate
+          "$OC" gateway restart --wait 30s --json
+          sleep 5
+          "$OC" config get agents.entries.local2b --json
+          "$OC" models status --agent local2b --json | head -c 6000
+          echo
+          REMOTE
+
+      - name: Test Local2B agent
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          "$OC" agent --agent local2b \
+            --session-key local2b-smoke-v1 \
+            --message 'Reply exactly with: OPENCLAW_LOCAL2B_AGENT_OK' \
+            --thinking off \
+            --timeout 240 \
+            --json > /tmp/local2b-agent.json
+          cat /tmp/local2b-agent.json
+          grep -q 'OPENCLAW_LOCAL2B_AGENT_OK' /tmp/local2b-agent.json
+          echo 'LOCAL2B_AGENT_TURN=PASS'
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
