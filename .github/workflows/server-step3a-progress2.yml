@@ -38,3 +38,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
+# progress probe 3
