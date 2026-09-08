@@ -30,7 +30,7 @@ jobs:
           replacement = r'''# Replace the current analysis condition state block with four semantic states.
           condition_start = text.index("    if (conditionStatusLabel_) {", text.index("void MainWindow::refreshAnalysisViews() {"))
           condition_end = text.index("    if (conditionMessageLabel_) {", condition_start)
-          new_condition = '''    if (conditionStatusLabel_) {
+          new_condition = r"""    if (conditionStatusLabel_) {
               QString conditionStyle = QStringLiteral("statusNeutral");
               if (analysis_.conditionAudit.status == ConditionAuditStatus::MatchedOnProvidedConditions) {
                   conditionStyle = QStringLiteral("statusGood");
@@ -41,7 +41,7 @@ jobs:
               }
               setStatusChip(conditionStatusLabel_, ConditionGuard::statusText(analysis_.conditionAudit.status), conditionStyle);
           }
-          '''
+          """
           text = text[:condition_start] + new_condition + text[condition_end:]
 
           '''
