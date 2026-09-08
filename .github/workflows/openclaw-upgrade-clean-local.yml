@@ -1,0 +1,248 @@
+name: Upgrade OpenClaw and connect local Qwen
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-upgrade-clean-local.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-upgrade-clean-local
+  cancel-in-progress: true
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Backup and upgrade ubuntu OpenClaw
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          BACKUP_ROOT='/home/ubuntu/openclaw-backups'
+          STAMP=$(date '+%Y%m%d-%H%M%S')
+          BACKUP="$BACKUP_ROOT/$STAMP"
+          mkdir -p "$BACKUP"
+
+          echo '=== BEFORE ==='
+          "$OC" --version
+          node --version
+          npm --version
+          cp -a /home/ubuntu/.openclaw "$BACKUP/ubuntu-openclaw-state"
+          if sudo test -d /root/.openclaw; then
+            sudo tar -C /root -czf "$BACKUP/root-openclaw-state.tar.gz" .openclaw
+            sudo chown ubuntu:ubuntu "$BACKUP/root-openclaw-state.tar.gz"
+          fi
+          echo "Backup: $BACKUP"
+
+          systemctl --user stop openclaw-gateway.service || true
+          npm install -g openclaw@2026.9.2 --prefix /home/ubuntu/.npm-global
+          hash -r
+          echo '=== AFTER UPGRADE ==='
+          "$OC" --version
+          "$OC" config validate
+          REMOTE
+
+      - name: Remove QQ WeChat and WeCom integrations
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+
+          echo '=== EXTERNAL PLUGINS BEFORE CLEANUP ==='
+          "$OC" plugins list 2>&1 | grep -Ei 'qq|weixin|wechat|wecom' || true
+
+          for id in openclaw-qqbot qqbot openclaw-weixin weixin wechat wecom; do
+            "$OC" plugins uninstall "$id" --force >/tmp/uninstall-"$id".log 2>&1 || true
+            cat /tmp/uninstall-"$id".log || true
+          done
+
+          python3 - <<'PY'
+          import json, os
+          paths=['/home/ubuntu/.openclaw/openclaw.json','/root/.openclaw/openclaw.json']
+          channel_keys={'qqbot','openclaw-qqbot','openclaw-weixin','weixin','wechat','wecom'}
+          plugin_terms=('qqbot','qq','weixin','wechat','wecom')
+          for path in paths:
+              if not os.path.exists(path):
+                  continue
+              with open(path, encoding='utf-8') as f:
+                  data=json.load(f)
+              changed=False
+              channels=data.get('channels')
+              if isinstance(channels, dict):
+                  for key in list(channels):
+                      if key.lower() in channel_keys or any(t in key.lower() for t in plugin_terms):
+                          channels.pop(key, None); changed=True
+              plugins=data.get('plugins')
+              if isinstance(plugins, dict):
+                  entries=plugins.get('entries')
+                  if isinstance(entries, dict):
+                      for key in list(entries):
+                          if any(t in key.lower() for t in plugin_terms):
+                              entries.pop(key, None); changed=True
+                  load=plugins.get('load')
+                  if isinstance(load, dict) and isinstance(load.get('paths'), list):
+                      new=[p for p in load['paths'] if not any(t in str(p).lower() for t in plugin_terms)]
+                      if new != load['paths']:
+                          load['paths']=new; changed=True
+                  for list_key in ('allow','deny'):
+                      if isinstance(plugins.get(list_key), list):
+                          new=[x for x in plugins[list_key] if not any(t in str(x).lower() for t in plugin_terms)]
+                          if new != plugins[list_key]:
+                              plugins[list_key]=new; changed=True
+              if changed:
+                  tmp=path+'.cleanup.tmp'
+                  with open(tmp,'w',encoding='utf-8') as f:
+                      json.dump(data,f,ensure_ascii=False,indent=2)
+                      f.write('\n')
+                  if path.startswith('/root/'):
+                      os.chmod(tmp,0o600)
+                  os.replace(tmp,path)
+                  print('cleaned',path)
+          PY
+
+          sudo find /home/ubuntu/.openclaw/extensions /root/.openclaw/extensions -mindepth 1 -maxdepth 1 \
+            \( -iname '*qq*' -o -iname '*weixin*' -o -iname '*wechat*' -o -iname '*wecom*' \) \
+            -print -exec rm -rf {} + 2>/dev/null || true
+
+          echo '=== STOP LEGACY ROOT GATEWAY ==='
+          for pid in $(pgrep -u root -f '^openclaw-gateway$' || true); do
+            sudo kill "$pid" || true
+          done
+          sleep 2
+          for pid in $(pgrep -u root -f '^openclaw-gateway$' || true); do
+            sudo kill -9 "$pid" || true
+          done
+
+          "$OC" config validate
+          echo '=== MATCHING EXTENSION DIRECTORIES AFTER CLEANUP ==='
+          sudo find /home/ubuntu/.openclaw/extensions /root/.openclaw/extensions -mindepth 1 -maxdepth 1 \
+            \( -iname '*qq*' -o -iname '*weixin*' -o -iname '*wechat*' -o -iname '*wecom*' \) -print 2>/dev/null || true
+          REMOTE
+
+      - name: Install official llama cpp provider and configure existing server
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+
+          sudo systemctl is-active --quiet rhocodec-llm.service
+          curl -fsS --max-time 10 http://127.0.0.1:18080/v1/models >/tmp/llama-models.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/llama-models.json'))
+          rows=d.get('data') or []
+          assert rows, d
+          row=rows[0]
+          print('llama-server model:', row.get('id'))
+          print('llama-server context:', (row.get('meta') or {}).get('n_ctx'))
+          assert row.get('id') == 'qwen3.5-2b-q4', d
+          assert int((row.get('meta') or {}).get('n_ctx') or 0) >= 8192, d
+          PY
+
+          "$OC" plugins install @openclaw/llama-cpp-provider --force
+
+          "$OC" config unset models.providers.rhocodec_local >/dev/null 2>&1 || true
+          "$OC" config unset 'agents.defaults.models["rhocodec_local/qwen3.5-2b-q4"]' >/dev/null 2>&1 || true
+
+          PROVIDER='{"baseUrl":"http://127.0.0.1:18080/v1","api":"openai-completions","timeoutSeconds":180,"request":{"allowPrivateNetwork":true},"models":[{"id":"qwen3.5-2b-q4","name":"Local Qwen3.5 2B Q4","reasoning":false,"input":["text"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":8192,"maxTokens":512,"compat":{"supportsTools":false,"toolSchemaProfile":"llamacpp"}}]}'
+
+          "$OC" config set models.mode '"merge"' --strict-json
+          "$OC" config set models.providers.llama-cpp "$PROVIDER" --strict-json
+          "$OC" config set 'agents.defaults.models["llama-cpp/qwen3.5-2b-q4"]' '{"alias":"Local2B"}' --strict-json
+          "$OC" config validate
+
+          systemctl --user restart openclaw-gateway.service
+          sleep 7
+          systemctl --user is-active --quiet openclaw-gateway.service
+          echo '=== LLAMA CPP PROVIDER ==='
+          "$OC" plugins inspect llama-cpp --runtime --json 2>/dev/null | head -c 5000 || "$OC" plugins list | grep -i llama || true
+          echo
+          "$OC" models list --provider llama-cpp || true
+          REMOTE
+
+      - name: Verify a real OpenClaw turn on Local2B
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          ORIGINAL=$(python3 - <<'PY'
+          import json
+          d=json.load(open('/home/ubuntu/.openclaw/openclaw.json'))
+          print((((d.get('agents') or {}).get('defaults') or {}).get('model') or {}).get('primary') or '')
+          PY
+          )
+          echo "Original primary: $ORIGINAL"
+
+          restore_primary() {
+            if [ -n "$ORIGINAL" ]; then
+              "$OC" config set agents.defaults.model.primary "\"$ORIGINAL\"" --strict-json >/dev/null 2>&1 || true
+              systemctl --user restart openclaw-gateway.service >/dev/null 2>&1 || true
+            fi
+          }
+          trap restore_primary EXIT
+
+          "$OC" config set agents.defaults.model.primary '"llama-cpp/qwen3.5-2b-q4"' --strict-json
+          systemctl --user restart openclaw-gateway.service
+          sleep 6
+
+          "$OC" agent --help 2>&1 | head -120
+          "$OC" agent \
+            --session-id local2b-upgrade-smoke \
+            --message 'Reply exactly with: OPENCLAW_LOCAL_2B_OK' \
+            --thinking off \
+            --timeout 180 \
+            --json > /tmp/local2b-agent.json
+          cat /tmp/local2b-agent.json
+          grep -q 'OPENCLAW_LOCAL_2B_OK' /tmp/local2b-agent.json
+          echo 'OPENCLAW_LOCAL_2B=PASS'
+          REMOTE
+
+      - name: Final health report
+        if: always()
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          echo '=== VERSION ==='
+          "$OC" --version 2>&1 || true
+          echo '=== SERVICES ==='
+          systemctl --user status openclaw-gateway.service --no-pager -l | head -35 || true
+          sudo systemctl status rhocodec-llm.service --no-pager -l | head -30 || true
+          echo '=== PORTS ==='
+          sudo ss -lntp | grep -E '(:18080|:11931|:18789)' || true
+          echo '=== QQ WECHAT WECOM RESIDUE ==='
+          "$OC" plugins list 2>&1 | grep -Ei 'qq|weixin|wechat|wecom' || true
+          echo '=== LOCAL MODEL ==='
+          "$OC" models list --provider llama-cpp 2>&1 || true
+          echo '=== RESOURCES ==='
+          free -h
+          df -h /
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
