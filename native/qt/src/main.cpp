@@ -620,7 +620,6 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
 
 void applyWindowPolish(catalyst::MainWindow& window) {
     window.setWindowTitle(QStringLiteral("催化剂寿命研究工作台"));
-    window.setStyleSheet(polishedStyleSheet());
     window.statusBar()->setSizeGripEnabled(false);
 
     if (auto* sidebar = window.findChild<QFrame*>(QStringLiteral("sidebar"))) {

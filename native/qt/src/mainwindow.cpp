@@ -55,6 +55,10 @@ QString gptMonochromeStyle() {
         #sourcePath { color:#27272A; font-weight:650; }
         #metricCard { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; min-height:70px; }
         #metricCard:hover { background:#FCFCFC; border-color:#CFCFD2; }
+        #decisionCard { background:#FFFFFF; border:1px solid #E4E4E7; border-radius:14px; min-height:105px; }
+        #decisionCard:hover { background:#FCFCFC; border-color:#B8B8BE; }
+        #decisionTitle { color:#52525B; font-size:12px; font-weight:650; }
+        #decisionDetail { color:#71717A; font-size:12px; }
         #panel, #gptSurface, #evidenceSurface, #aiSurface { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; }
         #panel:hover, #gptSurface:hover, #evidenceSurface:hover, #aiSurface:hover { background:#FEFEFE; border-color:#CFCFD2; }
         #gptSurface { border-color:#DEDEE1; }
@@ -126,6 +130,44 @@ QFrame* metricCard(const QString& title, QLabel** valueLabel) {
     layout->addWidget(value);
     *valueLabel = value;
     return card;
+}
+
+QFrame* decisionCard(const QString& title, QLabel** statusLabel, QLabel** detailLabel) {
+    auto* card = new QFrame;
+    card->setObjectName(QStringLiteral("decisionCard"));
+    card->setAttribute(Qt::WA_Hover, true);
+    card->setMouseTracking(true);
+    auto* layout = new QVBoxLayout(card);
+    layout->setContentsMargins(16, 14, 16, 14);
+    layout->setSpacing(7);
+
+    auto* titleLabel = new QLabel(title);
+    titleLabel->setObjectName(QStringLiteral("decisionTitle"));
+    auto* state = new QLabel(QStringLiteral("等待数据"));
+    state->setObjectName(QStringLiteral("statusNeutral"));
+    auto* detail = new QLabel(QStringLiteral("尚未形成可审计判断。"));
+    detail->setWordWrap(true);
+    detail->setObjectName(QStringLiteral("decisionDetail"));
+
+    layout->addWidget(titleLabel);
+    layout->addWidget(state, 0, Qt::AlignLeft);
+    layout->addWidget(detail);
+    layout->addStretch();
+    *statusLabel = state;
+    *detailLabel = detail;
+    return card;
+}
+
+void setStatusChip(QLabel* label, const QString& text, const QString& objectName) {
+    if (!label) return;
+    label->setText(text);
+    if (label->objectName() != objectName) {
+        label->setObjectName(objectName);
+        if (label->style()) {
+            label->style()->unpolish(label);
+            label->style()->polish(label);
+        }
+    }
 }
 
 QTableWidgetItem* readOnlyItem(const QString& text) {
@@ -213,6 +255,7 @@ void MainWindow::buildUi() {
     connect(evidencePage_, &EvidencePage::evidenceChanged, this, [this]() {
         projectDirty_ = true;
         updateProjectUi();
+        refreshDecisionOverview();
         setStatus(QStringLiteral("证据候选已更新；保存项目可持久化当前绑定与复核状态。"));
     });
 
@@ -343,6 +386,23 @@ QWidget* MainWindow::buildOverviewPage() {
     top->addWidget(exportButton);
     layout->addLayout(top);
 
+    auto* decisionTop = new QHBoxLayout;
+    auto* decisionHeading = new QLabel(QStringLiteral("决策状态  ·  Decision readiness"));
+    decisionHeading->setObjectName(QStringLiteral("sectionTitle"));
+    decisionTop->addWidget(decisionHeading);
+    decisionTop->addStretch();
+    decisionTop->addWidget(muted(QStringLiteral("先判断能不能比，再看谁领先。状态色只表达证据就绪度，不表达催化剂优劣。")));
+    layout->addLayout(decisionTop);
+
+    auto* decisions = new QGridLayout;
+    decisions->setHorizontalSpacing(12);
+    decisions->setVerticalSpacing(12);
+    decisions->addWidget(decisionCard(QStringLiteral("实验条件可比性"), &decisionComparability_, &decisionComparabilityDetail_), 0, 0);
+    decisions->addWidget(decisionCard(QStringLiteral("共同时间领先者"), &decisionLeader_, &decisionLeaderDetail_), 0, 1);
+    decisions->addWidget(decisionCard(QStringLiteral("T90 是否测到"), &decisionT90_, &decisionT90Detail_), 0, 2);
+    decisions->addWidget(decisionCard(QStringLiteral("证据包就绪度"), &decisionEvidence_, &decisionEvidenceDetail_), 0, 3);
+    layout->addLayout(decisions);
+
     auto* metrics = new QGridLayout;
     metrics->setHorizontalSpacing(12);
     metrics->addWidget(metricCard(QStringLiteral("催化剂"), &metricCatalysts_), 0, 0);
@@ -356,10 +416,15 @@ QWidget* MainWindow::buildOverviewPage() {
     chartFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* chartLayout = new QVBoxLayout(chartFrame);
     chartLayout->setContentsMargins(18, 16, 18, 16);
+    auto* chartHead = new QHBoxLayout;
     auto* chartTitle = new QLabel(QStringLiteral("长期性能轨迹  ·  Long-term performance"));
     chartTitle->setObjectName(QStringLiteral("sectionTitle"));
+    auto* chartHint = muted(QStringLiteral("悬浮查看精确点 · 单击数据点聚焦曲线 · 再次单击取消"));
+    chartHead->addWidget(chartTitle);
+    chartHead->addStretch();
+    chartHead->addWidget(chartHint);
     chart_ = new ChartWidget;
-    chartLayout->addWidget(chartTitle);
+    chartLayout->addLayout(chartHead);
     chartLayout->addWidget(chart_, 1);
     layout->addWidget(chartFrame, 1);
 
@@ -484,11 +549,12 @@ QWidget* MainWindow::buildAiPage() {
     readinessLayout->setSpacing(14);
     auto* readinessTitle = new QLabel(QStringLiteral("证据就绪度"));
     readinessTitle->setObjectName(QStringLiteral("sectionTitle"));
-    auto* readinessState = new QLabel(QStringLiteral("本地证据链已启用"));
-    readinessState->setObjectName(QStringLiteral("statusGood"));
+    aiEvidenceDetail_ = muted(QStringLiteral("实验数据、资料候选与人工复核状态保持分层。"));
+    aiEvidenceStatus_ = new QLabel(QStringLiteral("等待证据"));
+    aiEvidenceStatus_->setObjectName(QStringLiteral("statusNeutral"));
     readinessLayout->addWidget(readinessTitle);
-    readinessLayout->addWidget(muted(QStringLiteral("实验数据、资料候选与人工复核状态保持分层。")), 1);
-    readinessLayout->addWidget(readinessState);
+    readinessLayout->addWidget(aiEvidenceDetail_, 1);
+    readinessLayout->addWidget(aiEvidenceStatus_);
     layout->addWidget(readiness);
 
     auto* stages = new QGridLayout;
@@ -518,6 +584,7 @@ QWidget* MainWindow::buildAiPage() {
         title->setObjectName(QStringLiteral("sectionTitle"));
         auto* state = new QLabel(states[i]);
         state->setObjectName(i == 0 || i == 3 ? QStringLiteral("statusNeutral") : QStringLiteral("statusWarn"));
+        if (i == 0) aiPacketStageStatus_ = state;
         cardLayout->addWidget(title);
         cardLayout->addWidget(muted(descriptions[i]));
         cardLayout->addStretch();
@@ -563,33 +630,7 @@ QWidget* MainWindow::buildSettingsPage() {
 }
 
 void MainWindow::applyTheme() {
-    setStyleSheet(QStringLiteral(R"(
-        QMainWindow, QWidget { background: #F4F6F8; color: #17202A; font-family: "Microsoft YaHei UI"; font-size: 13px; }
-        QStatusBar { background: #FFFFFF; border-top: 1px solid #E5E7EB; }
-        #sidebar { background: #111827; }
-        #brand { color: #FFFFFF; font-size: 18px; font-weight: 700; letter-spacing: 1px; }
-        #sidebarFoot { color: #9CA3AF; font-size: 11px; }
-        #navButton { color: #D1D5DB; background: transparent; border: none; border-radius: 8px; padding: 11px 13px; text-align: left; font-weight: 500; }
-        #navButton:hover { background: #1F2937; color: #FFFFFF; }
-        #navButton:checked { background: #2563EB; color: #FFFFFF; }
-        #pageHeading { color: #111827; }
-        #mutedText { color: #6B7280; }
-        #metricCard, #panel { background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 10px; }
-        #infoPanel { background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 10px; }
-        #metricTitle { color: #6B7280; font-size: 12px; }
-        #metricValue { color: #111827; font-size: 19px; font-weight: 700; }
-        #sectionTitle { color: #111827; font-size: 15px; font-weight: 700; }
-        #sourcePath { color: #1D4ED8; }
-        #guardStatus { font-size: 15px; font-weight: 700; padding: 3px 0; }
-        #primaryButton { background: #2563EB; color: white; border: none; border-radius: 8px; padding: 10px 17px; font-weight: 600; }
-        #primaryButton:hover { background: #1D4ED8; }
-        #secondaryButton { background: #FFFFFF; color: #374151; border: 1px solid #D1D5DB; border-radius: 8px; padding: 10px 17px; font-weight: 600; }
-        #secondaryButton:hover { background: #F9FAFB; }
-        QTableWidget { background: #FFFFFF; alternate-background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; gridline-color: #EEF0F2; }
-        QHeaderView::section { background: #F3F4F6; color: #374151; border: none; border-bottom: 1px solid #E5E7EB; padding: 8px; font-weight: 600; }
-        QTableWidget::item { padding: 6px; }
-        QTableWidget::item:selected { background: #DBEAFE; color: #111827; }
-    )"));
+    setStyleSheet(gptMonochromeStyle());
 }
 
 void MainWindow::newProject() {
@@ -834,14 +875,16 @@ void MainWindow::refreshAnalysisViews() {
     if (chart_) chart_->setRecords(records_);
 
     if (conditionStatusLabel_) {
-        conditionStatusLabel_->setText(ConditionGuard::statusText(analysis_.conditionAudit.status));
-        conditionStatusLabel_->setStyleSheet(QString());
-        conditionStatusLabel_->setObjectName(analysis_.conditionAudit.blocksDirectRanking()
-            ? QStringLiteral("statusBad")
-            : QStringLiteral("statusGood"));
-        conditionStatusLabel_->style()->unpolish(conditionStatusLabel_);
-        conditionStatusLabel_->style()->polish(conditionStatusLabel_);
+    QString conditionStyle = QStringLiteral("statusNeutral");
+    if (analysis_.conditionAudit.status == ConditionAuditStatus::MatchedOnProvidedConditions) {
+        conditionStyle = QStringLiteral("statusGood");
+    } else if (analysis_.conditionAudit.status == ConditionAuditStatus::ConditionsNotProvided) {
+        conditionStyle = QStringLiteral("statusWarn");
+    } else if (analysis_.conditionAudit.blocksDirectRanking()) {
+        conditionStyle = QStringLiteral("statusBad");
     }
+    setStatusChip(conditionStatusLabel_, ConditionGuard::statusText(analysis_.conditionAudit.status), conditionStyle);
+}
     if (conditionMessageLabel_) {
         conditionMessageLabel_->setText(analysis_.conditionAudit.message.isEmpty()
             ? QStringLiteral("尚未提供可审计数据。")
@@ -876,6 +919,81 @@ void MainWindow::refreshAnalysisViews() {
         thresholdTable_->setItem(row, 4, readOnlyItem(AnalysisEngine::thresholdText(summary.t80)));
         thresholdTable_->setItem(row, 5, readOnlyItem(QString::number(summary.initialPerformance, 'g', 8)));
         thresholdTable_->setItem(row, 6, readOnlyItem(QString::number(summary.latestPerformance, 'g', 8)));
+    }
+    refreshDecisionOverview();
+}
+
+void MainWindow::refreshDecisionOverview() {
+    if (!decisionComparability_) return;
+
+    if (analysis_.totalObservations <= 0) {
+        setStatusChip(decisionComparability_, QStringLiteral("等待数据"), QStringLiteral("statusNeutral"));
+        decisionComparabilityDetail_->setText(QStringLiteral("导入实验数据后检查温度、空速、压力和进料条件。"));
+    } else if (analysis_.conditionAudit.blocksDirectRanking()) {
+        setStatusChip(decisionComparability_, QStringLiteral("禁止直接排名"), QStringLiteral("statusBad"));
+        decisionComparabilityDetail_->setText(QStringLiteral("检测到明确条件错配；需要先处理条件差异。"));
+    } else if (analysis_.conditionAudit.status == ConditionAuditStatus::MatchedOnProvidedConditions) {
+        setStatusChip(decisionComparability_, QStringLiteral("允许直接比较"), QStringLiteral("statusGood"));
+        decisionComparabilityDetail_->setText(QStringLiteral("已提供的实验条件一致，可继续查看共同时间表现。"));
+    } else {
+        setStatusChip(decisionComparability_, QStringLiteral("条件信息不足"), QStringLiteral("statusWarn"));
+        decisionComparabilityDetail_->setText(QStringLiteral("未发现明确冲突，但条件字段不足以形成强可比性结论。"));
+    }
+
+    if (analysis_.totalObservations <= 0) {
+        setStatusChip(decisionLeader_, QStringLiteral("等待分析"), QStringLiteral("statusNeutral"));
+        decisionLeaderDetail_->setText(QStringLiteral("领先者只在共同可比时间点上计算。"));
+    } else if (analysis_.conditionAudit.blocksDirectRanking()) {
+        setStatusChip(decisionLeader_, QStringLiteral("排名已阻止"), QStringLiteral("statusBad"));
+        decisionLeaderDetail_->setText(QStringLiteral("条件守门优先于性能排序。"));
+    } else if (analysis_.latestSharedTimeHours.has_value() && !analysis_.latestSharedLeader.isEmpty()) {
+        setStatusChip(decisionLeader_, analysis_.latestSharedLeader, QStringLiteral("statusGood"));
+        decisionLeaderDetail_->setText(QStringLiteral("共同时间 %1 h；此状态不外推到未观测时间。")
+            .arg(QString::number(*analysis_.latestSharedTimeHours, 'g', 8)));
+    } else {
+        setStatusChip(decisionLeader_, QStringLiteral("暂无共同时间点"), QStringLiteral("statusWarn"));
+        decisionLeaderDetail_->setText(QStringLiteral("当前轨迹无法在同一观测时间形成直接领先判断。"));
+    }
+
+    const int totalCatalysts = analysis_.catalysts.size();
+    int t90Touched = 0;
+    for (const auto& summary : analysis_.catalysts) {
+        if (summary.t90.status != ThresholdStatus::RightCensored) ++t90Touched;
+    }
+    if (totalCatalysts == 0) {
+        setStatusChip(decisionT90_, QStringLiteral("等待数据"), QStringLiteral("statusNeutral"));
+        decisionT90Detail_->setText(QStringLiteral("T90 保留左删失、区间删失与右删失语义。"));
+    } else if (t90Touched == totalCatalysts) {
+        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已触及").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusGood"));
+        decisionT90Detail_->setText(QStringLiteral("所有催化剂均已观测到 T90 阈值通过区间。"));
+    } else if (t90Touched > 0) {
+        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已触及").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusWarn"));
+        decisionT90Detail_->setText(QStringLiteral("%1 个仍为右删失：测试结束时尚未跌破 90%。").arg(totalCatalysts - t90Touched));
+    } else {
+        setStatusChip(decisionT90_, QStringLiteral("尚未触及 T90"), QStringLiteral("statusWarn"));
+        decisionT90Detail_->setText(QStringLiteral("全部轨迹仍为右删失；这表示当前测试只给出寿命下界。"));
+    }
+
+    if (!evidencePage_) return;
+    const EvidencePacket packet = evidencePage_->evidencePacket();
+    if (packet.readyForAi) {
+        setStatusChip(decisionEvidence_, QStringLiteral("可进入 AI · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        decisionEvidenceDetail_->setText(QStringLiteral("另有 %1 条尚未满足证据门槛。").arg(packet.pendingItems));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("证据包可用 · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("可审计 · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("已形成受控 Evidence Packet；AI 只能读取通过人工条件复核的上下文。"));
+    } else if (packet.pendingItems > 0) {
+        setStatusChip(decisionEvidence_, QStringLiteral("待复核 · %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
+        decisionEvidenceDetail_->setText(QStringLiteral("完成催化剂、时间点与条件复核后才能进入 AI。"));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("待复核 · %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("尚未就绪"), QStringLiteral("statusWarn"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("候选证据已存在，但 Evidence Packet 尚未满足受控输入门槛。"));
+    } else {
+        setStatusChip(decisionEvidence_, QStringLiteral("尚无证据"), QStringLiteral("statusNeutral"));
+        decisionEvidenceDetail_->setText(QStringLiteral("在“资料证据”页导入论文并完成绑定与人工条件复核。"));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("等待证据"), QStringLiteral("statusNeutral"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("等待证据"), QStringLiteral("statusNeutral"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("尚未形成可供 AI 使用的 Evidence Packet。"));
     }
 }
 
