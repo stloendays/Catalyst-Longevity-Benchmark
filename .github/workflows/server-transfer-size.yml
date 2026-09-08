@@ -21,11 +21,10 @@ jobs:
           printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
-      - name: Read transfer state
+      - name: Read training state
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
-            "date -Is; echo SOURCE; ls -lh /home/ubuntu/qvac-step3.tar.gz 2>/dev/null || true; echo TRAINER; ls -lh /home/ubuntu/qvac-trainer-step3.tar.gz 2>/dev/null || true; stat -c '%s' /home/ubuntu/qvac-trainer-step3.tar.gz 2>/dev/null || true; df -h /; systemctl is-active rhocodec-llm.service || true"
+            "date -Is; echo ADAPTER; ls -lh /tmp/local2b_lora_smoke_v4.gguf 2>/dev/null || true; echo LOG; tail -40 /tmp/local2b_lora_smoke_v4.log 2>/dev/null || true; echo MEMORY; free -h; echo SERVICE; systemctl is-active rhocodec-llm.service || true"
       - name: Remove key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-# probe 3
