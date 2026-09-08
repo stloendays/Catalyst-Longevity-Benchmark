@@ -1,0 +1,172 @@
+name: Expand local Qwen context for OpenClaw
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-expand-local-context.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-expand-local-context
+  cancel-in-progress: true
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Expand llama cpp context to 16k
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=30 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          MODEL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          SERVER='/opt/rhocodec-llm/bin/llama-server'
+          test -s "$MODEL"
+          test -x "$SERVER"
+
+          echo '=== MEMORY BEFORE ==='
+          free -h
+
+          sudo install -d -m 755 /etc/systemd/system/rhocodec-llm.service.d
+          sudo tee /etc/systemd/system/rhocodec-llm.service.d/openclaw.conf >/dev/null <<'UNIT'
+          [Service]
+          ExecStart=
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --alias qwen3.5-2b-q4 --host 127.0.0.1 --port 18080 -c 16384 -t 4 -b 128 -ub 128 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl restart rhocodec-llm.service
+
+          ready=0
+          for i in $(seq 1 80); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/models-16k.json 2>/dev/null; then
+              if python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/models-16k.json'))
+          rows=d.get('data') or []
+          ok=bool(rows) and rows[0].get('id') == 'qwen3.5-2b-q4' and int((rows[0].get('meta') or {}).get('n_ctx') or 0) >= 16384
+          raise SystemExit(0 if ok else 1)
+          PY
+              then
+                ready=1
+                break
+              fi
+            fi
+            sleep 3
+          done
+          if [ "$ready" -ne 1 ]; then
+            sudo systemctl status rhocodec-llm.service --no-pager -l || true
+            sudo journalctl -u rhocodec-llm.service -n 160 --no-pager || true
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/models-16k.json'))
+          row=d['data'][0]
+          print('Model:', row['id'])
+          print('Context:', (row.get('meta') or {}).get('n_ctx'))
+          PY
+          echo '=== MEMORY AFTER LOAD ==='
+          free -h
+          sudo systemctl status rhocodec-llm.service --no-pager -l | head -30
+          REMOTE
+
+      - name: Update OpenClaw model context and restart Gateway
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+
+          "$OC" config set 'models.providers.llama-cpp.models[0].contextWindow' 16384 --strict-json
+          "$OC" config set 'models.providers.llama-cpp.models[0].maxTokens' 1024 --strict-json
+          "$OC" config validate
+          "$OC" gateway restart --wait 30s --json || "$OC" gateway start --json
+          sleep 5
+          "$OC" gateway status --deep --json >/tmp/gateway-16k.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/gateway-16k.json'))
+          assert ((d.get('service') or {}).get('runtime') or {}).get('status') == 'running', d
+          assert (d.get('rpc') or {}).get('ok') is True, d
+          assert ((d.get('rpc') or {}).get('server') or {}).get('version') == '2026.9.2', d
+          print('Gateway 2026.9.2 RPC: PASS')
+          PY
+          "$OC" models list --provider llama-cpp | tee /tmp/models-list-16k.txt
+          grep -q 'llama-cpp/qwen3.5-2b-q4' /tmp/models-list-16k.txt
+          grep -Eq '16k|16K|16384' /tmp/models-list-16k.txt
+          REMOTE
+
+      - name: Verify full OpenClaw local inference chain
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=30 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          MODEL='llama-cpp/qwen3.5-2b-q4'
+
+          "$OC" infer model run --local --model "$MODEL" --prompt 'Reply exactly with: LOCAL_TRANSPORT_16K_OK' --json >/tmp/transport-16k.json
+          grep -q 'LOCAL_TRANSPORT_16K_OK' /tmp/transport-16k.json
+          echo 'LOCAL_TRANSPORT_16K=PASS'
+
+          "$OC" infer model run --gateway --model "$MODEL" --prompt 'Reply exactly with: LOCAL_GATEWAY_16K_OK' --json >/tmp/gateway-probe-16k.json
+          grep -q 'LOCAL_GATEWAY_16K_OK' /tmp/gateway-probe-16k.json
+          echo 'LOCAL_GATEWAY_16K=PASS'
+
+          "$OC" agent exec 'Reply exactly with: OPENCLAW_LOCAL_2B_16K_OK' \
+            --model "$MODEL" --code-mode direct --local-model-lean --thinking off --timeout 240 --json >/tmp/agent-16k.json
+          cat /tmp/agent-16k.json
+          grep -q 'OPENCLAW_LOCAL_2B_16K_OK' /tmp/agent-16k.json
+          echo 'OPENCLAW_LOCAL_AGENT_16K=PASS'
+          REMOTE
+
+      - name: Verify social plugins remain removed
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/home/ubuntu/.openclaw/openclaw.json'))
+          terms=('qqbot','openclaw-qqbot','weixin','openclaw-weixin','wechat','wecom','yuanbao','dingtalk','ddingtalk')
+          channels=d.get('channels') if isinstance(d.get('channels'),dict) else {}
+          entries=((d.get('plugins') or {}).get('entries') or {}) if isinstance(d.get('plugins'),dict) else {}
+          bad=[]
+          for section,mapping in [('channels',channels),('plugins.entries',entries)]:
+              for key in mapping:
+                  if any(t in key.lower() for t in terms): bad.append(section+'.'+key)
+          assert not bad, bad
+          print('Active QQ/WeChat/WeCom/Yuanbao/DingTalk config residue: none')
+          PY
+          residue=$(sudo find /home/ubuntu/.openclaw/extensions /root/.openclaw/extensions -mindepth 1 -maxdepth 1 \
+            \( -iname '*qqbot*' -o -iname '*weixin*' -o -iname '*wechat*' -o -iname '*wecom*' -o -iname '*yuanbao*' -o -iname '*dingtalk*' -o -iname '*ddingtalk*' \) -print 2>/dev/null || true)
+          test -z "$residue" || { echo "$residue"; exit 1; }
+          ! pgrep -u root -f '^openclaw-gateway$' >/dev/null 2>&1
+          ! sudo ss -lntp | grep -q ':11931'
+          echo 'SOCIAL_PLUGIN_CLEANUP=PASS'
+          echo '=== PORTS ==='
+          sudo ss -lntp | grep -E '(:18080|:18789|:11931)' || true
+          echo '=== MEMORY ==='
+          free -h
+          df -h /
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
