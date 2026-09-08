@@ -18,6 +18,36 @@ jobs:
           ref: ui-decision-dashboard-v4
           fetch-depth: 0
 
+      - name: Patch migration for current condition-state implementation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tools/apply_decision_dashboard.py")
+          text = p.read_text(encoding="utf-8")
+          start = text.index("# Replace the analysis condition inline color with semantic state chips.")
+          end = text.index("# Insert refreshDecisionOverview at the end of refreshAnalysisViews.", start)
+          replacement = r'''# Replace the current analysis condition state block with four semantic states.
+          condition_start = text.index("    if (conditionStatusLabel_) {", text.index("void MainWindow::refreshAnalysisViews() {"))
+          condition_end = text.index("    if (conditionMessageLabel_) {", condition_start)
+          new_condition = '''    if (conditionStatusLabel_) {
+              QString conditionStyle = QStringLiteral("statusNeutral");
+              if (analysis_.conditionAudit.status == ConditionAuditStatus::MatchedOnProvidedConditions) {
+                  conditionStyle = QStringLiteral("statusGood");
+              } else if (analysis_.conditionAudit.status == ConditionAuditStatus::ConditionsNotProvided) {
+                  conditionStyle = QStringLiteral("statusWarn");
+              } else if (analysis_.conditionAudit.blocksDirectRanking()) {
+                  conditionStyle = QStringLiteral("statusBad");
+              }
+              setStatusChip(conditionStatusLabel_, ConditionGuard::statusText(analysis_.conditionAudit.status), conditionStyle);
+          }
+          '''
+          text = text[:condition_start] + new_condition + text[condition_end:]
+
+          '''
+          p.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
+          PY
+
       - name: Apply decision dashboard migration
         run: python tools/apply_decision_dashboard.py
 
