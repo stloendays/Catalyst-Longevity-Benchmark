@@ -215,7 +215,7 @@ jobs:
           WorkingDirectory=/opt/rhocodec-llm/bin
           Environment=HOME=/home/ubuntu
           Environment=LD_LIBRARY_PATH=/opt/rhocodec-llm/bin
-          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --host 127.0.0.1 --port 18080 -c 1536 -t 4 -b 128 -ub 128 --parallel 1 --jinja --no-webui
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --host 127.0.0.1 --port 18080 -c 1536 -t 4 -b 128 -ub 128 --parallel 1 --jinja --reasoning-budget 0 --no-webui
           Restart=on-failure
           RestartSec=5
           TimeoutStartSec=180
@@ -269,15 +269,30 @@ jobs:
               'messages': [
                   {'role': 'user', 'content': 'Reply briefly with the words RhoCodec local model is running.'}
               ],
-              'max_tokens': 32,
-              'temperature': 0
+              'max_tokens': 96,
+              'temperature': 0,
+              'chat_template_kwargs': {'enable_thinking': False}
           }))
           PY
 
-          curl -fsS --max-time 180 http://127.0.0.1:18080/v1/chat/completions \
+          CURL_RC=0
+          HTTP_CODE=$(curl -sS --max-time 180 http://127.0.0.1:18080/v1/chat/completions \
             -H 'Content-Type: application/json' \
             --data-binary @/tmp/rhocodec-request.json \
-            -o /tmp/rhocodec-smoke.json
+            -o /tmp/rhocodec-smoke.json \
+            -w '%{http_code}') || CURL_RC=$?
+
+          if [ "$CURL_RC" -ne 0 ] || [ "$HTTP_CODE" != '200' ]; then
+            echo "Chat smoke request failed: curl_rc=$CURL_RC http=$HTTP_CODE"
+            echo '=== RESPONSE BODY ==='
+            cat /tmp/rhocodec-smoke.json 2>/dev/null || true
+            echo
+            echo '=== SERVICE ==='
+            sudo systemctl status rhocodec-llm.service --no-pager -l || true
+            echo '=== JOURNAL ==='
+            sudo journalctl -u rhocodec-llm.service -n 200 --no-pager || true
+            exit 1
+          fi
 
           python3 - <<'PY'
           import json
@@ -285,9 +300,14 @@ jobs:
               d = json.load(f)
           choices = d.get('choices') or []
           assert choices, d
-          content = choices[0].get('message', {}).get('content', '')
-          assert content.strip(), d
+          message = choices[0].get('message', {})
+          content = message.get('content', '') or ''
+          reasoning = message.get('reasoning_content', '') or message.get('reasoning', '') or ''
+          if not content.strip():
+              raise AssertionError({'error': 'empty assistant content', 'reasoning_preview': reasoning[:500], 'response': d})
           print('Smoke response:', content.strip())
+          if reasoning.strip():
+              print('Reasoning field was present but normal content was also returned.')
           print('LOCAL_API_SMOKE_TEST=PASS')
           PY
 
