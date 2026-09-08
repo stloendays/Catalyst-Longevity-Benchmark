@@ -89,6 +89,9 @@ QString statusLabel(const QString& status) {
     if (status == QStringLiteral("bound_to_catalyst_time_requires_condition_review")) {
         return QStringLiteral("已绑定催化剂+时间：待条件复核");
     }
+    if (status == QStringLiteral("condition_reviewed_context_only")) {
+        return QStringLiteral("条件已人工复核：仅作上下文");
+    }
     return status;
 }
 
@@ -119,7 +122,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* titleBox = new QVBoxLayout;
     titleBox->addWidget(headingLabel(QStringLiteral("资料分析与证据提取")));
     titleBox->addWidget(mutedLabel(QStringLiteral(
-        "保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据。候选证据可以绑定到催化剂和时间，但仍不会自动进入排名，直到实验条件完成复核。")));
+        "保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据。候选证据可以绑定到催化剂和时间，并由用户显式完成条件复核；即使复核完成，也只作为可追溯上下文，不会自动改写实验排名。")));
     top->addLayout(titleBox, 1);
 
     auto* chooseButton = new QPushButton(QStringLiteral("选择资料文件"));
@@ -172,14 +175,14 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceFrame->setObjectName(QStringLiteral("panel"));
     auto* evidenceLayout = new QVBoxLayout(evidenceFrame);
     evidenceLayout->setContentsMargins(18, 16, 18, 16);
-    auto* evidenceTitle = new QLabel(QStringLiteral("项目证据候选与绑定"));
+    auto* evidenceTitle = new QLabel(QStringLiteral("项目证据候选、绑定与复核"));
     evidenceTitle->setObjectName(QStringLiteral("sectionTitle"));
     evidenceLayout->addWidget(evidenceTitle);
 
     evidenceTable_ = new QTableWidget(0, 7);
     evidenceTable_->setHorizontalHeaderLabels({
         QStringLiteral("来源"), QStringLiteral("类别"), QStringLiteral("候选"), QStringLiteral("状态"),
-        QStringLiteral("催化剂"), QStringLiteral("时间(h)"), QStringLiteral("原文片段")});
+        QStringLiteral("催化剂"), QStringLiteral("时间(h)"), QStringLiteral("原文片段 / 备注")});
     evidenceTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     evidenceTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
     evidenceTable_->verticalHeader()->setVisible(false);
@@ -200,14 +203,20 @@ EvidencePage::EvidencePage(QWidget* parent)
     timeSpin_->setSpecialValueText(QStringLiteral("未绑定时间"));
     timeSpin_->setSuffix(QStringLiteral(" h"));
     noteEdit_ = new QLineEdit;
-    noteEdit_->setPlaceholderText(QStringLiteral("绑定备注（可选）"));
+    noteEdit_->setPlaceholderText(QStringLiteral("复核/绑定备注；条件复核时必填"));
 
     auto* bindButton = new QPushButton(QStringLiteral("绑定所选证据"));
     bindButton->setObjectName(QStringLiteral("primaryButton"));
     auto* unbindButton = new QPushButton(QStringLiteral("解除绑定"));
     unbindButton->setObjectName(QStringLiteral("secondaryButton"));
+    auto* reviewButton = new QPushButton(QStringLiteral("条件已复核（仅上下文）"));
+    reviewButton->setObjectName(QStringLiteral("primaryButton"));
+    auto* returnButton = new QPushButton(QStringLiteral("退回待复核"));
+    returnButton->setObjectName(QStringLiteral("secondaryButton"));
     connect(bindButton, &QPushButton::clicked, this, &EvidencePage::bindSelectedEvidence);
     connect(unbindButton, &QPushButton::clicked, this, &EvidencePage::unbindSelectedEvidence);
+    connect(reviewButton, &QPushButton::clicked, this, &EvidencePage::markConditionReviewed);
+    connect(returnButton, &QPushButton::clicked, this, &EvidencePage::returnSelectedToReview);
 
     bindRow->addWidget(new QLabel(QStringLiteral("催化剂")));
     bindRow->addWidget(catalystCombo_);
@@ -215,6 +224,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     bindRow->addWidget(timeSpin_);
     bindRow->addWidget(noteEdit_, 1);
     bindRow->addWidget(bindButton);
+    bindRow->addWidget(reviewButton);
+    bindRow->addWidget(returnButton);
     bindRow->addWidget(unbindButton);
     evidenceLayout->addLayout(bindRow);
     layout->addWidget(evidenceFrame, 1);
@@ -224,7 +235,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* noteLayout = new QVBoxLayout(note);
     noteLayout->addWidget(new QLabel(QStringLiteral("证据门槛")));
     noteLayout->addWidget(mutedLabel(QStringLiteral(
-        "绑定到催化剂和时间只建立 provenance link，不等于证据已可用于排名。当前 native engine 仍要求后续条件复核；资料证据不会静默改写实验数据。扫描 PDF 也不会自动 OCR。")));
+        "“条件已复核”是人工审查状态，不是实验真值认证。必须先绑定催化剂和时间并留下复核备注；该状态只允许证据进入报告/AI 上下文，仍不会自动进入性能轨迹、T90 或直接排名。")));
     layout->addWidget(note);
 
     resetCurrentDocumentSummary();
@@ -331,6 +342,58 @@ void EvidencePage::unbindSelectedEvidence() {
     item.boundTimeHours = std::nullopt;
     item.note.clear();
     item.status = DocumentAnalyzer::bindingStatus(QString(), std::nullopt);
+    refreshEvidenceTable();
+    evidenceTable_->selectRow(row);
+    emit evidenceChanged();
+}
+
+void EvidencePage::markConditionReviewed() {
+    const int row = evidenceTable_->currentRow();
+    if (row < 0 || row >= evidenceItems_.size()) {
+        QMessageBox::information(this, QStringLiteral("条件复核"), QStringLiteral("请先选择一条证据候选。"));
+        return;
+    }
+
+    auto& item = evidenceItems_[row];
+    const QString selectedCatalyst = catalystCombo_->currentData().toString();
+    const std::optional<double> selectedTime = timeSpin_->value() < 0.0
+        ? std::nullopt
+        : std::optional<double>(timeSpin_->value());
+    const QString reviewNote = noteEdit_->text().trimmed();
+
+    if (selectedCatalyst.isEmpty() || !selectedTime.has_value()) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("条件复核"),
+            QStringLiteral("条件复核前必须先选择明确的催化剂和时间点。"));
+        return;
+    }
+    if (reviewNote.isEmpty()) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("条件复核"),
+            QStringLiteral("请填写复核备注，例如核对了温度、空速、压力、进料与指标定义。"));
+        return;
+    }
+
+    item.boundCatalyst = selectedCatalyst;
+    item.boundTimeHours = selectedTime;
+    item.note = reviewNote;
+    item.status = QStringLiteral("condition_reviewed_context_only");
+    refreshEvidenceTable();
+    evidenceTable_->selectRow(row);
+    emit evidenceChanged();
+}
+
+void EvidencePage::returnSelectedToReview() {
+    const int row = evidenceTable_->currentRow();
+    if (row < 0 || row >= evidenceItems_.size()) {
+        QMessageBox::information(this, QStringLiteral("退回复核"), QStringLiteral("请先选择一条证据候选。"));
+        return;
+    }
+
+    auto& item = evidenceItems_[row];
+    item.status = DocumentAnalyzer::bindingStatus(item.boundCatalyst, item.boundTimeHours);
     refreshEvidenceTable();
     evidenceTable_->selectRow(row);
     emit evidenceChanged();

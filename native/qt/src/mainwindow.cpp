@@ -127,20 +127,20 @@ void MainWindow::buildUi() {
     root->addWidget(buildSidebar());
 
     pages_ = new QStackedWidget;
-    pages_->addWidget(buildProjectPage());       // 0
-    pages_->addWidget(buildOverviewPage());      // 1
-    pages_->addWidget(buildDataPage());          // 2
+    pages_->addWidget(buildProjectPage());
+    pages_->addWidget(buildOverviewPage());
+    pages_->addWidget(buildDataPage());
     evidencePage_ = new EvidencePage;
-    pages_->addWidget(evidencePage_);             // 3
-    pages_->addWidget(buildAnalysisPage());      // 4
-    pages_->addWidget(buildAiPage());            // 5
-    pages_->addWidget(buildSettingsPage());      // 6
+    pages_->addWidget(evidencePage_);
+    pages_->addWidget(buildAnalysisPage());
+    pages_->addWidget(buildAiPage());
+    pages_->addWidget(buildSettingsPage());
     root->addWidget(pages_, 1);
 
     connect(evidencePage_, &EvidencePage::evidenceChanged, this, [this]() {
         projectDirty_ = true;
         updateProjectUi();
-        setStatus(QStringLiteral("证据候选已更新；保存项目可持久化当前绑定。"));
+        setStatus(QStringLiteral("证据候选已更新；保存项目可持久化当前绑定与复核状态。"));
     });
 
     setCentralWidget(central);
@@ -233,7 +233,7 @@ QWidget* MainWindow::buildProjectPage() {
     cardLayout->addWidget(projectStateLabel_);
     cardLayout->addSpacing(12);
     cardLayout->addWidget(muted(QStringLiteral(
-        ".clrproj 内部为 SQLite 数据库。证据候选的来源、摘要、绑定催化剂和绑定时间会随项目一起保存，但不会自动改写实验观测数据。")));
+        ".clrproj 内部为 SQLite 数据库。证据候选的来源、摘要、绑定催化剂、绑定时间和人工复核状态会随项目一起保存，但不会自动改写实验观测数据。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -402,7 +402,7 @@ QWidget* MainWindow::buildAiPage() {
     layout->setSpacing(16);
     layout->addWidget(heading(QStringLiteral("AI 工作区")));
     layout->addWidget(muted(QStringLiteral(
-        "原生证据候选现在可以持久化并绑定到催化剂/时间。下一阶段将把 Evidence Packet、AI Analyst、Evidence Critic 与外部数据库客户端接入这里。")));
+        "原生证据候选现在可以持久化、绑定并人工完成条件复核。下一阶段将把 Evidence Packet、AI Analyst、Evidence Critic 与外部数据库客户端接入这里。")));
 
     auto* card = new QFrame;
     card->setObjectName(QStringLiteral("panel"));
@@ -412,7 +412,7 @@ QWidget* MainWindow::buildAiPage() {
     title->setObjectName(QStringLiteral("sectionTitle"));
     cardLayout->addWidget(title);
     cardLayout->addWidget(muted(QStringLiteral(
-        "Evidence Packet  ·  条件复核  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")));
+        "Evidence Packet  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -434,8 +434,8 @@ QWidget* MainWindow::buildSettingsPage() {
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("数据输入：CSV / Excel .xlsx。")));
-    cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件（实验记录 + 证据候选）。")));
-    cardLayout->addWidget(new QLabel(QStringLiteral("报告输出：原生 PDF 分析报告。")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件（实验记录 + 证据候选/复核状态）。")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("报告输出：原生 PDF 分析报告 + 证据审计附录。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -571,7 +571,10 @@ void MainWindow::exportReport() {
     if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".pdf");
 
     QString message;
-    if (!ReportExporter::exportPdf(path, analysis_, sourceLabelText_, &message)) {
+    const QVector<EvidenceItem> evidence = evidencePage_
+        ? evidencePage_->evidenceItems()
+        : QVector<EvidenceItem>{};
+    if (!ReportExporter::exportPdf(path, analysis_, sourceLabelText_, evidence, &message)) {
         QMessageBox::warning(this, QStringLiteral("导出失败"), message);
         setStatus(message, true);
         return;

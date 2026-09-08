@@ -30,6 +30,8 @@ private slots:
     void chooseDocument();
     void bindSelectedEvidence();
     void unbindSelectedEvidence();
+    void markConditionReviewed();
+    void returnSelectedToReview();
 
 private:
     void refreshCurrentDocumentSummary();

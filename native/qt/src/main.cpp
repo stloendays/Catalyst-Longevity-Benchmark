@@ -46,12 +46,6 @@ int main(int argc, char* argv[]) {
             || loaded.front().catalyst != records.front().catalyst
             || loaded.front().temperatureC != records.front().temperatureC) return 8;
 
-        const QString reportPath = tempDir.filePath(QStringLiteral("self-test-report.pdf"));
-        QString reportMessage;
-        if (!catalyst::ReportExporter::exportPdf(
-                reportPath, result, QStringLiteral("self-test"), &reportMessage)) return 9;
-        if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) return 10;
-
         const QString workbookPath = tempDir.filePath(QStringLiteral("self-test.xlsx"));
         {
             QXlsx::Document workbook;
@@ -67,7 +61,7 @@ int main(int argc, char* argv[]) {
             workbook.write(3, 2, 24.0);
             workbook.write(3, 3, 76.0);
             workbook.write(3, 4, 650.0);
-            if (!workbook.saveAs(workbookPath)) return 11;
+            if (!workbook.saveAs(workbookPath)) return 9;
         }
 
         QString importMessage;
@@ -75,7 +69,7 @@ int main(int argc, char* argv[]) {
         if (workbookRecords.size() != 2
             || workbookRecords.front().catalyst != QStringLiteral("Excel Catalyst")
             || !workbookRecords.front().temperatureC.has_value()
-            || *workbookRecords.front().temperatureC != 650.0) return 12;
+            || *workbookRecords.front().temperatureC != 650.0) return 10;
 
         const QString evidenceText = QStringLiteral(
             "DOI 10.1234/example.2026.42. Catalyst X was tested at 700 °C for 20 h. "
@@ -89,29 +83,36 @@ int main(int argc, char* argv[]) {
             || documentSignals.ch4ConversionPercentCandidates.isEmpty()
             || !documentSignals.keywordEvidence.contains(QStringLiteral("stability"))
             || documentSignals.snippets.isEmpty()
-            || documentSignals.sourceSha256.isEmpty()) return 13;
+            || documentSignals.sourceSha256.isEmpty()) return 11;
 
         auto evidenceItems = catalyst::DocumentAnalyzer::candidateItems(evidenceText, documentSignals);
-        if (evidenceItems.isEmpty()) return 14;
+        if (evidenceItems.isEmpty()) return 12;
         evidenceItems.front().boundCatalyst = QStringLiteral("Catalyst A");
         evidenceItems.front().boundTimeHours = 20.0;
-        evidenceItems.front().status = catalyst::DocumentAnalyzer::bindingStatus(
-            evidenceItems.front().boundCatalyst, evidenceItems.front().boundTimeHours);
-        evidenceItems.front().note = QStringLiteral("self-test binding");
+        evidenceItems.front().status = QStringLiteral("condition_reviewed_context_only");
+        evidenceItems.front().note = QStringLiteral(
+            "self-test reviewed temperature, flow/space velocity, pressure, feed and metric semantics");
 
         if (!catalyst::ProjectStore::saveProject(
-                projectPath, records, evidenceItems, &persistenceMessage)) return 15;
+                projectPath, records, evidenceItems, &persistenceMessage)) return 13;
         QVector<catalyst::Record> loadedWithEvidence;
         QVector<catalyst::EvidenceItem> loadedEvidence;
         if (!catalyst::ProjectStore::loadProject(
-                projectPath, &loadedWithEvidence, &loadedEvidence, &persistenceMessage)) return 16;
+                projectPath, &loadedWithEvidence, &loadedEvidence, &persistenceMessage)) return 14;
         if (loadedWithEvidence.size() != records.size()
             || loadedEvidence.size() != evidenceItems.size()
             || loadedEvidence.front().sourceSha256 != evidenceItems.front().sourceSha256
             || loadedEvidence.front().boundCatalyst != QStringLiteral("Catalyst A")
             || !loadedEvidence.front().boundTimeHours.has_value()
             || *loadedEvidence.front().boundTimeHours != 20.0
-            || loadedEvidence.front().note != QStringLiteral("self-test binding")) return 17;
+            || loadedEvidence.front().status != QStringLiteral("condition_reviewed_context_only")
+            || loadedEvidence.front().note.isEmpty()) return 15;
+
+        const QString reportPath = tempDir.filePath(QStringLiteral("self-test-report.pdf"));
+        QString reportMessage;
+        if (!catalyst::ReportExporter::exportPdf(
+                reportPath, result, QStringLiteral("self-test"), loadedEvidence, &reportMessage)) return 16;
+        if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) return 17;
 
         return 0;
     }

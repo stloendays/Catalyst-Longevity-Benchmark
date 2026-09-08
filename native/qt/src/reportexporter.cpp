@@ -14,9 +14,7 @@ namespace catalyst {
 
 namespace {
 
-QString escape(const QString& value) {
-    return value.toHtmlEscaped();
-}
+QString escape(const QString& value) { return value.toHtmlEscaped(); }
 
 QString fieldLabel(const QString& field) {
     if (field == QStringLiteral("temperature_c")) return QStringLiteral("温度");
@@ -29,24 +27,49 @@ QString fieldLabel(const QString& field) {
 
 QString fieldList(const QStringList& fields) {
     QStringList labels;
-    for (const auto& field : fields) {
-        labels.append(fieldLabel(field));
-    }
+    for (const auto& field : fields) labels.append(fieldLabel(field));
     return labels.join(QStringLiteral("、"));
 }
 
-QString buildHtml(const AnalysisResult& result, const QString& sourceLabel) {
+QString evidenceCategoryLabel(const QString& category) {
+    if (category == QStringLiteral("doi")) return QStringLiteral("DOI");
+    if (category == QStringLiteral("temperature_c")) return QStringLiteral("温度");
+    if (category == QStringLiteral("duration_h")) return QStringLiteral("测试时长");
+    if (category == QStringLiteral("ch4_conversion_percent_candidate")) return QStringLiteral("CH4 转化率候选");
+    if (category == QStringLiteral("keyword_evidence")) return QStringLiteral("失活/稳定证据词");
+    return category;
+}
+
+QString evidenceStatusLabel(const QString& status) {
+    if (status == QStringLiteral("candidate_requires_condition_binding")) return QStringLiteral("候选：待绑定");
+    if (status == QStringLiteral("bound_to_catalyst_requires_time_condition_review")) return QStringLiteral("已绑定催化剂：待时间/条件复核");
+    if (status == QStringLiteral("bound_to_catalyst_time_requires_condition_review")) return QStringLiteral("已绑定催化剂+时间：待条件复核");
+    if (status == QStringLiteral("condition_reviewed_context_only")) return QStringLiteral("条件已人工复核：仅作上下文");
+    return status;
+}
+
+QString truncate(QString value, int maxLength = 260) {
+    value = value.simplified();
+    if (value.size() <= maxLength) return value;
+    return value.left(maxLength - 1) + QChar(0x2026);
+}
+
+QString buildHtml(
+    const AnalysisResult& result,
+    const QString& sourceLabel,
+    const QVector<EvidenceItem>& evidenceItems) {
     QString html;
     html += QStringLiteral(
         "<html><head><meta charset='utf-8'>"
         "<style>"
-        "body{font-family:'Microsoft YaHei UI','Segoe UI',sans-serif;color:#17202a;font-size:10pt;}"
+        "body{font-family:'Microsoft YaHei UI','Segoe UI',sans-serif;color:#17202a;font-size:9.5pt;}"
         "h1{font-size:21pt;margin-bottom:4px;} h2{font-size:14pt;margin-top:20px;}"
         "p.meta{color:#5f6b76;}"
         "table{border-collapse:collapse;width:100%;margin-top:8px;}"
-        "th,td{border:1px solid #d8dde3;padding:6px 7px;text-align:left;}"
+        "th,td{border:1px solid #d8dde3;padding:5px 6px;text-align:left;vertical-align:top;}"
         "th{background:#f1f3f5;} .warn{color:#a61b1b;font-weight:600;}"
         ".ok{color:#166534;font-weight:600;} .note{background:#eef6ff;padding:10px;}"
+        ".small{font-size:8.5pt;color:#4b5563;}"
         "</style></head><body>");
 
     html += QStringLiteral("<h1>Catalyst Longevity Research</h1>");
@@ -88,19 +111,14 @@ QString buildHtml(const AnalysisResult& result, const QString& sourceLabel) {
              escape(result.conditionAudit.message.isEmpty()
                  ? QStringLiteral("没有额外条件审计信息。")
                  : result.conditionAudit.message));
-
     if (!result.conditionAudit.explicitFields.isEmpty()) {
-        html += QStringLiteral("<p>已审计字段：%1</p>")
-            .arg(escape(fieldList(result.conditionAudit.explicitFields)));
+        html += QStringLiteral("<p>已审计字段：%1</p>").arg(escape(fieldList(result.conditionAudit.explicitFields)));
     }
-
     if (!result.conditionAudit.pairMismatches.isEmpty()) {
         html += QStringLiteral("<table><tr><th>催化剂 A</th><th>催化剂 B</th><th>不匹配条件</th></tr>");
         for (const auto& mismatch : result.conditionAudit.pairMismatches) {
             html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td></tr>")
-                .arg(escape(mismatch.catalystA),
-                     escape(mismatch.catalystB),
-                     escape(fieldList(mismatch.fields)));
+                .arg(escape(mismatch.catalystA), escape(mismatch.catalystB), escape(fieldList(mismatch.fields)));
         }
         html += QStringLiteral("</table>");
     }
@@ -115,21 +133,62 @@ QString buildHtml(const AnalysisResult& result, const QString& sourceLabel) {
         html += QStringLiteral("<p>当前数据不足以给出共同实际观测时间下的直接领先者。</p>");
     }
 
+    html += QStringLiteral("<h2>资料证据审计附录</h2>");
+    if (evidenceItems.isEmpty()) {
+        html += QStringLiteral("<p>当前项目未保存资料证据候选。</p>");
+    } else {
+        int unbound = 0;
+        int boundPending = 0;
+        int reviewed = 0;
+        for (const auto& item : evidenceItems) {
+            if (item.status == QStringLiteral("condition_reviewed_context_only")) ++reviewed;
+            else if (item.boundCatalyst.isEmpty()) ++unbound;
+            else ++boundPending;
+        }
+        html += QStringLiteral("<table><tr><th>证据候选</th><th>未绑定</th><th>已绑定待复核</th><th>条件已人工复核</th></tr>");
+        html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td></tr></table>")
+            .arg(evidenceItems.size()).arg(unbound).arg(boundPending).arg(reviewed);
+        html += QStringLiteral(
+            "<p class='note'><b>重要：</b>“条件已人工复核”只表示用户完成了资料上下文核对。"
+            "这些资料证据仍不会自动修改实验观测、寿命阈值或排名。</p>");
+
+        html += QStringLiteral(
+            "<table><tr><th>来源</th><th>类别</th><th>候选</th><th>状态</th><th>绑定</th><th>备注 / 原文</th></tr>");
+        for (const auto& item : evidenceItems) {
+            const QString source = item.sourcePath.isEmpty() ? QStringLiteral("—") : QFileInfo(item.sourcePath).fileName();
+            const QString binding = item.boundCatalyst.isEmpty()
+                ? QStringLiteral("—")
+                : (item.boundTimeHours.has_value()
+                    ? QStringLiteral("%1 @ %2 h").arg(item.boundCatalyst, QString::number(*item.boundTimeHours, 'g', 8))
+                    : item.boundCatalyst);
+            QString context = item.note;
+            if (!item.snippet.isEmpty()) {
+                context = context.isEmpty() ? item.snippet : QStringLiteral("%1 | 原文：%2").arg(context, item.snippet);
+            }
+            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td><td class='small'>%6</td></tr>")
+                .arg(escape(source),
+                     escape(evidenceCategoryLabel(item.category)),
+                     escape(item.valueText.isEmpty() ? item.term : item.valueText),
+                     escape(evidenceStatusLabel(item.status)),
+                     escape(binding),
+                     escape(truncate(context)));
+        }
+        html += QStringLiteral("</table>");
+    }
+
     html += QStringLiteral(
         "<p class='note'><b>证据语义：</b> T95 / T90 / T80 采用离散观测的删失语义。"
         "报告不会把两个实际观测点之间的插值结果冒充为直接测得的精确寿命。"
-        "条件守门只根据用户显式提供的实验条件阻止明显不可比的直接排名。</p>");
-
+        "资料证据与实验观测在项目文件中分开存储，人工复核不会静默覆盖原始数据。</p>");
     html += QStringLiteral("</body></html>");
     return html;
 }
 
-} // namespace
-
-bool ReportExporter::exportPdf(
+bool writePdf(
     const QString& path,
     const AnalysisResult& result,
     const QString& sourceLabel,
+    const QVector<EvidenceItem>& evidenceItems,
     QString* errorMessage) {
     if (path.trimmed().isEmpty()) {
         if (errorMessage) *errorMessage = QStringLiteral("报告输出路径为空。");
@@ -149,7 +208,7 @@ bool ReportExporter::exportPdf(
     QTextDocument document;
     document.setDefaultFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
     document.setDocumentMargin(24.0);
-    document.setHtml(buildHtml(result, sourceLabel));
+    document.setHtml(buildHtml(result, sourceLabel, evidenceItems));
     document.print(&writer);
 
     const QFileInfo output(path);
@@ -157,11 +216,27 @@ bool ReportExporter::exportPdf(
         if (errorMessage) *errorMessage = QStringLiteral("PDF 报告生成失败。");
         return false;
     }
-
-    if (errorMessage) {
-        *errorMessage = QStringLiteral("PDF 报告已导出：%1").arg(path);
-    }
+    if (errorMessage) *errorMessage = QStringLiteral("PDF 报告已导出：%1").arg(path);
     return true;
+}
+
+} // namespace
+
+bool ReportExporter::exportPdf(
+    const QString& path,
+    const AnalysisResult& result,
+    const QString& sourceLabel,
+    QString* errorMessage) {
+    return writePdf(path, result, sourceLabel, {}, errorMessage);
+}
+
+bool ReportExporter::exportPdf(
+    const QString& path,
+    const AnalysisResult& result,
+    const QString& sourceLabel,
+    const QVector<EvidenceItem>& evidenceItems,
+    QString* errorMessage) {
+    return writePdf(path, result, sourceLabel, evidenceItems, errorMessage);
 }
 
 } // namespace catalyst
