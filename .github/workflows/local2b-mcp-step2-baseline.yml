@@ -1,0 +1,112 @@
+name: Local2B MCP Step 2 baseline
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - training/local2b_mcp/generate_stage2_dataset.py
+      - training/local2b_mcp/benchmark_tool_use.py
+      - training/local2b_mcp/validate_dataset.py
+      - .github/workflows/local2b-mcp-step2-baseline.yml
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy Step-2 benchmark code to server
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'rm -rf /tmp/local2b-mcp-step2 && mkdir -p /tmp/local2b-mcp-step2'
+          scp -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/generate_stage2_dataset.py \
+            training/local2b_mcp/benchmark_tool_use.py \
+            training/local2b_mcp/validate_dataset.py \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-step2/
+
+      - name: Generate and validate expanded curriculum
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /tmp/local2b-mcp-step2
+          rm -rf dataset
+          python3 generate_stage2_dataset.py \
+            --out dataset \
+            --train 16000 \
+            --val 1600 \
+            --test 1600 \
+            --seed 20260908
+          python3 validate_dataset.py dataset
+          cp dataset/manifest.json step2-manifest.json
+          REMOTE
+
+      - name: Verify base model endpoint
+        run: |
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          systemctl is-active --quiet rhocodec-llm.service
+          curl -fsS http://127.0.0.1:18080/v1/models > /tmp/local2b-mcp-step2/models.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/local2b-mcp-step2/models.json'))
+          rows=d.get('data') or []
+          assert rows and rows[0].get('id') == 'qwen3.5-2b-q4', d
+          assert int((rows[0].get('meta') or {}).get('n_ctx') or 0) >= 16384, rows[0]
+          print('BASE_MODEL_ENDPOINT=PASS')
+          PY
+          REMOTE
+
+      - name: Run frozen base-model decision benchmark
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd /tmp/local2b-mcp-step2
+          python3 benchmark_tool_use.py \
+            --dataset dataset/test.jsonl \
+            --endpoint http://127.0.0.1:18080/v1/chat/completions \
+            --model qwen3.5-2b-q4 \
+            --limit 80 \
+            --max-tokens 192 \
+            --timeout 120 \
+            --out base-q4-baseline.json
+          REMOTE
+
+      - name: Collect baseline artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p build/local2b-mcp-step2
+          scp -i "$HOME/.ssh/server_key" \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-step2/base-q4-baseline.json \
+            build/local2b-mcp-step2/
+          scp -i "$HOME/.ssh/server_key" \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-step2/step2-manifest.json \
+            build/local2b-mcp-step2/
+          cat build/local2b-mcp-step2/base-q4-baseline.json
+
+      - name: Upload Step-2 baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step2-base-baseline
+          path: build/local2b-mcp-step2/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
