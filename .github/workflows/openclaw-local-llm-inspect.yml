@@ -1,0 +1,54 @@
+name: Inspect OpenClaw local LLM integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-local-llm-inspect.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Inspect OpenClaw and local LLM
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -u
+          echo '=== OPENCLAW PROCESS ==='
+          ps -eo pid,user,etime,args | grep -E 'openclaw-gatewa|openclaw gateway' | grep -v grep || true
+          echo '=== OPENCLAW BINARY ==='
+          command -v openclaw || true
+          openclaw --version 2>&1 || true
+          echo '=== OPENCLAW HELP ==='
+          openclaw --help 2>&1 | head -120 || true
+          echo '=== MODELS HELP ==='
+          openclaw models --help 2>&1 | head -160 || true
+          echo '=== CONFIG HELP ==='
+          openclaw config --help 2>&1 | head -160 || true
+          echo '=== CURRENT DEFAULT MODEL ==='
+          openclaw config get agents.defaults.model --json 2>&1 || true
+          echo '=== CURRENT PROVIDERS ==='
+          openclaw config get models.providers --json 2>&1 || true
+          echo '=== LOCAL LLAMA API ==='
+          curl -fsS --max-time 10 http://127.0.0.1:18080/v1/models || true
+          echo
+          echo '=== PORTS ==='
+          sudo ss -lntp | grep -E '(:18080|:11931|:18789)' || true
+          REMOTE
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
