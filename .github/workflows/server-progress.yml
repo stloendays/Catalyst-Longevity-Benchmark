@@ -1,0 +1,41 @@
+name: Server progress probe
+
+on:
+  push:
+    paths:
+      - .github/workflows/server-progress.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Prepare key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Inspect live build and training state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          echo '=== TIME ==='; date -Is
+          echo '=== PROCESSES ==='
+          ps -eo pid,ppid,user,%cpu,%mem,etime,args | grep -E 'cmake|g\+\+|cc1plus|llama-finetune-lora|llama-server|git clone' | grep -v grep || true
+          echo '=== BUILD ==='
+          du -sh /home/ubuntu/qvac-fabric-llm.cpp 2>/dev/null || true
+          ls -lh /home/ubuntu/qvac-fabric-llm.cpp/build-cpu/bin/llama-finetune-lora 2>/dev/null || true
+          echo '=== SMOKE ==='
+          ls -lh /tmp/local2b_lora_smoke* 2>/dev/null || true
+          tail -40 /tmp/local2b_lora_smoke.log 2>/dev/null || true
+          echo '=== MEMORY ==='; free -h
+          echo '=== SERVICE ==='; systemctl is-active rhocodec-llm.service || true
+          REMOTE
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
