@@ -1,0 +1,52 @@
+name: Local2B MCP data Step 1
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - training/local2b_mcp/**
+      - .github/workflows/local2b-mcp-data-step1.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate frozen synthetic dataset
+        run: |
+          set -euo pipefail
+          rm -rf build/local2b-mcp-step1
+          python training/local2b_mcp/generate_dataset.py \
+            --out build/local2b-mcp-step1 \
+            --train 2400 \
+            --val 300 \
+            --test 300 \
+            --seed 20260908
+
+      - name: Validate dataset and held-out tool aliases
+        run: |
+          set -euo pipefail
+          python training/local2b_mcp/validate_dataset.py build/local2b-mcp-step1
+          wc -l build/local2b-mcp-step1/train.jsonl \
+                build/local2b-mcp-step1/val.jsonl \
+                build/local2b-mcp-step1/test.jsonl
+          cat build/local2b-mcp-step1/manifest.json
+
+      - name: Upload frozen Step-1 dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step1-dataset
+          path: build/local2b-mcp-step1/
+          if-no-files-found: error
+          retention-days: 30
