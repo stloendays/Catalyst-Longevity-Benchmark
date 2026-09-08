@@ -24,6 +24,45 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
+      - name: Ensure Local2B llama cpp runtime uses 16k context
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          MODEL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          SERVER='/opt/rhocodec-llm/bin/llama-server'
+          test -s "$MODEL"
+          test -x "$SERVER"
+
+          sudo install -d -m 755 /etc/systemd/system/rhocodec-llm.service.d
+          sudo tee /etc/systemd/system/rhocodec-llm.service.d/openclaw.conf >/dev/null <<'UNIT'
+          [Service]
+          ExecStart=
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --alias qwen3.5-2b-q4 --host 127.0.0.1 --port 18080 -c 16384 -t 4 -b 128 -ub 128 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl restart rhocodec-llm.service
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/local2b-models.json 2>/dev/null; then
+              if python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/local2b-models.json'))
+          rows=d.get('data') or []
+          ok=bool(rows) and rows[0].get('id') == 'qwen3.5-2b-q4' and int((rows[0].get('meta') or {}).get('n_ctx') or 0) >= 16384
+          raise SystemExit(0 if ok else 1)
+          PY
+              then
+                ready=1
+                break
+              fi
+            fi
+            sleep 3
+          done
+          test "$ready" -eq 1
+          echo 'LOCAL2B_LLAMA_16K=PASS'
+          REMOTE
+
       - name: Configure Local2B agent
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
@@ -33,6 +72,8 @@ jobs:
           WORKSPACE='/home/ubuntu/.openclaw/workspace-local2b'
 
           "$OC" --version | grep '2026.9.2'
+          "$OC" config set 'models.providers.llama-cpp.models[0].contextWindow' 16384 --strict-json
+          "$OC" config set 'models.providers.llama-cpp.models[0].maxTokens' 1024 --strict-json
           mkdir -p "$WORKSPACE"
           printf '%s\n' 'Answer lightweight text requests directly and concisely.' > "$WORKSPACE/AGENTS.md"
 
@@ -54,7 +95,7 @@ jobs:
           export PATH="/home/ubuntu/.npm-global/bin:$PATH"
           OC='/home/ubuntu/.npm-global/bin/openclaw'
           "$OC" agent --agent local2b \
-            --session-key local2b-smoke-v1 \
+            --session-key local2b-smoke-v2 \
             --message 'Reply exactly with: OPENCLAW_LOCAL2B_AGENT_OK' \
             --thinking off \
             --timeout 240 \
