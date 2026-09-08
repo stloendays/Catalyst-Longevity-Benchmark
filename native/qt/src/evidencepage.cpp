@@ -2,6 +2,7 @@
 
 #include <QAbstractItemView>
 #include <QComboBox>
+#include <QColor>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -14,6 +15,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QStyle>
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -144,7 +146,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     layout->addLayout(top);
 
     auto* sourceFrame = new QFrame;
-    sourceFrame->setObjectName(QStringLiteral("panel"));
+    sourceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* sourceLayout = new QVBoxLayout(sourceFrame);
     sourceLayout->setContentsMargins(18, 14, 18, 14);
     auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));
@@ -173,7 +175,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     layout->addLayout(metrics);
 
     auto* signalFrame = new QFrame;
-    signalFrame->setObjectName(QStringLiteral("panel"));
+    signalFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* signalLayout = new QVBoxLayout(signalFrame);
     signalLayout->setContentsMargins(18, 14, 18, 14);
     auto* signalTitle = new QLabel(QStringLiteral("当前资料提取摘要"));
@@ -186,11 +188,12 @@ EvidencePage::EvidencePage(QWidget* parent)
     signalsTable_->verticalHeader()->setVisible(false);
     signalsTable_->setAlternatingRowColors(true);
     signalsTable_->setMaximumHeight(165);
+    signalsTable_->setMouseTracking(true);
     signalLayout->addWidget(signalsTable_);
     layout->addWidget(signalFrame);
 
     auto* evidenceFrame = new QFrame;
-    evidenceFrame->setObjectName(QStringLiteral("panel"));
+    evidenceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* evidenceLayout = new QVBoxLayout(evidenceFrame);
     evidenceLayout->setContentsMargins(18, 14, 18, 14);
     auto* evidenceTitle = new QLabel(QStringLiteral("项目证据候选、绑定与复核"));
@@ -209,6 +212,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     evidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     evidenceTable_->setWordWrap(true);
+    evidenceTable_->setMouseTracking(true);
     evidenceLayout->addWidget(evidenceTable_, 1);
 
     auto* bindRow = new QHBoxLayout;
@@ -250,14 +254,14 @@ EvidencePage::EvidencePage(QWidget* parent)
     layout->addWidget(evidenceFrame, 1);
 
     auto* packetFrame = new QFrame;
-    packetFrame->setObjectName(QStringLiteral("panel"));
+    packetFrame->setObjectName(QStringLiteral("aiSurface"));
     auto* packetLayout = new QVBoxLayout(packetFrame);
     packetLayout->setContentsMargins(18, 14, 18, 14);
     auto* packetTop = new QHBoxLayout;
     auto* packetTitle = new QLabel(QStringLiteral("Evidence Packet · AI 输入边界"));
     packetTitle->setObjectName(QStringLiteral("sectionTitle"));
     packetStatusLabel_ = new QLabel(QStringLiteral("尚无可进入 AI 的证据"));
-    packetStatusLabel_->setObjectName(QStringLiteral("guardStatus"));
+    packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));
     packetTop->addWidget(packetTitle);
     packetTop->addStretch();
     packetTop->addWidget(packetStatusLabel_);
@@ -507,7 +511,18 @@ void EvidencePage::refreshEvidenceTable() {
             ? QString::number(item.sourcePage) : QStringLiteral("—")));
         evidenceTable_->setItem(row, 2, readOnlyItem(categoryLabel(item.category)));
         evidenceTable_->setItem(row, 3, readOnlyItem(displayCandidate(item)));
-        evidenceTable_->setItem(row, 4, readOnlyItem(statusLabel(item.status)));
+        auto* statusItem = readOnlyItem(statusLabel(item.status));
+        if (item.status == QStringLiteral("condition_reviewed_context_only")) {
+            statusItem->setForeground(QColor(QStringLiteral("#166534")));
+            statusItem->setBackground(QColor(QStringLiteral("#F0FDF4")));
+        } else if (item.status == QStringLiteral("candidate_requires_condition_binding")) {
+            statusItem->setForeground(QColor(QStringLiteral("#71717A")));
+            statusItem->setBackground(QColor(QStringLiteral("#F4F4F5")));
+        } else {
+            statusItem->setForeground(QColor(QStringLiteral("#92400E")));
+            statusItem->setBackground(QColor(QStringLiteral("#FFFBEB")));
+        }
+        evidenceTable_->setItem(row, 4, statusItem);
         evidenceTable_->setItem(row, 5, readOnlyItem(item.boundCatalyst.isEmpty()
             ? QStringLiteral("—") : item.boundCatalyst));
         evidenceTable_->setItem(row, 6, readOnlyItem(item.boundTimeHours.has_value()
@@ -527,10 +542,16 @@ void EvidencePage::refreshEvidencePacket() {
         packetStatusLabel_->setText(QStringLiteral("可进入 AI：%1 条 · 排除 %2 条")
             .arg(packet.reviewedContextItems)
             .arg(packet.pendingItems));
-        packetStatusLabel_->setStyleSheet(QStringLiteral("color:#166534;font-weight:700;"));
+        packetStatusLabel_->setStyleSheet(QString());
+        packetStatusLabel_->setObjectName(QStringLiteral("statusGood"));
+        packetStatusLabel_->style()->unpolish(packetStatusLabel_);
+        packetStatusLabel_->style()->polish(packetStatusLabel_);
     } else {
         packetStatusLabel_->setText(QStringLiteral("暂不可进入 AI · 待复核 %1 条").arg(packet.pendingItems));
-        packetStatusLabel_->setStyleSheet(QStringLiteral("color:#B45309;font-weight:700;"));
+        packetStatusLabel_->setStyleSheet(QString());
+        packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));
+        packetStatusLabel_->style()->unpolish(packetStatusLabel_);
+        packetStatusLabel_->style()->polish(packetStatusLabel_);
     }
     packetPreview_->setPlainText(EvidencePacketBuilder::toMarkdown(packet));
 }

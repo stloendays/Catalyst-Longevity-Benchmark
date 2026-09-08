@@ -24,6 +24,8 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTableWidget>
+#include <QTimer>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWidget>
@@ -31,6 +33,68 @@
 namespace catalyst {
 
 namespace {
+
+QString gptMonochromeStyle() {
+    return QStringLiteral(R"(
+        QMainWindow, QWidget { background:#F7F7F8; color:#111111; font-family:"Microsoft YaHei UI"; font-size:13px; }
+        QMainWindow { background:#F7F7F8; }
+        QStatusBar { background:#FFFFFF; color:#71717A; border-top:1px solid #E7E7E9; min-height:30px; }
+        QStatusBar QLabel { color:#71717A; padding:0 8px; }
+        #sidebar { background:#111111; border-right:1px solid #242424; }
+        #brand { color:#FFFFFF; background:transparent; border:none; padding:8px 8px 14px; font-size:16px; font-weight:700; letter-spacing:.3px; }
+        #sidebarFoot { color:#737373; font-size:11px; padding:8px 4px; }
+        #navButton { color:#D4D4D4; background:transparent; border:1px solid transparent; border-radius:10px; padding:10px 12px; text-align:left; font-weight:500; min-height:24px; }
+        #navButton:hover { background:#242424; border-color:#333333; color:#FFFFFF; }
+        #navButton:checked { background:#2F2F2F; border-color:#3C3C3C; color:#FFFFFF; font-weight:650; }
+        #navButton:pressed { background:#383838; }
+        #pageHeading { color:#111111; font-size:24px; font-weight:700; }
+        #mutedText { color:#71717A; line-height:1.55; }
+        #sectionTitle { color:#18181B; font-size:15px; font-weight:700; }
+        #metricTitle { color:#71717A; font-size:12px; font-weight:500; }
+        #metricValue { color:#111111; font-size:21px; font-weight:700; }
+        #sourcePath { color:#27272A; font-weight:650; }
+        #metricCard { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; min-height:70px; }
+        #metricCard:hover { background:#FCFCFC; border-color:#CFCFD2; }
+        #panel, #gptSurface, #evidenceSurface, #aiSurface { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; }
+        #panel:hover, #gptSurface:hover, #evidenceSurface:hover, #aiSurface:hover { background:#FEFEFE; border-color:#CFCFD2; }
+        #gptSurface { border-color:#DEDEE1; }
+        #evidenceSurface { border-left:3px solid #18181B; }
+        #aiSurface { background:#FAFAFA; border-color:#DCDCE0; }
+        #infoPanel { background:#FAFAFA; border:1px solid #E4E4E7; border-radius:12px; }
+        #statusNeutral, #statusGood, #statusWarn, #statusBad { border-radius:9px; padding:5px 9px; font-size:12px; font-weight:650; }
+        #statusNeutral { color:#52525B; background:#F4F4F5; border:1px solid #E4E4E7; }
+        #statusGood { color:#166534; background:#F0FDF4; border:1px solid #BBF7D0; }
+        #statusWarn { color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; }
+        #statusBad { color:#991B1B; background:#FEF2F2; border:1px solid #FECACA; }
+        #guardStatus { color:#18181B; font-size:14px; font-weight:700; padding:4px 0; }
+        #primaryButton { background:#111111; color:#FFFFFF; border:1px solid #111111; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
+        #primaryButton:hover { background:#2F2F2F; border-color:#2F2F2F; }
+        #primaryButton:pressed { background:#444444; border-color:#444444; }
+        #primaryButton:disabled { background:#B4B4B4; border-color:#B4B4B4; color:#F5F5F5; }
+        #secondaryButton { background:#FFFFFF; color:#27272A; border:1px solid #D4D4D8; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
+        #secondaryButton:hover { background:#F4F4F5; border-color:#A1A1AA; color:#111111; }
+        #secondaryButton:pressed { background:#EDEDEF; }
+        QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit { background:#FFFFFF; color:#18181B; border:1px solid #D4D4D8; border-radius:9px; padding:7px 9px; selection-background-color:#27272A; selection-color:#FFFFFF; }
+        QLineEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QTextEdit:hover { border-color:#A1A1AA; }
+        QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QTextEdit:focus { border:1px solid #52525B; background:#FFFFFF; }
+        QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled { background:#F4F4F5; color:#A1A1AA; }
+        QComboBox::drop-down, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { border:none; background:transparent; }
+        QTableWidget { background:#FFFFFF; alternate-background-color:#FAFAFA; border:1px solid #E4E4E7; border-radius:10px; gridline-color:#F0F0F1; selection-background-color:#F0F0F1; selection-color:#111111; }
+        QHeaderView::section { background:#F7F7F8; color:#52525B; border:none; border-right:1px solid #ECECEF; border-bottom:1px solid #E4E4E7; padding:9px 8px; font-weight:650; }
+        QTableWidget::item { padding:7px; border:none; }
+        QTableWidget::item:hover { background:#F5F5F6; }
+        QTableWidget::item:selected { background:#EDEDEF; color:#111111; }
+        QScrollBar:vertical { background:transparent; width:10px; margin:3px 2px; }
+        QScrollBar::handle:vertical { background:#D4D4D8; border-radius:4px; min-height:28px; }
+        QScrollBar::handle:vertical:hover { background:#A1A1AA; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+        QScrollBar:horizontal { background:transparent; height:10px; margin:2px 3px; }
+        QScrollBar::handle:horizontal { background:#D4D4D8; border-radius:4px; min-width:28px; }
+        QScrollBar::handle:horizontal:hover { background:#A1A1AA; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
+        QToolTip { background:#18181B; color:#FFFFFF; border:1px solid #3F3F46; border-radius:7px; padding:6px 8px; }
+    )");
+}
 
 QLabel* heading(const QString& text, int pointSize = 20) {
     auto* label = new QLabel(text);
@@ -117,6 +181,15 @@ MainWindow::MainWindow(QWidget* parent)
     buildUi();
     applyTheme();
     newProject();
+    QTimer::singleShot(0, this, [this]() {
+        setStyleSheet(gptMonochromeStyle());
+        for (auto* frame : findChildren<QFrame*>()) {
+            frame->setAttribute(Qt::WA_Hover, true);
+            frame->setMouseTracking(true);
+            if (frame->objectName() != QStringLiteral("sidebar")) frame->setGraphicsEffect(nullptr);
+        }
+        for (auto* table : findChildren<QTableWidget*>()) table->setMouseTracking(true);
+    });
 }
 
 void MainWindow::buildUi() {
@@ -247,7 +320,7 @@ QWidget* MainWindow::buildOverviewPage() {
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
-    titleBox->addWidget(heading(QStringLiteral("催化剂长期表现总览")));
+    titleBox->addWidget(heading(QStringLiteral("总览  Dashboard")));
     titleBox->addWidget(muted(QStringLiteral(
         "导入 CSV 或 Excel 后，直接计算保持率、删失感知寿命阈值与实验条件守门结果。")));
     top->addLayout(titleBox, 1);
@@ -280,10 +353,10 @@ QWidget* MainWindow::buildOverviewPage() {
     layout->addLayout(metrics);
 
     auto* chartFrame = new QFrame;
-    chartFrame->setObjectName(QStringLiteral("panel"));
+    chartFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* chartLayout = new QVBoxLayout(chartFrame);
     chartLayout->setContentsMargins(18, 16, 18, 16);
-    auto* chartTitle = new QLabel(QStringLiteral("性能随时间变化"));
+    auto* chartTitle = new QLabel(QStringLiteral("长期性能轨迹  ·  Long-term performance"));
     chartTitle->setObjectName(QStringLiteral("sectionTitle"));
     chart_ = new ChartWidget;
     chartLayout->addWidget(chartTitle);
@@ -291,10 +364,10 @@ QWidget* MainWindow::buildOverviewPage() {
     layout->addWidget(chartFrame, 1);
 
     auto* tableFrame = new QFrame;
-    tableFrame->setObjectName(QStringLiteral("panel"));
+    tableFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* tableLayout = new QVBoxLayout(tableFrame);
     tableLayout->setContentsMargins(18, 16, 18, 16);
-    auto* tableTitle = new QLabel(QStringLiteral("催化剂概览"));
+    auto* tableTitle = new QLabel(QStringLiteral("催化剂概览  ·  Decision summary"));
     tableTitle->setObjectName(QStringLiteral("sectionTitle"));
     tableLayout->addWidget(tableTitle);
     summaryTable_ = new QTableWidget(0, 7);
@@ -364,7 +437,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* guardTitle = new QLabel(QStringLiteral("实验条件守门"));
     guardTitle->setObjectName(QStringLiteral("sectionTitle"));
     conditionStatusLabel_ = new QLabel(QStringLiteral("—"));
-    conditionStatusLabel_->setObjectName(QStringLiteral("guardStatus"));
+    conditionStatusLabel_->setObjectName(QStringLiteral("statusNeutral"));
     conditionMessageLabel_ = muted(QStringLiteral("尚未分析。"));
     guardLayout->addWidget(guardTitle);
     guardLayout->addWidget(conditionStatusLabel_);
@@ -400,21 +473,69 @@ QWidget* MainWindow::buildAiPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
-    layout->addWidget(heading(QStringLiteral("AI 工作区")));
+    layout->addWidget(heading(QStringLiteral("AI 智能研判")));
     layout->addWidget(muted(QStringLiteral(
-        "原生证据候选现在可以持久化、绑定并人工完成条件复核。下一阶段将把 Evidence Packet、AI Analyst、Evidence Critic 与外部数据库客户端接入这里。")));
+        "AI 只在受控证据边界内工作。先构建证据包，再完成分析、证据审查与可追溯输出；任何阶段都不会自动改写原始实验观测。")));
 
-    auto* card = new QFrame;
-    card->setObjectName(QStringLiteral("panel"));
-    auto* cardLayout = new QVBoxLayout(card);
-    cardLayout->setContentsMargins(24, 22, 24, 22);
-    auto* title = new QLabel(QStringLiteral("Native AI integration roadmap"));
-    title->setObjectName(QStringLiteral("sectionTitle"));
-    cardLayout->addWidget(title);
-    cardLayout->addWidget(muted(QStringLiteral(
-        "Evidence Packet  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")));
-    cardLayout->addStretch();
-    layout->addWidget(card, 1);
+    auto* readiness = new QFrame;
+    readiness->setObjectName(QStringLiteral("aiSurface"));
+    auto* readinessLayout = new QHBoxLayout(readiness);
+    readinessLayout->setContentsMargins(20, 16, 20, 16);
+    readinessLayout->setSpacing(14);
+    auto* readinessTitle = new QLabel(QStringLiteral("证据就绪度"));
+    readinessTitle->setObjectName(QStringLiteral("sectionTitle"));
+    auto* readinessState = new QLabel(QStringLiteral("本地证据链已启用"));
+    readinessState->setObjectName(QStringLiteral("statusGood"));
+    readinessLayout->addWidget(readinessTitle);
+    readinessLayout->addWidget(muted(QStringLiteral("实验数据、资料候选与人工复核状态保持分层。")), 1);
+    readinessLayout->addWidget(readinessState);
+    layout->addWidget(readiness);
+
+    auto* stages = new QGridLayout;
+    stages->setHorizontalSpacing(12);
+    stages->setVerticalSpacing(12);
+    const QStringList titles = {
+        QStringLiteral("01  证据包"), QStringLiteral("02  AI 分析器"),
+        QStringLiteral("03  证据审查器"), QStringLiteral("04  审计输出")
+    };
+    const QStringList descriptions = {
+        QStringLiteral("只纳入已绑定并完成人工条件复核的上下文证据。"),
+        QStringLiteral("基于证据包生成候选解释、比较与下一步建议。"),
+        QStringLiteral("检查引用、条件错配、删失语义与过度外推。"),
+        QStringLiteral("保留输入边界、证据 ID、审查状态与最终结论。")
+    };
+    const QStringList states = {
+        QStringLiteral("可审计"), QStringLiteral("待接入 API"),
+        QStringLiteral("待接入 API"), QStringLiteral("本地基础已就绪")
+    };
+    for (int i = 0; i < titles.size(); ++i) {
+        auto* card = new QFrame;
+        card->setObjectName(QStringLiteral("aiSurface"));
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(20, 18, 20, 18);
+        cardLayout->setSpacing(8);
+        auto* title = new QLabel(titles[i]);
+        title->setObjectName(QStringLiteral("sectionTitle"));
+        auto* state = new QLabel(states[i]);
+        state->setObjectName(i == 0 || i == 3 ? QStringLiteral("statusNeutral") : QStringLiteral("statusWarn"));
+        cardLayout->addWidget(title);
+        cardLayout->addWidget(muted(descriptions[i]));
+        cardLayout->addStretch();
+        cardLayout->addWidget(state, 0, Qt::AlignLeft);
+        stages->addWidget(card, i / 2, i % 2);
+    }
+    layout->addLayout(stages, 1);
+
+    auto* boundary = new QFrame;
+    boundary->setObjectName(QStringLiteral("infoPanel"));
+    auto* boundaryLayout = new QVBoxLayout(boundary);
+    boundaryLayout->setContentsMargins(18, 14, 18, 14);
+    auto* boundaryTitle = new QLabel(QStringLiteral("AI 输入边界"));
+    boundaryTitle->setObjectName(QStringLiteral("sectionTitle"));
+    boundaryLayout->addWidget(boundaryTitle);
+    boundaryLayout->addWidget(muted(QStringLiteral(
+        "未绑定候选、条件未复核条目和外部背景记录不会直接成为寿命结论。最终输出必须保留证据来源与审查状态。")));
+    layout->addWidget(boundary);
     return page;
 }
 
@@ -714,9 +835,12 @@ void MainWindow::refreshAnalysisViews() {
 
     if (conditionStatusLabel_) {
         conditionStatusLabel_->setText(ConditionGuard::statusText(analysis_.conditionAudit.status));
-        conditionStatusLabel_->setStyleSheet(analysis_.conditionAudit.blocksDirectRanking()
-            ? QStringLiteral("color: #B91C1C; font-size: 15px; font-weight: 700; padding: 3px 0;")
-            : QStringLiteral("color: #166534; font-size: 15px; font-weight: 700; padding: 3px 0;"));
+        conditionStatusLabel_->setStyleSheet(QString());
+        conditionStatusLabel_->setObjectName(analysis_.conditionAudit.blocksDirectRanking()
+            ? QStringLiteral("statusBad")
+            : QStringLiteral("statusGood"));
+        conditionStatusLabel_->style()->unpolish(conditionStatusLabel_);
+        conditionStatusLabel_->style()->polish(conditionStatusLabel_);
     }
     if (conditionMessageLabel_) {
         conditionMessageLabel_->setText(analysis_.conditionAudit.message.isEmpty()

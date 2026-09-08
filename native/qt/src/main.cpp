@@ -229,8 +229,8 @@ QIcon makeApplicationIcon() {
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
     QLinearGradient gradient(10, 8, 118, 120);
-    gradient.setColorAt(0.0, QColor(QStringLiteral("#0F766E")));
-    gradient.setColorAt(1.0, QColor(QStringLiteral("#0B4F6C")));
+    gradient.setColorAt(0.0, QColor(QStringLiteral("#111111")));
+    gradient.setColorAt(1.0, QColor(QStringLiteral("#3F3F46")));
     painter.setPen(Qt::NoPen);
     painter.setBrush(gradient);
     painter.drawRoundedRect(QRectF(6, 6, 116, 116), 27, 27);
@@ -252,7 +252,7 @@ QIcon makeApplicationIcon() {
     painter.drawLine(QPointF(43, 27), QPointF(85, 27));
     painter.drawLine(QPointF(40, 79), QPointF(88, 79));
 
-    painter.setBrush(QColor(QStringLiteral("#BFE8E3")));
+    painter.setBrush(QColor(QStringLiteral("#D4D4D8")));
     painter.setPen(Qt::NoPen);
     painter.drawEllipse(QPointF(52, 88), 5.0, 5.0);
     painter.drawEllipse(QPointF(70, 91), 3.8, 3.8);
@@ -636,9 +636,9 @@ void applyWindowPolish(catalyst::MainWindow& window) {
         QString tooltip;
         if (!iconForButton(button->text(), &icon, &tooltip)) continue;
 
-        QColor color(QStringLiteral("#344054"));
+        QColor color(QStringLiteral("#3F3F46"));
         if (button->objectName() == QStringLiteral("navButton")) {
-            color = QColor(QStringLiteral("#D8E5F2"));
+            color = QColor(QStringLiteral("#E5E5E5"));
             button->setIconSize(QSize(19, 19));
         } else if (button->objectName() == QStringLiteral("primaryButton")) {
             color = QColor(QStringLiteral("#FFFFFF"));
