@@ -28,3 +28,4 @@ jobs:
       - name: Remove key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
+# probe 3
