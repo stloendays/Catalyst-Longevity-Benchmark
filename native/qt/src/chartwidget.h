@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPointF>
+#include <QString>
 #include <QWidget>
 #include <optional>
 
@@ -20,6 +21,7 @@ public:
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
 private:
@@ -29,9 +31,13 @@ private:
         double performance = 0.0;
         QPointF screen;
     };
+
+    std::optional<HoverPoint> nearestPoint(const QPointF& position, double radius) const;
+
     QVector<Record> records_;
     QVector<HoverPoint> renderedPoints_;
     std::optional<HoverPoint> hovered_;
+    QString selectedCatalyst_;
 };
 
 } // namespace catalyst

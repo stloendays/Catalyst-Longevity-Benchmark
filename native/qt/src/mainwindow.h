@@ -48,6 +48,7 @@ private:
     void setRecords(const QVector<Record>& records, const QString& sourceLabel, bool markDirty = true);
     void refreshRawTable();
     void refreshAnalysisViews();
+    void refreshDecisionOverview();
     void updateProjectUi();
     void setStatus(const QString& text, bool error = false);
     bool saveProjectTo(const QString& path);
@@ -70,6 +71,17 @@ private:
     QLabel* metricLongest_ = nullptr;
     QLabel* metricLeader_ = nullptr;
     QLabel* metricCondition_ = nullptr;
+    QLabel* decisionComparability_ = nullptr;
+    QLabel* decisionComparabilityDetail_ = nullptr;
+    QLabel* decisionLeader_ = nullptr;
+    QLabel* decisionLeaderDetail_ = nullptr;
+    QLabel* decisionT90_ = nullptr;
+    QLabel* decisionT90Detail_ = nullptr;
+    QLabel* decisionEvidence_ = nullptr;
+    QLabel* decisionEvidenceDetail_ = nullptr;
+    QLabel* aiEvidenceStatus_ = nullptr;
+    QLabel* aiEvidenceDetail_ = nullptr;
+    QLabel* aiPacketStageStatus_ = nullptr;
     QLabel* conditionStatusLabel_ = nullptr;
     QLabel* conditionMessageLabel_ = nullptr;
     QTableWidget* conditionMismatchTable_ = nullptr;
