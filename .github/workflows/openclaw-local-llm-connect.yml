@@ -1,0 +1,136 @@
+name: Connect local Qwen to OpenClaw
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-local-llm-connect.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-local-llm-connect
+  cancel-in-progress: true
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Configure local model for OpenClaw
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          SERVER='/opt/rhocodec-llm/bin/llama-server'
+          MODEL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          test -x "$OC"
+          test -x "$SERVER"
+          test -s "$MODEL"
+
+          if ! "$SERVER" --help 2>&1 | grep -q -- '--alias'; then
+            echo 'Installed llama-server does not support --alias.'
+            exit 1
+          fi
+
+          sudo install -d -m 755 /etc/systemd/system/rhocodec-llm.service.d
+          sudo tee /etc/systemd/system/rhocodec-llm.service.d/openclaw.conf >/dev/null <<'UNIT'
+          [Service]
+          ExecStart=
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf --alias qwen3.5-2b-q4 --host 127.0.0.1 --port 18080 -c 8192 -t 4 -b 128 -ub 128 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          UNIT
+          sudo systemctl daemon-reload
+          sudo systemctl restart rhocodec-llm.service
+
+          ready=0
+          for i in $(seq 1 100); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models > /tmp/local-models.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 3
+          done
+          if [ "$ready" -ne 1 ]; then
+            sudo systemctl status rhocodec-llm.service --no-pager -l || true
+            sudo journalctl -u rhocodec-llm.service -n 120 --no-pager || true
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/local-models.json'))
+          items=d.get('data') or []
+          assert items, d
+          print('local model id:', items[0].get('id'))
+          print('local context:', (items[0].get('meta') or {}).get('n_ctx'))
+          assert items[0].get('id') == 'qwen3.5-2b-q4', d
+          assert int((items[0].get('meta') or {}).get('n_ctx') or 0) >= 8192, d
+          PY
+
+          PROVIDER='{"baseUrl":"http://127.0.0.1:18080/v1","apiKey":"local-no-key","api":"openai-completions","models":[{"id":"qwen3.5-2b-q4","name":"Local Qwen3.5 2B Q4","reasoning":false,"input":["text"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":8192,"maxTokens":512,"compat":{"supportsTools":false}}]}'
+
+          "$OC" config set models.mode '"merge"' --strict-json --dry-run
+          "$OC" config set models.providers.rhocodec_local "$PROVIDER" --strict-json --dry-run
+          "$OC" config set 'agents.defaults.models["rhocodec_local/qwen3.5-2b-q4"]' '{"alias":"Local2B"}' --strict-json --dry-run
+
+          "$OC" config set models.mode '"merge"' --strict-json
+          "$OC" config set models.providers.rhocodec_local "$PROVIDER" --strict-json
+          "$OC" config set 'agents.defaults.models["rhocodec_local/qwen3.5-2b-q4"]' '{"alias":"Local2B"}' --strict-json
+          "$OC" config validate
+
+          systemctl --user restart openclaw-gateway.service
+          sleep 5
+          systemctl --user is-active --quiet openclaw-gateway.service
+          echo '=== CONFIGURED MODELS ==='
+          "$OC" models list 2>&1 | grep -E 'rhocodec_local|qwen3\.5-2b-q4|Local2B' || true
+          echo '=== MEMORY ==='
+          free -h
+          REMOTE
+
+      - name: Test local model through OpenClaw Gateway
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=40 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          set +e
+          "$OC" agent \
+            --session-key local2b-smoke \
+            --model rhocodec_local/qwen3.5-2b-q4 \
+            --message 'Reply exactly with: OPENCLAW_LOCAL_2B_OK' \
+            --thinking off \
+            --timeout 180 \
+            --json > /tmp/openclaw-local2b.json 2>/tmp/openclaw-local2b.err
+          rc=$?
+          set -e
+          echo "agent exit code: $rc"
+          if [ -s /tmp/openclaw-local2b.json ]; then
+            cat /tmp/openclaw-local2b.json
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo '=== AGENT STDERR ==='
+            sed -n '1,180p' /tmp/openclaw-local2b.err || true
+            echo '=== GATEWAY JOURNAL ==='
+            journalctl --user -u openclaw-gateway.service -n 120 --no-pager || true
+            exit "$rc"
+          fi
+          grep -q 'OPENCLAW_LOCAL_2B_OK' /tmp/openclaw-local2b.json
+          echo 'OPENCLAW_LOCAL_2B_GATEWAY=PASS'
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
