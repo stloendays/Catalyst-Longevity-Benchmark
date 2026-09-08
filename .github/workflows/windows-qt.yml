@@ -17,8 +17,6 @@ concurrency:
 
 jobs:
   build-qt-desktop:
-    # Qt is installed with the MSVC 2022 kit below, so pin the runner to a
-    # Visual Studio 2022 image instead of following windows-latest to VS 2026.
     runs-on: windows-2022
     timeout-minutes: 45
 
@@ -32,7 +30,7 @@ jobs:
           version: "6.8.3"
           arch: "win64_msvc2022_64"
           cache: true
-          modules: ""
+          modules: "qtpdf"
 
       - name: Configure CMake
         shell: pwsh
@@ -47,16 +45,13 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Native Qt executable was not produced: $exe" }
           Get-Item $exe | Select-Object Name, Length
 
-      - name: Run native engine persistence report Excel and evidence self-test
+      - name: Run native engine PDF Evidence Packet persistence report Excel self-test
         shell: pwsh
         run: |
           $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
-          # This target uses the Windows GUI subsystem. Invoke it as a process
-          # and wait explicitly; PowerShell's $LASTEXITCODE can stay unset for
-          # GUI applications launched with the call operator.
           $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
           if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
-          Write-Host "Native self-test passed."
+          Write-Host "Native PDF/Evidence Packet self-test passed."
 
       - name: Smoke-test native desktop window
         shell: pwsh
@@ -84,6 +79,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path "dist-qt\app\sqldrivers\qsqlite.dll")) {
             throw "Qt SQLite driver was not deployed; .clrproj project persistence would fail on user machines"
+          }
+          if (-not (Test-Path "dist-qt\app\Qt6Pdf.dll")) {
+            throw "Qt PDF runtime was not deployed; native PDF paper reading would fail on user machines"
           }
           if (-not (Test-Path "dist-qt\app\THIRD_PARTY_NOTICES.md")) {
             throw "Third-party license notices were not included in the desktop package"
@@ -168,7 +166,7 @@ jobs:
 
             Recommended: download `Catalyst-Longevity-Research-Setup.exe` and install normally. The installed application opens as a native Windows window — no browser, no Streamlit and no Python runtime.
 
-            Current native modules include `.clrproj` SQLite project save/open, unsaved-change protection, CSV and `.xlsx` ingestion, trajectory chart, retention summary, condition comparability guard, guarded shared-time ranking, censor-aware T95/T90/T80 evidence, native PDF report export, and the first conservative document-evidence extraction backend for text files.
+            Current native modules include `.clrproj` SQLite project save/open, CSV and `.xlsx` ingestion, trajectory/lifetime analysis, condition comparability guard, native PDF report export, native searchable-PDF paper text extraction with page traceability, conservative evidence review states, and an Evidence Packet that only admits manually condition-reviewed catalyst/time-bound context for future AI Analyst / Evidence Critic use. Scanned PDF pages are not silently OCR'd.
           files: |
             release/Catalyst-Longevity-Research-Setup.exe
             release/Catalyst-Longevity-Research-Portable.zip

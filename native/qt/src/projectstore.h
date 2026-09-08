@@ -10,8 +10,8 @@ namespace catalyst {
 
 class ProjectStore {
 public:
-    // Keep schema version 1 backward compatible. Evidence persistence is an
-    // additive table so older .clrproj files remain readable.
+    // Keep schema version 1 backward compatible. Evidence extensions are
+    // additive columns/tables so older .clrproj files remain readable.
     static constexpr int SchemaVersion = 1;
 
     static bool saveProject(

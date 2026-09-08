@@ -2,6 +2,7 @@
 
 #include "analysisengine.h"
 #include "conditionguard.h"
+#include "evidencepacket.h"
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -54,16 +55,23 @@ QString truncate(QString value, int maxLength = 260) {
     return value.left(maxLength - 1) + QChar(0x2026);
 }
 
+QString sourcePageText(const EvidenceItem& item) {
+    if (item.sourcePage <= 0) return QStringLiteral("—");
+    return QStringLiteral("p.%1").arg(item.sourcePage);
+}
+
 QString buildHtml(
     const AnalysisResult& result,
     const QString& sourceLabel,
     const QVector<EvidenceItem>& evidenceItems) {
+    const EvidencePacket packet = EvidencePacketBuilder::build(evidenceItems);
+
     QString html;
     html += QStringLiteral(
         "<html><head><meta charset='utf-8'>"
         "<style>"
         "body{font-family:'Microsoft YaHei UI','Segoe UI',sans-serif;color:#17202a;font-size:9.5pt;}"
-        "h1{font-size:21pt;margin-bottom:4px;} h2{font-size:14pt;margin-top:20px;}"
+        "h1{font-size:21pt;margin-bottom:4px;} h2{font-size:14pt;margin-top:20px;} h3{font-size:11.5pt;margin-top:14px;}"
         "p.meta{color:#5f6b76;}"
         "table{border-collapse:collapse;width:100%;margin-top:8px;}"
         "th,td{border:1px solid #d8dde3;padding:5px 6px;text-align:left;vertical-align:top;}"
@@ -133,6 +141,50 @@ QString buildHtml(
         html += QStringLiteral("<p>当前数据不足以给出共同实际观测时间下的直接领先者。</p>");
     }
 
+    html += QStringLiteral("<h2>Evidence Packet</h2>");
+    html += QStringLiteral(
+        "<table><tr><th>AI 可用</th><th>已复核上下文</th><th>待复核/排除</th><th>来源</th><th>催化剂</th></tr>");
+    html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td></tr></table>")
+        .arg(packet.readyForAi ? QStringLiteral("是") : QStringLiteral("否"))
+        .arg(packet.reviewedContextItems)
+        .arg(packet.pendingItems)
+        .arg(packet.sourceCount)
+        .arg(packet.catalystCount);
+
+    if (!packet.warnings.isEmpty()) {
+        html += QStringLiteral("<p class='note'><b>Packet guardrails：</b><br/>");
+        for (const auto& warning : packet.warnings) {
+            html += QStringLiteral("• %1<br/>").arg(escape(warning));
+        }
+        html += QStringLiteral("</p>");
+    }
+
+    if (!packet.contextItems.isEmpty()) {
+        html += QStringLiteral(
+            "<table><tr><th>来源/页码</th><th>绑定</th><th>类别</th><th>候选</th><th>复核备注</th><th>原文上下文</th></tr>");
+        for (const auto& item : packet.contextItems) {
+            const QString source = item.sourcePath.isEmpty()
+                ? QStringLiteral("—")
+                : QFileInfo(item.sourcePath).fileName();
+            const QString sourceWithPage = QStringLiteral("%1 · %2").arg(source, sourcePageText(item));
+            const QString binding = QStringLiteral("%1 @ %2 h")
+                .arg(item.boundCatalyst, QString::number(*item.boundTimeHours, 'g', 8));
+            const QString candidate = item.valueText.isEmpty() ? item.term : item.valueText;
+            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td class='small'>%5</td><td class='small'>%6</td></tr>")
+                .arg(escape(sourceWithPage),
+                     escape(binding),
+                     escape(evidenceCategoryLabel(item.category)),
+                     escape(candidate),
+                     escape(truncate(item.note)),
+                     escape(truncate(item.snippet)));
+        }
+        html += QStringLiteral("</table>");
+    }
+
+    html += QStringLiteral(
+        "<p class='note'><b>Evidence Packet 语义：</b>只有完成催化剂、时间和人工条件复核的条目进入 AI 上下文。"
+        "Packet 为 context-only，不得覆盖实验观测、寿命阈值或直接排名。</p>");
+
     html += QStringLiteral("<h2>资料证据审计附录</h2>");
     if (evidenceItems.isEmpty()) {
         html += QStringLiteral("<p>当前项目未保存资料证据候选。</p>");
@@ -153,7 +205,7 @@ QString buildHtml(
             "这些资料证据仍不会自动修改实验观测、寿命阈值或排名。</p>");
 
         html += QStringLiteral(
-            "<table><tr><th>来源</th><th>类别</th><th>候选</th><th>状态</th><th>绑定</th><th>备注 / 原文</th></tr>");
+            "<table><tr><th>来源</th><th>页</th><th>类别</th><th>候选</th><th>状态</th><th>绑定</th><th>备注 / 原文</th></tr>");
         for (const auto& item : evidenceItems) {
             const QString source = item.sourcePath.isEmpty() ? QStringLiteral("—") : QFileInfo(item.sourcePath).fileName();
             const QString binding = item.boundCatalyst.isEmpty()
@@ -165,8 +217,9 @@ QString buildHtml(
             if (!item.snippet.isEmpty()) {
                 context = context.isEmpty() ? item.snippet : QStringLiteral("%1 | 原文：%2").arg(context, item.snippet);
             }
-            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td><td class='small'>%6</td></tr>")
+            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td><td>%6</td><td class='small'>%7</td></tr>")
                 .arg(escape(source),
+                     escape(sourcePageText(item)),
                      escape(evidenceCategoryLabel(item.category)),
                      escape(item.valueText.isEmpty() ? item.term : item.valueText),
                      escape(evidenceStatusLabel(item.status)),
@@ -179,7 +232,7 @@ QString buildHtml(
     html += QStringLiteral(
         "<p class='note'><b>证据语义：</b> T95 / T90 / T80 采用离散观测的删失语义。"
         "报告不会把两个实际观测点之间的插值结果冒充为直接测得的精确寿命。"
-        "资料证据与实验观测在项目文件中分开存储，人工复核不会静默覆盖原始数据。</p>");
+        "PDF 页码、来源 SHA-256、绑定与人工复核状态用于可追溯性；资料证据与实验观测在项目文件中分开存储。</p>");
     html += QStringLiteral("</body></html>");
     return html;
 }

@@ -2,6 +2,15 @@
 
 Catalyst Longevity Research includes or links the following third-party software in the native desktop build.
 
+## Qt 6
+
+Project: https://www.qt.io/
+Components used by this build include Qt Widgets, Qt SQL, Qt PDF and their deployed runtime dependencies.
+
+Qt is available under commercial and open-source licensing options. The release package is intended to preserve the applicable Qt runtime notices and license obligations. See the Qt licensing documentation and the license files distributed with the corresponding Qt build for the authoritative terms.
+
+Qt PDF is used only for native extraction of text that already exists in the PDF text layer. The application does not silently OCR scanned pages.
+
 ## QXlsx
 
 Project: https://github.com/QtExcel/QXlsx

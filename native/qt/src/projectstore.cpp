@@ -43,6 +43,28 @@ bool tableExists(QSqlDatabase& db, const QString& tableName) {
     return query.exec() && query.next();
 }
 
+bool columnExists(QSqlDatabase& db, const QString& tableName, const QString& columnName) {
+    QSqlQuery query(db);
+    if (!query.exec(QStringLiteral("PRAGMA table_info(%1)").arg(tableName))) return false;
+    while (query.next()) {
+        if (query.value(1).toString() == columnName) return true;
+    }
+    return false;
+}
+
+bool ensureEvidenceColumns(QSqlDatabase& db, QString* errorMessage) {
+    if (!columnExists(db, QStringLiteral("evidence_items"), QStringLiteral("source_page"))) {
+        QSqlQuery alter(db);
+        if (!execOrSetError(
+                alter,
+                errorMessage,
+                QStringLiteral("ALTER TABLE evidence_items ADD COLUMN source_page INTEGER"))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 bool ProjectStore::saveProject(
@@ -91,6 +113,7 @@ bool ProjectStore::saveProject(
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "source_path TEXT, "
                 "source_sha256 TEXT, "
+                "source_page INTEGER, "
                 "category TEXT NOT NULL, "
                 "term TEXT, "
                 "value_text TEXT, "
@@ -103,7 +126,8 @@ bool ProjectStore::saveProject(
             if (!execOrSetError(query, errorMessage, QStringLiteral("PRAGMA foreign_keys = ON"))
                 || !execOrSetError(query, errorMessage, metadataSql)
                 || !execOrSetError(query, errorMessage, observationsSql)
-                || !execOrSetError(query, errorMessage, evidenceSql)) {
+                || !execOrSetError(query, errorMessage, evidenceSql)
+                || !ensureEvidenceColumns(db, errorMessage)) {
                 db.close();
             } else if (!db.transaction()) {
                 setError(errorMessage, QStringLiteral("无法开始保存事务：%1").arg(db.lastError().text()));
@@ -130,7 +154,7 @@ bool ProjectStore::saveProject(
                         {QStringLiteral("product"), QStringLiteral("Catalyst Longevity Research")},
                         {QStringLiteral("saved_utc"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
                         {QStringLiteral("project_name"), QFileInfo(path).completeBaseName()},
-                        {QStringLiteral("evidence_model"), QStringLiteral("candidate_binding_v1")}
+                        {QStringLiteral("evidence_model"), QStringLiteral("pdf_page_binding_packet_v2")}
                     };
                     for (const auto& entry : entries) {
                         metadata.bindValue(0, entry.first);
@@ -174,20 +198,21 @@ bool ProjectStore::saveProject(
                     QSqlQuery insertEvidence(db);
                     insertEvidence.prepare(QStringLiteral(
                         "INSERT INTO evidence_items("
-                        "source_path, source_sha256, category, term, value_text, snippet, "
+                        "source_path, source_sha256, source_page, category, term, value_text, snippet, "
                         "bound_catalyst, bound_time_h, status, note"
-                        ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+                        ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
                     for (const auto& item : evidenceItems) {
                         insertEvidence.bindValue(0, item.sourcePath);
                         insertEvidence.bindValue(1, item.sourceSha256);
-                        insertEvidence.bindValue(2, item.category);
-                        insertEvidence.bindValue(3, item.term);
-                        insertEvidence.bindValue(4, item.valueText);
-                        insertEvidence.bindValue(5, item.snippet);
-                        insertEvidence.bindValue(6, item.boundCatalyst);
-                        insertEvidence.bindValue(7, optionalVariant(item.boundTimeHours));
-                        insertEvidence.bindValue(8, item.status);
-                        insertEvidence.bindValue(9, item.note);
+                        insertEvidence.bindValue(2, item.sourcePage > 0 ? QVariant(item.sourcePage) : QVariant());
+                        insertEvidence.bindValue(3, item.category);
+                        insertEvidence.bindValue(4, item.term);
+                        insertEvidence.bindValue(5, item.valueText);
+                        insertEvidence.bindValue(6, item.snippet);
+                        insertEvidence.bindValue(7, item.boundCatalyst);
+                        insertEvidence.bindValue(8, optionalVariant(item.boundTimeHours));
+                        insertEvidence.bindValue(9, item.status);
+                        insertEvidence.bindValue(10, item.note);
                         if (!insertEvidence.exec()) {
                             setError(errorMessage,
                                 QStringLiteral("写入证据候选失败：%1").arg(insertEvidence.lastError().text()));
@@ -289,13 +314,19 @@ bool ProjectStore::loadProject(
                 }
 
                 // Evidence is additive under schema version 1. Old projects that
-                // predate this table remain valid and simply load zero items.
+                // predate the table or page column remain valid.
                 if (ok && tableExists(db, QStringLiteral("evidence_items"))) {
+                    const bool hasSourcePage = columnExists(
+                        db, QStringLiteral("evidence_items"), QStringLiteral("source_page"));
+                    const QString pageExpression = hasSourcePage
+                        ? QStringLiteral("source_page")
+                        : QStringLiteral("NULL AS source_page");
                     QSqlQuery evidenceQuery(db);
-                    if (!evidenceQuery.exec(QStringLiteral(
-                            "SELECT source_path, source_sha256, category, term, value_text, snippet, "
-                            "bound_catalyst, bound_time_h, status, note "
-                            "FROM evidence_items ORDER BY id"))) {
+                    const QString sql = QStringLiteral(
+                        "SELECT source_path, source_sha256, %1, category, term, value_text, snippet, "
+                        "bound_catalyst, bound_time_h, status, note "
+                        "FROM evidence_items ORDER BY id").arg(pageExpression);
+                    if (!evidenceQuery.exec(sql)) {
                         setError(errorMessage,
                             QStringLiteral("读取项目证据失败：%1").arg(evidenceQuery.lastError().text()));
                         ok = false;
@@ -304,14 +335,15 @@ bool ProjectStore::loadProject(
                             EvidenceItem item;
                             item.sourcePath = evidenceQuery.value(0).toString();
                             item.sourceSha256 = evidenceQuery.value(1).toString();
-                            item.category = evidenceQuery.value(2).toString();
-                            item.term = evidenceQuery.value(3).toString();
-                            item.valueText = evidenceQuery.value(4).toString();
-                            item.snippet = evidenceQuery.value(5).toString();
-                            item.boundCatalyst = evidenceQuery.value(6).toString();
-                            item.boundTimeHours = optionalDouble(evidenceQuery.value(7));
-                            item.status = evidenceQuery.value(8).toString();
-                            item.note = evidenceQuery.value(9).toString();
+                            item.sourcePage = evidenceQuery.value(2).isNull() ? -1 : evidenceQuery.value(2).toInt();
+                            item.category = evidenceQuery.value(3).toString();
+                            item.term = evidenceQuery.value(4).toString();
+                            item.valueText = evidenceQuery.value(5).toString();
+                            item.snippet = evidenceQuery.value(6).toString();
+                            item.boundCatalyst = evidenceQuery.value(7).toString();
+                            item.boundTimeHours = optionalDouble(evidenceQuery.value(8));
+                            item.status = evidenceQuery.value(9).toString();
+                            item.note = evidenceQuery.value(10).toString();
                             evidenceItems->append(item);
                         }
                     }
