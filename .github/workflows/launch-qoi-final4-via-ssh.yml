@@ -1,0 +1,174 @@
+name: Launch QoI final four via Tencent SSH
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/launch-qoi-final4-via-ssh.yml
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Configure Tencent SSH
+        env:
+          SSH_KEY: ${{ secrets.TENCENT_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/tencent"
+          chmod 600 "$HOME/.ssh/tencent"
+          ssh-keyscan -T 15 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Prepare and launch frozen QoI recovery service
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+            -i "$HOME/.ssh/tencent" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          VENV="$BASE/venv"
+          FROZEN=893f931b3045b0b628329db81999c2f439d4e830
+          sudo mkdir -p "$BASE"
+          sudo chown -R ubuntu:ubuntu "$BASE"
+
+          echo '=== SERVER ==='
+          hostname
+          date -Is
+          nproc
+          free -h
+          df -h /
+
+          if [ -d "$REPO/.git" ]; then
+            echo 'Using existing /opt/qoi-final4/repo checkout.'
+          elif [ -d "$HOME/QoI/.git" ]; then
+            echo 'Cloning from existing ~/QoI checkout.'
+            git clone --no-checkout "$HOME/QoI" "$REPO"
+          elif GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15' git ls-remote git@github.com:stloendays/QoI.git >/dev/null 2>&1; then
+            echo 'Cloning private QoI repository through server SSH credentials.'
+            GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15' git clone --no-checkout git@github.com:stloendays/QoI.git "$REPO"
+          elif GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/stloendays/QoI.git >/dev/null 2>&1; then
+            echo 'Cloning private QoI repository through server HTTPS credentials.'
+            GIT_TERMINAL_PROMPT=0 git clone --no-checkout https://github.com/stloendays/QoI.git "$REPO"
+          else
+            echo 'ERROR: Tencent server cannot access stloendays/QoI and has no existing local QoI checkout.' >&2
+            exit 21
+          fi
+
+          git -C "$REPO" fetch --no-tags origin "$FROZEN" || true
+          git -C "$REPO" cat-file -e "$FROZEN^{commit}"
+          git -C "$REPO" checkout --detach --force "$FROZEN"
+          test "$(git -C "$REPO" rev-parse HEAD)" = "$FROZEN"
+          echo "Frozen scientific commit: $(git -C "$REPO" rev-parse HEAD)"
+
+          PYBIN=python3
+          "$PYBIN" --version
+          "$PYBIN" -c 'import sys; assert sys.version_info[:2] == (3,12), sys.version'
+          if [ ! -x "$VENV/bin/python" ]; then
+            "$PYBIN" -m venv "$VENV"
+          fi
+          "$VENV/bin/python" -m pip install --no-cache-dir --upgrade pip
+          "$VENV/bin/python" -m pip install --no-cache-dir -r "$REPO/validation/requirements-external-e2e.txt"
+          "$VENV/bin/python" -m pip freeze | sort > "$BASE/pip_freeze.txt"
+          sha256sum "$REPO/validation/requirements-external-e2e.txt" > "$BASE/requirements_sha256.txt"
+          git -C "$REPO" rev-parse HEAD > "$BASE/frozen_commit.txt"
+
+          mkdir -p "$BASE/results" "$BASE/logs" "$BASE/status"
+          cat > "$BASE/run_final4.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          PY="$BASE/venv/bin/python"
+          FROZEN=893f931b3045b0b628329db81999c2f439d4e830
+          materials=(
+            aflow-Cl1O12Pb5V3_ICSD_203074
+            aflow-B1C1F6K1_ICSD_1194
+            aflow-B6H2O13Sr3_ICSD_262541
+            aflow-Mo3Na1O16P3_ICSD_66877
+          )
+
+          cd "$REPO"
+          test "$(git rev-parse HEAD)" = "$FROZEN" || exit 90
+          printf '%s\n' "$FROZEN" > "$BASE/status/frozen_commit.txt"
+          date -Is > "$BASE/status/service_started_at.txt"
+          rm -f "$BASE/status/service_finished_at.txt"
+
+          overall=0
+          for material in "${materials[@]}"; do
+            out="$BASE/results/$material"
+            log="$BASE/logs/$material.log"
+            status="$BASE/status/$material.status"
+            mkdir -p "$out"
+            printf 'RUNNING %s\n' "$(date -Is)" > "$status"
+            echo "[$(date -Is)] START $material" | tee -a "$BASE/logs/controller.log"
+            set +e
+            nice -n 10 "$PY" validation/formal_external_e2e.py \
+              --material-id "$material" \
+              --codecs zfp,sz3,sperr \
+              --output-dir "$out" \
+              > "$log" 2>&1
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              printf 'SUCCESS %s rc=%s\n' "$(date -Is)" "$rc" > "$status"
+              echo "[$(date -Is)] SUCCESS $material" | tee -a "$BASE/logs/controller.log"
+            else
+              printf 'FAILED %s rc=%s\n' "$(date -Is)" "$rc" > "$status"
+              echo "[$(date -Is)] FAILED $material rc=$rc" | tee -a "$BASE/logs/controller.log"
+              overall=1
+            fi
+          done
+          date -Is > "$BASE/status/service_finished_at.txt"
+          exit "$overall"
+          SCRIPT
+          chmod +x "$BASE/run_final4.sh"
+
+          sudo tee /etc/systemd/system/qoi-final4.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=QoI frozen external final four recovery
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/opt/qoi-final4/repo
+          Environment=HOME=/home/ubuntu
+          Environment=PYTHONUNBUFFERED=1
+          ExecStart=/opt/qoi-final4/run_final4.sh
+          Restart=no
+          KillMode=control-group
+          StandardOutput=append:/opt/qoi-final4/logs/service.log
+          StandardError=append:/opt/qoi-final4/logs/service.log
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable qoi-final4.service
+          sudo systemctl restart qoi-final4.service
+          sleep 8
+          echo '=== QOI SERVICE ==='
+          sudo systemctl status qoi-final4.service --no-pager -l | head -50 || true
+          echo '=== MATERIAL STATUS ==='
+          find "$BASE/status" -maxdepth 1 -type f -printf '%f: ' -exec cat {} \; || true
+          echo '=== CONTROLLER LOG ==='
+          tail -50 "$BASE/logs/controller.log" 2>/dev/null || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/tencent"
