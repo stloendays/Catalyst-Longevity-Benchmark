@@ -1,0 +1,54 @@
+name: Restart Tencent self-hosted runner for QoI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/restart-self-hosted-runner-for-qoi.yml
+
+permissions:
+  contents: read
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Restart self-hosted runner service on Tencent server
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== HOST ==='
+          hostname
+          date -Is
+          echo '=== RUNNER DIR ==='
+          test -d /opt/actions-runner
+          ls -la /opt/actions-runner | head -30
+          echo '=== RUNNER STATUS BEFORE ==='
+          cd /opt/actions-runner
+          sudo ./svc.sh status || true
+          echo '=== RESTART RUNNER ==='
+          sudo ./svc.sh stop || true
+          sudo ./svc.sh start
+          sleep 3
+          sudo ./svc.sh status
+          echo '=== SERVICES ==='
+          systemctl --no-pager --type=service | grep -E 'actions.runner|rhocodec|openclaw' || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
