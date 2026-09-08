@@ -24,30 +24,44 @@ jobs:
           printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
-      - name: Inspect OpenClaw and local LLM
+      - name: Locate active OpenClaw installations
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -u
-          echo '=== OPENCLAW PROCESS ==='
+          echo '=== OPENCLAW PROCESSES ==='
           ps -eo pid,user,etime,args | grep -E 'openclaw-gatewa|openclaw gateway' | grep -v grep || true
-          echo '=== OPENCLAW BINARY ==='
-          command -v openclaw || true
-          openclaw --version 2>&1 || true
-          echo '=== OPENCLAW HELP ==='
-          openclaw --help 2>&1 | head -120 || true
-          echo '=== MODELS HELP ==='
-          openclaw models --help 2>&1 | head -160 || true
-          echo '=== CONFIG HELP ==='
-          openclaw config --help 2>&1 | head -160 || true
-          echo '=== CURRENT DEFAULT MODEL ==='
-          openclaw config get agents.defaults.model --json 2>&1 || true
-          echo '=== CURRENT PROVIDERS ==='
-          openclaw config get models.providers --json 2>&1 || true
+
+          for pid in $(pgrep -f '^openclaw-gateway$' || true); do
+            echo "=== PID $pid ==="
+            ps -o pid,user,group,lstart,etime,args -p "$pid" || true
+            sudo readlink -f "/proc/$pid/exe" || true
+            sudo readlink -f "/proc/$pid/cwd" || true
+            sudo sh -c "tr '\\0' ' ' < /proc/$pid/cmdline; echo" || true
+            sudo cat "/proc/$pid/cgroup" 2>/dev/null || true
+            sudo systemctl status "$pid" --no-pager -l 2>/dev/null | head -45 || true
+          done
+
+          echo '=== SYSTEM SERVICES ==='
+          sudo systemctl list-unit-files --type=service --no-pager | grep -i openclaw || true
+          sudo systemctl list-units --type=service --all --no-pager | grep -i openclaw || true
+          echo '=== UBUNTU USER SERVICES ==='
+          systemctl --user list-unit-files --type=service --no-pager 2>/dev/null | grep -i openclaw || true
+          systemctl --user list-units --type=service --all --no-pager 2>/dev/null | grep -i openclaw || true
+
+          echo '=== CLI CANDIDATES ==='
+          sudo find /usr/local/bin /usr/bin /opt /root /home/ubuntu -maxdepth 6 \
+            \( -type f -o -type l \) \( -name 'openclaw' -o -name 'openclaw-gateway' -o -name 'openclaw.mjs' \) \
+            -print 2>/dev/null | head -120 || true
+
+          echo '=== CONFIG DIRECTORIES ==='
+          sudo find /root /home/ubuntu -maxdepth 3 -type d -name '.openclaw' -print 2>/dev/null || true
+          sudo find /root /home/ubuntu -maxdepth 4 -type f \
+            \( -name 'openclaw.json' -o -name 'openclaw.json5' -o -name 'models.json' \) \
+            -print 2>/dev/null | head -80 || true
+
           echo '=== LOCAL LLAMA API ==='
           curl -fsS --max-time 10 http://127.0.0.1:18080/v1/models || true
           echo
-          echo '=== PORTS ==='
-          sudo ss -lntp | grep -E '(:18080|:11931|:18789)' || true
           REMOTE
       - name: Remove SSH key
         if: always()
