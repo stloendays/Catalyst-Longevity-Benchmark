@@ -45,7 +45,7 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Native Qt executable was not produced: $exe" }
           Get-Item $exe | Select-Object Name, Length
 
-      - name: Run native engine persistence and report self-test
+      - name: Run native engine persistence report Excel and evidence self-test
         shell: pwsh
         run: |
           & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
@@ -72,10 +72,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "dist-qt\app" | Out-Null
           Copy-Item "build-qt\Release\Catalyst Longevity Research.exe" "dist-qt\app\Catalyst Longevity Research.exe" -Force
+          Copy-Item "native\qt\THIRD_PARTY_NOTICES.md" "dist-qt\app\THIRD_PARTY_NOTICES.md" -Force
           windeployqt --release --no-translations --compiler-runtime "dist-qt\app\Catalyst Longevity Research.exe"
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path "dist-qt\app\sqldrivers\qsqlite.dll")) {
             throw "Qt SQLite driver was not deployed; .clrproj project persistence would fail on user machines"
+          }
+          if (-not (Test-Path "dist-qt\app\THIRD_PARTY_NOTICES.md")) {
+            throw "Third-party license notices were not included in the desktop package"
           }
 
       - name: Validate deployed application without Qt SDK on PATH
@@ -156,7 +160,7 @@ jobs:
 
             Recommended: download `Catalyst-Longevity-Research-Setup.exe` and install normally. The installed application opens as a native Windows window — no browser, no Streamlit and no Python runtime.
 
-            Current native modules include `.clrproj` SQLite project save/open, unsaved-change protection, CSV import, trajectory chart, retention summary, condition comparability guard, guarded shared-time ranking, censor-aware T95/T90/T80 evidence, and native PDF analysis report export.
+            Current native modules include `.clrproj` SQLite project save/open, unsaved-change protection, CSV and `.xlsx` ingestion, trajectory chart, retention summary, condition comparability guard, guarded shared-time ranking, censor-aware T95/T90/T80 evidence, native PDF report export, and the first conservative document-evidence extraction backend for text files.
           files: |
             release/Catalyst-Longevity-Research-Setup.exe
             release/Catalyst-Longevity-Research-Portable.zip
