@@ -24,41 +24,57 @@ jobs:
           printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
-      - name: Locate active OpenClaw installations
+      - name: Inspect ubuntu OpenClaw CLI and model config
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -u
-          echo '=== OPENCLAW PROCESSES ==='
-          ps -eo pid,user,etime,args | grep -E 'openclaw-gatewa|openclaw gateway' | grep -v grep || true
-
-          for pid in $(pgrep -f '^openclaw-gateway$' || true); do
-            echo "=== PID $pid ==="
-            ps -o pid,user,group,lstart,etime,args -p "$pid" || true
-            sudo readlink -f "/proc/$pid/exe" || true
-            sudo readlink -f "/proc/$pid/cwd" || true
-            sudo sh -c "tr '\\0' ' ' < /proc/$pid/cmdline; echo" || true
-            sudo cat "/proc/$pid/cgroup" 2>/dev/null || true
-            sudo systemctl status "$pid" --no-pager -l 2>/dev/null | head -45 || true
-          done
-
-          echo '=== SYSTEM SERVICES ==='
-          sudo systemctl list-unit-files --type=service --no-pager | grep -i openclaw || true
-          sudo systemctl list-units --type=service --all --no-pager | grep -i openclaw || true
-          echo '=== UBUNTU USER SERVICES ==='
-          systemctl --user list-unit-files --type=service --no-pager 2>/dev/null | grep -i openclaw || true
-          systemctl --user list-units --type=service --all --no-pager 2>/dev/null | grep -i openclaw || true
-
-          echo '=== CLI CANDIDATES ==='
-          sudo find /usr/local/bin /usr/bin /opt /root /home/ubuntu -maxdepth 6 \
-            \( -type f -o -type l \) \( -name 'openclaw' -o -name 'openclaw-gateway' -o -name 'openclaw.mjs' \) \
-            -print 2>/dev/null | head -120 || true
-
-          echo '=== CONFIG DIRECTORIES ==='
-          sudo find /root /home/ubuntu -maxdepth 3 -type d -name '.openclaw' -print 2>/dev/null || true
-          sudo find /root /home/ubuntu -maxdepth 4 -type f \
-            \( -name 'openclaw.json' -o -name 'openclaw.json5' -o -name 'models.json' \) \
-            -print 2>/dev/null | head -80 || true
-
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+          CFG='/home/ubuntu/.openclaw/openclaw.json'
+          echo '=== VERSION ==='
+          "$OC" --version 2>&1 || true
+          echo '=== MAIN HELP ==='
+          "$OC" --help 2>&1 | head -140 || true
+          echo '=== CONFIG HELP ==='
+          "$OC" config --help 2>&1 | head -180 || true
+          echo '=== CONFIG SET HELP ==='
+          "$OC" config set --help 2>&1 | head -180 || true
+          echo '=== MODELS HELP ==='
+          "$OC" models --help 2>&1 | head -180 || true
+          echo '=== PLUGINS ==='
+          "$OC" plugins list 2>&1 | head -220 || true
+          echo '=== SANITIZED MODEL CONFIG ==='
+          python3 - "$CFG" <<'PY'
+          import json, sys
+          p=sys.argv[1]
+          with open(p) as f:
+              d=json.load(f)
+          out={
+              'agents.defaults.model': (((d.get('agents') or {}).get('defaults') or {}).get('model')),
+              'agents.defaults.models': (((d.get('agents') or {}).get('defaults') or {}).get('models')),
+              'models.mode': ((d.get('models') or {}).get('mode')),
+              'providers': {}
+          }
+          for k,v in (((d.get('models') or {}).get('providers')) or {}).items():
+              if not isinstance(v, dict):
+                  continue
+              out['providers'][k]={
+                  'baseUrl': v.get('baseUrl'),
+                  'api': v.get('api'),
+                  'timeoutSeconds': v.get('timeoutSeconds'),
+                  'models': [
+                      {
+                          'id': m.get('id'),
+                          'name': m.get('name'),
+                          'contextWindow': m.get('contextWindow'),
+                          'maxTokens': m.get('maxTokens'),
+                          'reasoning': m.get('reasoning'),
+                          'compat': m.get('compat')
+                      }
+                      for m in (v.get('models') or []) if isinstance(m, dict)
+                  ]
+              }
+          print(json.dumps(out, ensure_ascii=False, indent=2))
+          PY
           echo '=== LOCAL LLAMA API ==='
           curl -fsS --max-time 10 http://127.0.0.1:18080/v1/models || true
           echo
