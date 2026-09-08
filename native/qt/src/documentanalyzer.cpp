@@ -97,8 +97,7 @@ bool DocumentAnalyzer::readTextFile(
     }
 
     if (errorMessage) {
-        *errorMessage = QStringLiteral("已读取 %1 个字符。")
-                            .arg(text->size());
+        *errorMessage = QStringLiteral("已读取 %1 个字符。").arg(text->size());
     }
     return true;
 }
@@ -106,36 +105,38 @@ bool DocumentAnalyzer::readTextFile(
 DocumentSignals DocumentAnalyzer::analyzeText(
     const QString& text,
     const QString& sourcePath) {
-    DocumentSignals signals;
-    signals.sourcePath = sourcePath;
-    signals.characterCount = text.size();
+    // `signals` is a Qt keyword macro, so avoid using it as an identifier in
+    // implementation code compiled with Qt's default keyword support.
+    DocumentSignals result;
+    result.sourcePath = sourcePath;
+    result.characterCount = text.size();
 
     const QRegularExpression doiRe(
         QStringLiteral(R"(10\.\d{4,9}/[-._;()/:A-Z0-9]+)"),
         QRegularExpression::CaseInsensitiveOption);
     auto doiMatches = doiRe.globalMatch(text);
-    while (doiMatches.hasNext() && signals.dois.size() < 20) {
-        appendUnique(signals.dois, cleanDoi(doiMatches.next().captured(0)));
+    while (doiMatches.hasNext() && result.dois.size() < 20) {
+        appendUnique(result.dois, cleanDoi(doiMatches.next().captured(0)));
     }
 
     const QRegularExpression temperatureRe(
         QStringLiteral(R"((?<!\d)(\d{2,4}(?:\.\d+)?)\s*(?:°\s*C|℃|deg\.?\s*C))"),
         QRegularExpression::CaseInsensitiveOption);
     auto temperatureMatches = temperatureRe.globalMatch(text);
-    while (temperatureMatches.hasNext() && signals.temperaturesC.size() < 50) {
+    while (temperatureMatches.hasNext() && result.temperaturesC.size() < 50) {
         bool ok = false;
         const double value = temperatureMatches.next().captured(1).toDouble(&ok);
         if (ok) {
-            appendUnique(signals.temperaturesC, value);
+            appendUnique(result.temperaturesC, value);
         }
     }
-    std::sort(signals.temperaturesC.begin(), signals.temperaturesC.end());
+    std::sort(result.temperaturesC.begin(), result.temperaturesC.end());
 
     const QRegularExpression timeRe(
         QStringLiteral(R"((?<![\w.])(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|min|mins|minute|minutes)(?!\w))"),
         QRegularExpression::CaseInsensitiveOption);
     auto timeMatches = timeRe.globalMatch(text);
-    while (timeMatches.hasNext() && signals.durationsHours.size() < 100) {
+    while (timeMatches.hasNext() && result.durationsHours.size() < 100) {
         const auto match = timeMatches.next();
         bool ok = false;
         double value = match.captured(1).toDouble(&ok);
@@ -146,19 +147,19 @@ DocumentSignals DocumentAnalyzer::analyzeText(
         if (!unit.startsWith(QLatin1Char('h'))) {
             value /= 60.0;
         }
-        appendUnique(signals.durationsHours, value);
+        appendUnique(result.durationsHours, value);
     }
-    std::sort(signals.durationsHours.begin(), signals.durationsHours.end());
+    std::sort(result.durationsHours.begin(), result.durationsHours.end());
 
     const QRegularExpression conversionRe(
         QStringLiteral(R"((?:CH\s*4|CH4|methane)[^\n%]{0,80}?(\d+(?:\.\d+)?)\s*%)"),
         QRegularExpression::CaseInsensitiveOption);
     auto conversionMatches = conversionRe.globalMatch(text);
-    while (conversionMatches.hasNext() && signals.ch4ConversionPercentCandidates.size() < 100) {
+    while (conversionMatches.hasNext() && result.ch4ConversionPercentCandidates.size() < 100) {
         bool ok = false;
         const double value = conversionMatches.next().captured(1).toDouble(&ok);
         if (ok) {
-            signals.ch4ConversionPercentCandidates.append(value);
+            result.ch4ConversionPercentCandidates.append(value);
         }
     }
 
@@ -184,12 +185,12 @@ DocumentSignals DocumentAnalyzer::analyzeText(
             }
         }
         if (!detected.isEmpty()) {
-            signals.keywordEvidence.insert(it.key(), detected);
+            result.keywordEvidence.insert(it.key(), detected);
         }
     }
 
-    signals.snippets = evidenceSnippets(text, defaultEvidenceTerms());
-    return signals;
+    result.snippets = evidenceSnippets(text, defaultEvidenceTerms());
+    return result;
 }
 
 QVector<EvidenceSnippet> DocumentAnalyzer::evidenceSnippets(
