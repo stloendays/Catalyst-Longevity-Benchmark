@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   build-qt-desktop:
-    runs-on: windows-latest
+    # Qt is installed with the MSVC 2022 kit below, so pin the runner to a
+    # Visual Studio 2022 image instead of following windows-latest to VS 2026.
+    runs-on: windows-2022
     timeout-minutes: 45
 
     steps:
