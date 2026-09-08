@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSet>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTableWidget>
@@ -85,9 +86,7 @@ QString conditionFieldLabel(const QString& field) {
 QString conditionFieldsText(const QStringList& fields) {
     QStringList labels;
     labels.reserve(fields.size());
-    for (const auto& field : fields) {
-        labels.append(conditionFieldLabel(field));
-    }
+    for (const auto& field : fields) labels.append(conditionFieldLabel(field));
     return labels.join(QStringLiteral("、"));
 }
 
@@ -96,6 +95,17 @@ void configureTable(QTableWidget* table) {
     table->verticalHeader()->setVisible(false);
     table->setAlternatingRowColors(true);
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
+}
+
+QStringList catalystNamesFromRecords(const QVector<Record>& records) {
+    QSet<QString> names;
+    for (const auto& record : records) {
+        const QString name = record.catalyst.trimmed();
+        if (!name.isEmpty()) names.insert(name);
+    }
+    QStringList result(names.cbegin(), names.cend());
+    result.sort(Qt::CaseInsensitive);
+    return result;
 }
 
 } // namespace
@@ -120,11 +130,18 @@ void MainWindow::buildUi() {
     pages_->addWidget(buildProjectPage());       // 0
     pages_->addWidget(buildOverviewPage());      // 1
     pages_->addWidget(buildDataPage());          // 2
-    pages_->addWidget(new EvidencePage);          // 3
+    evidencePage_ = new EvidencePage;
+    pages_->addWidget(evidencePage_);             // 3
     pages_->addWidget(buildAnalysisPage());      // 4
     pages_->addWidget(buildAiPage());            // 5
     pages_->addWidget(buildSettingsPage());      // 6
     root->addWidget(pages_, 1);
+
+    connect(evidencePage_, &EvidencePage::evidenceChanged, this, [this]() {
+        projectDirty_ = true;
+        updateProjectUi();
+        setStatus(QStringLiteral("证据候选已更新；保存项目可持久化当前绑定。"));
+    });
 
     setCentralWidget(central);
     statusLabel_ = new QLabel(QStringLiteral("Ready"));
@@ -183,7 +200,7 @@ QWidget* MainWindow::buildProjectPage() {
     layout->setSpacing(18);
     layout->addWidget(heading(QStringLiteral("项目工作区")));
     layout->addWidget(muted(QStringLiteral(
-        "项目文件使用本地 SQLite 保存实验记录与项目元数据。关闭软件后可以直接重新打开 .clrproj 继续分析。")));
+        "项目文件使用本地 SQLite 保存实验记录、实验条件和资料证据候选。关闭软件后可以直接重新打开 .clrproj 继续分析。")));
 
     auto* actions = new QHBoxLayout;
     const auto addAction = [this, actions](const QString& text, const char* style, auto slot) {
@@ -216,7 +233,7 @@ QWidget* MainWindow::buildProjectPage() {
     cardLayout->addWidget(projectStateLabel_);
     cardLayout->addSpacing(12);
     cardLayout->addWidget(muted(QStringLiteral(
-        ".clrproj 内部为 SQLite 数据库，当前保存催化剂时间序列、实验条件、指标与数据来源。")));
+        ".clrproj 内部为 SQLite 数据库。证据候选的来源、摘要、绑定催化剂和绑定时间会随项目一起保存，但不会自动改写实验观测数据。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -385,7 +402,7 @@ QWidget* MainWindow::buildAiPage() {
     layout->setSpacing(16);
     layout->addWidget(heading(QStringLiteral("AI 工作区")));
     layout->addWidget(muted(QStringLiteral(
-        "原生资料分析后端已进入桌面版。下一阶段将把 Evidence Packet、AI Analyst、Evidence Critic 与外部数据库客户端接入这里。")));
+        "原生证据候选现在可以持久化并绑定到催化剂/时间。下一阶段将把 Evidence Packet、AI Analyst、Evidence Critic 与外部数据库客户端接入这里。")));
 
     auto* card = new QFrame;
     card->setObjectName(QStringLiteral("panel"));
@@ -395,7 +412,7 @@ QWidget* MainWindow::buildAiPage() {
     title->setObjectName(QStringLiteral("sectionTitle"));
     cardLayout->addWidget(title);
     cardLayout->addWidget(muted(QStringLiteral(
-        "Evidence Packet  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")));
+        "Evidence Packet  ·  条件复核  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
     return page;
@@ -417,7 +434,7 @@ QWidget* MainWindow::buildSettingsPage() {
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("数据输入：CSV / Excel .xlsx。")));
-    cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件。")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj SQLite 文件（实验记录 + 证据候选）。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("报告输出：原生 PDF 分析报告。")));
     cardLayout->addStretch();
     layout->addWidget(card, 1);
@@ -462,6 +479,10 @@ void MainWindow::newProject() {
     sourceLabelText_ = QStringLiteral("未加载数据");
     analysis_ = AnalysisResult{};
     if (sourceLabel_) sourceLabel_->setText(sourceLabelText_);
+    if (evidencePage_) {
+        evidencePage_->clearEvidence();
+        evidencePage_->setCatalystNames({});
+    }
     refreshRawTable();
     refreshAnalysisViews();
     updateProjectUi();
@@ -477,14 +498,16 @@ void MainWindow::openProject() {
     if (path.isEmpty() || !confirmProjectTransition()) return;
 
     QVector<Record> loaded;
+    QVector<EvidenceItem> loadedEvidence;
     QString message;
-    if (!ProjectStore::loadProject(path, &loaded, &message)) {
+    if (!ProjectStore::loadProject(path, &loaded, &loadedEvidence, &message)) {
         QMessageBox::warning(this, QStringLiteral("打开项目失败"), message);
         setStatus(message, true);
         return;
     }
 
     currentProjectPath_ = path;
+    if (evidencePage_) evidencePage_->setEvidenceItems(loadedEvidence);
     setRecords(loaded, path, false);
     projectDirty_ = false;
     updateProjectUi();
@@ -513,7 +536,10 @@ void MainWindow::saveProjectAs() {
 
 bool MainWindow::saveProjectTo(const QString& path) {
     QString message;
-    if (!ProjectStore::saveProject(path, records_, &message)) {
+    const QVector<EvidenceItem> evidence = evidencePage_
+        ? evidencePage_->evidenceItems()
+        : QVector<EvidenceItem>{};
+    if (!ProjectStore::saveProject(path, records_, evidence, &message)) {
         QMessageBox::warning(this, QStringLiteral("保存项目失败"), message);
         setStatus(message, true);
         return false;
@@ -612,6 +638,7 @@ void MainWindow::setRecords(const QVector<Record>& records, const QString& sourc
     sourceLabelText_ = sourceLabel;
     if (markDirty) projectDirty_ = true;
     if (sourceLabel_) sourceLabel_->setText(sourceLabelText_);
+    if (evidencePage_) evidencePage_->setCatalystNames(catalystNamesFromRecords(records_));
     refreshRawTable();
     if (records_.isEmpty()) {
         analysis_ = AnalysisResult{};
@@ -732,14 +759,18 @@ void MainWindow::updateProjectUi() {
             : currentProjectPath_);
     }
     if (projectStateLabel_) {
+        const qsizetype evidenceCount = evidencePage_ ? evidencePage_->evidenceItems().size() : 0;
+        const QString counts = QStringLiteral("%1 条实验记录 · %2 条证据候选")
+            .arg(records_.size())
+            .arg(evidenceCount);
         if (currentProjectPath_.isEmpty()) {
             projectStateLabel_->setText(projectDirty_
-                ? QStringLiteral("未保存 · %1 条实验记录").arg(records_.size())
-                : QStringLiteral("尚未保存 · 空白项目"));
+                ? QStringLiteral("未保存 · %1").arg(counts)
+                : QStringLiteral("尚未保存 · %1").arg(counts));
         } else {
             projectStateLabel_->setText(projectDirty_
-                ? QStringLiteral("有未保存更改 · %1 条实验记录").arg(records_.size())
-                : QStringLiteral("已保存 · %1 条实验记录").arg(records_.size()));
+                ? QStringLiteral("有未保存更改 · %1").arg(counts)
+                : QStringLiteral("已保存 · %1").arg(counts));
         }
     }
 

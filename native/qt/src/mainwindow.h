@@ -14,6 +14,7 @@ class QWidget;
 namespace catalyst {
 
 class ChartWidget;
+class EvidencePage;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -59,6 +60,7 @@ private:
     bool projectDirty_ = false;
 
     QStackedWidget* pages_ = nullptr;
+    EvidencePage* evidencePage_ = nullptr;
     QLabel* projectPathLabel_ = nullptr;
     QLabel* projectStateLabel_ = nullptr;
     QLabel* sourceLabel_ = nullptr;

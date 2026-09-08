@@ -23,53 +23,34 @@ int main(int argc, char* argv[]) {
     if (app.arguments().contains(QStringLiteral("--self-test"))) {
         const auto records = catalyst::CsvReader::demoData();
         const auto result = catalyst::AnalysisEngine::analyze(records);
-        if (result.totalObservations != 6 || result.catalysts.size() != 2) {
-            return 2;
-        }
-        if (!result.latestSharedTimeHours.has_value() || result.latestSharedLeader.isEmpty()) {
-            return 3;
-        }
+        if (result.totalObservations != 6 || result.catalysts.size() != 2) return 2;
+        if (!result.latestSharedTimeHours.has_value() || result.latestSharedLeader.isEmpty()) return 3;
 
         auto mismatched = records;
         for (auto& record : mismatched) {
-            if (record.catalyst == QStringLiteral("Catalyst B")) {
-                record.temperatureC = 750.0;
-            }
+            if (record.catalyst == QStringLiteral("Catalyst B")) record.temperatureC = 750.0;
         }
         const auto mismatchResult = catalyst::AnalysisEngine::analyze(mismatched);
         if (!mismatchResult.conditionAudit.blocksDirectRanking()
-            || !mismatchResult.latestSharedLeader.isEmpty()) {
-            return 4;
-        }
+            || !mismatchResult.latestSharedLeader.isEmpty()) return 4;
 
         QTemporaryDir tempDir;
-        if (!tempDir.isValid()) {
-            return 5;
-        }
+        if (!tempDir.isValid()) return 5;
+
         const QString projectPath = tempDir.filePath(QStringLiteral("self-test.clrproj"));
         QString persistenceMessage;
-        if (!catalyst::ProjectStore::saveProject(projectPath, records, &persistenceMessage)) {
-            return 6;
-        }
+        if (!catalyst::ProjectStore::saveProject(projectPath, records, &persistenceMessage)) return 6;
         QVector<catalyst::Record> loaded;
-        if (!catalyst::ProjectStore::loadProject(projectPath, &loaded, &persistenceMessage)) {
-            return 7;
-        }
+        if (!catalyst::ProjectStore::loadProject(projectPath, &loaded, &persistenceMessage)) return 7;
         if (loaded.size() != records.size()
             || loaded.front().catalyst != records.front().catalyst
-            || loaded.front().temperatureC != records.front().temperatureC) {
-            return 8;
-        }
+            || loaded.front().temperatureC != records.front().temperatureC) return 8;
 
         const QString reportPath = tempDir.filePath(QStringLiteral("self-test-report.pdf"));
         QString reportMessage;
         if (!catalyst::ReportExporter::exportPdf(
-                reportPath, result, QStringLiteral("self-test"), &reportMessage)) {
-            return 9;
-        }
-        if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) {
-            return 10;
-        }
+                reportPath, result, QStringLiteral("self-test"), &reportMessage)) return 9;
+        if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) return 10;
 
         const QString workbookPath = tempDir.filePath(QStringLiteral("self-test.xlsx"));
         {
@@ -86,9 +67,7 @@ int main(int argc, char* argv[]) {
             workbook.write(3, 2, 24.0);
             workbook.write(3, 3, 76.0);
             workbook.write(3, 4, 650.0);
-            if (!workbook.saveAs(workbookPath)) {
-                return 11;
-            }
+            if (!workbook.saveAs(workbookPath)) return 11;
         }
 
         QString importMessage;
@@ -96,9 +75,7 @@ int main(int argc, char* argv[]) {
         if (workbookRecords.size() != 2
             || workbookRecords.front().catalyst != QStringLiteral("Excel Catalyst")
             || !workbookRecords.front().temperatureC.has_value()
-            || *workbookRecords.front().temperatureC != 650.0) {
-            return 12;
-        }
+            || *workbookRecords.front().temperatureC != 650.0) return 12;
 
         const QString evidenceText = QStringLiteral(
             "DOI 10.1234/example.2026.42. Catalyst X was tested at 700 °C for 20 h. "
@@ -111,9 +88,30 @@ int main(int argc, char* argv[]) {
             || documentSignals.durationsHours.isEmpty()
             || documentSignals.ch4ConversionPercentCandidates.isEmpty()
             || !documentSignals.keywordEvidence.contains(QStringLiteral("stability"))
-            || documentSignals.snippets.isEmpty()) {
-            return 13;
-        }
+            || documentSignals.snippets.isEmpty()
+            || documentSignals.sourceSha256.isEmpty()) return 13;
+
+        auto evidenceItems = catalyst::DocumentAnalyzer::candidateItems(evidenceText, documentSignals);
+        if (evidenceItems.isEmpty()) return 14;
+        evidenceItems.front().boundCatalyst = QStringLiteral("Catalyst A");
+        evidenceItems.front().boundTimeHours = 20.0;
+        evidenceItems.front().status = catalyst::DocumentAnalyzer::bindingStatus(
+            evidenceItems.front().boundCatalyst, evidenceItems.front().boundTimeHours);
+        evidenceItems.front().note = QStringLiteral("self-test binding");
+
+        if (!catalyst::ProjectStore::saveProject(
+                projectPath, records, evidenceItems, &persistenceMessage)) return 15;
+        QVector<catalyst::Record> loadedWithEvidence;
+        QVector<catalyst::EvidenceItem> loadedEvidence;
+        if (!catalyst::ProjectStore::loadProject(
+                projectPath, &loadedWithEvidence, &loadedEvidence, &persistenceMessage)) return 16;
+        if (loadedWithEvidence.size() != records.size()
+            || loadedEvidence.size() != evidenceItems.size()
+            || loadedEvidence.front().sourceSha256 != evidenceItems.front().sourceSha256
+            || loadedEvidence.front().boundCatalyst != QStringLiteral("Catalyst A")
+            || !loadedEvidence.front().boundTimeHours.has_value()
+            || *loadedEvidence.front().boundTimeHours != 20.0
+            || loadedEvidence.front().note != QStringLiteral("self-test binding")) return 17;
 
         return 0;
     }

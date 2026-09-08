@@ -1,5 +1,6 @@
 #include "documentanalyzer.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -10,42 +11,65 @@ namespace catalyst {
 namespace {
 
 void appendUnique(QVector<double>& values, double value) {
-    if (!values.contains(value)) {
-        values.append(value);
-    }
+    if (!values.contains(value)) values.append(value);
 }
 
 void appendUnique(QStringList& values, const QString& value) {
-    if (!value.isEmpty() && !values.contains(value, Qt::CaseInsensitive)) {
-        values.append(value);
-    }
+    if (!value.isEmpty() && !values.contains(value, Qt::CaseInsensitive)) values.append(value);
 }
 
 QString decodeText(const QByteArray& bytes) {
     QByteArray data = bytes;
-    if (data.startsWith("\xEF\xBB\xBF")) {
-        data.remove(0, 3);
-    }
+    if (data.startsWith("\xEF\xBB\xBF")) data.remove(0, 3);
 
     QString utf8 = QString::fromUtf8(data);
-    if (!utf8.contains(QChar::ReplacementCharacter)) {
-        return utf8;
-    }
+    if (!utf8.contains(QChar::ReplacementCharacter)) return utf8;
 
     const QString local = QString::fromLocal8Bit(data);
-    if (local.count(QChar::ReplacementCharacter) < utf8.count(QChar::ReplacementCharacter)) {
-        return local;
-    }
+    if (local.count(QChar::ReplacementCharacter) < utf8.count(QChar::ReplacementCharacter)) return local;
     return utf8;
 }
 
 QString cleanDoi(QString value) {
     static const QString trailing = QStringLiteral(".,;)]}");
     value = value.trimmed();
-    while (!value.isEmpty() && trailing.contains(value.back())) {
-        value.chop(1);
-    }
+    while (!value.isEmpty() && trailing.contains(value.back())) value.chop(1);
     return value;
+}
+
+QString contextAround(const QString& text, const QString& needle, int radius = 120) {
+    if (text.isEmpty() || needle.isEmpty()) return QString();
+    const qsizetype index = text.indexOf(needle, 0, Qt::CaseInsensitive);
+    if (index < 0) return QString();
+    const qsizetype left = std::max<qsizetype>(0, index - radius);
+    const qsizetype right = std::min<qsizetype>(text.size(), index + needle.size() + radius);
+    return text.mid(left, right - left).simplified();
+}
+
+void addCandidate(
+    QVector<EvidenceItem>& items,
+    const DocumentSignals& document,
+    const QString& category,
+    const QString& term,
+    const QString& value,
+    const QString& snippet) {
+    EvidenceItem item;
+    item.sourcePath = document.sourcePath;
+    item.sourceSha256 = document.sourceSha256;
+    item.category = category;
+    item.term = term;
+    item.valueText = value;
+    item.snippet = snippet;
+    item.status = QStringLiteral("candidate_requires_condition_binding");
+
+    const bool duplicate = std::any_of(items.cbegin(), items.cend(), [&](const EvidenceItem& existing) {
+        return existing.sourceSha256 == item.sourceSha256
+            && existing.category == item.category
+            && existing.term == item.term
+            && existing.valueText == item.valueText
+            && existing.snippet == item.snippet;
+    });
+    if (!duplicate) items.append(item);
 }
 
 } // namespace
@@ -55,9 +79,7 @@ bool DocumentAnalyzer::readTextFile(
     QString* text,
     QString* errorMessage) {
     if (!text) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("内部错误：未提供文本输出缓冲区。");
-        }
+        if (errorMessage) *errorMessage = QStringLiteral("内部错误：未提供文本输出缓冲区。");
         return false;
     }
 
@@ -74,41 +96,33 @@ bool DocumentAnalyzer::readTextFile(
 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("无法打开资料文件：%1").arg(path);
-        }
+        if (errorMessage) *errorMessage = QStringLiteral("无法打开资料文件：%1").arg(path);
         return false;
     }
 
     const QByteArray bytes = file.readAll();
     if (bytes.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("资料文件为空：%1").arg(path);
-        }
+        if (errorMessage) *errorMessage = QStringLiteral("资料文件为空：%1").arg(path);
         return false;
     }
 
     *text = decodeText(bytes);
     if (text->trimmed().isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("资料文件未解析到可读文本。");
-        }
+        if (errorMessage) *errorMessage = QStringLiteral("资料文件未解析到可读文本。");
         return false;
     }
 
-    if (errorMessage) {
-        *errorMessage = QStringLiteral("已读取 %1 个字符。").arg(text->size());
-    }
+    if (errorMessage) *errorMessage = QStringLiteral("已读取 %1 个字符。").arg(text->size());
     return true;
 }
 
 DocumentSignals DocumentAnalyzer::analyzeText(
     const QString& text,
     const QString& sourcePath) {
-    // `signals` is a Qt keyword macro, so avoid using it as an identifier in
-    // implementation code compiled with Qt's default keyword support.
     DocumentSignals result;
     result.sourcePath = sourcePath;
+    result.sourceSha256 = QString::fromLatin1(
+        QCryptographicHash::hash(text.toUtf8(), QCryptographicHash::Sha256).toHex());
     result.characterCount = text.size();
 
     const QRegularExpression doiRe(
@@ -126,9 +140,7 @@ DocumentSignals DocumentAnalyzer::analyzeText(
     while (temperatureMatches.hasNext() && result.temperaturesC.size() < 50) {
         bool ok = false;
         const double value = temperatureMatches.next().captured(1).toDouble(&ok);
-        if (ok) {
-            appendUnique(result.temperaturesC, value);
-        }
+        if (ok) appendUnique(result.temperaturesC, value);
     }
     std::sort(result.temperaturesC.begin(), result.temperaturesC.end());
 
@@ -140,13 +152,9 @@ DocumentSignals DocumentAnalyzer::analyzeText(
         const auto match = timeMatches.next();
         bool ok = false;
         double value = match.captured(1).toDouble(&ok);
-        if (!ok) {
-            continue;
-        }
+        if (!ok) continue;
         const QString unit = match.captured(2).toCaseFolded();
-        if (!unit.startsWith(QLatin1Char('h'))) {
-            value /= 60.0;
-        }
+        if (!unit.startsWith(QLatin1Char('h'))) value /= 60.0;
         appendUnique(result.durationsHours, value);
     }
     std::sort(result.durationsHours.begin(), result.durationsHours.end());
@@ -158,9 +166,7 @@ DocumentSignals DocumentAnalyzer::analyzeText(
     while (conversionMatches.hasNext() && result.ch4ConversionPercentCandidates.size() < 100) {
         bool ok = false;
         const double value = conversionMatches.next().captured(1).toDouble(&ok);
-        if (ok) {
-            result.ch4ConversionPercentCandidates.append(value);
-        }
+        if (ok) result.ch4ConversionPercentCandidates.append(value);
     }
 
     const QMap<QString, QStringList> keywordSets = {
@@ -180,17 +186,43 @@ DocumentSignals DocumentAnalyzer::analyzeText(
     for (auto it = keywordSets.cbegin(); it != keywordSets.cend(); ++it) {
         QStringList detected;
         for (const QString& term : it.value()) {
-            if (folded.contains(term.toCaseFolded())) {
-                detected.append(term);
-            }
+            if (folded.contains(term.toCaseFolded())) detected.append(term);
         }
-        if (!detected.isEmpty()) {
-            result.keywordEvidence.insert(it.key(), detected);
-        }
+        if (!detected.isEmpty()) result.keywordEvidence.insert(it.key(), detected);
     }
 
     result.snippets = evidenceSnippets(text, defaultEvidenceTerms());
     return result;
+}
+
+QVector<EvidenceItem> DocumentAnalyzer::candidateItems(
+    const QString& text,
+    const DocumentSignals& document) {
+    QVector<EvidenceItem> items;
+
+    for (const QString& doi : document.dois) {
+        addCandidate(items, document, QStringLiteral("doi"), QStringLiteral("DOI"), doi, contextAround(text, doi));
+    }
+    for (double value : document.temperaturesC) {
+        const QString rendered = QString::number(value, 'g', 10);
+        addCandidate(items, document, QStringLiteral("temperature_c"), QStringLiteral("temperature"), rendered,
+            contextAround(text, rendered));
+    }
+    for (double value : document.durationsHours) {
+        const QString rendered = QString::number(value, 'g', 10);
+        addCandidate(items, document, QStringLiteral("duration_h"), QStringLiteral("duration"), rendered,
+            contextAround(text, rendered));
+    }
+    for (double value : document.ch4ConversionPercentCandidates) {
+        const QString rendered = QString::number(value, 'g', 10);
+        addCandidate(items, document, QStringLiteral("ch4_conversion_percent_candidate"),
+            QStringLiteral("CH4 conversion"), rendered, contextAround(text, rendered));
+    }
+    for (const auto& snippet : document.snippets) {
+        addCandidate(items, document, QStringLiteral("keyword_evidence"), snippet.term,
+            snippet.term, snippet.snippet);
+    }
+    return items;
 }
 
 QVector<EvidenceSnippet> DocumentAnalyzer::evidenceSnippets(
@@ -199,9 +231,7 @@ QVector<EvidenceSnippet> DocumentAnalyzer::evidenceSnippets(
     int radius,
     int limit) {
     QVector<EvidenceSnippet> snippets;
-    if (text.isEmpty() || terms.isEmpty() || limit <= 0) {
-        return snippets;
-    }
+    if (text.isEmpty() || terms.isEmpty() || limit <= 0) return snippets;
 
     radius = std::max(0, radius);
     const QString folded = text.toCaseFolded();
@@ -209,16 +239,12 @@ QVector<EvidenceSnippet> DocumentAnalyzer::evidenceSnippets(
     for (const QString& rawTerm : terms) {
         const QString term = rawTerm.trimmed();
         const QString target = term.toCaseFolded();
-        if (target.isEmpty()) {
-            continue;
-        }
+        if (target.isEmpty()) continue;
 
         qsizetype start = 0;
         while (snippets.size() < limit) {
             const qsizetype index = folded.indexOf(target, start);
-            if (index < 0) {
-                break;
-            }
+            if (index < 0) break;
 
             const qsizetype left = std::max<qsizetype>(0, index - radius);
             const qsizetype right = std::min<qsizetype>(text.size(), index + term.size() + radius);
@@ -228,11 +254,8 @@ QVector<EvidenceSnippet> DocumentAnalyzer::evidenceSnippets(
             snippets.append(snippet);
             start = index + target.size();
         }
-        if (snippets.size() >= limit) {
-            break;
-        }
+        if (snippets.size() >= limit) break;
     }
-
     return snippets;
 }
 
@@ -243,6 +266,18 @@ QStringList DocumentAnalyzer::defaultEvidenceTerms() {
         QStringLiteral("regeneration"), QStringLiteral("稳定"), QStringLiteral("失活"),
         QStringLiteral("积碳"), QStringLiteral("烧结"), QStringLiteral("再生")
     };
+}
+
+QString DocumentAnalyzer::bindingStatus(
+    const QString& catalyst,
+    const std::optional<double>& timeHours) {
+    if (catalyst.trimmed().isEmpty()) {
+        return QStringLiteral("candidate_requires_condition_binding");
+    }
+    if (!timeHours.has_value()) {
+        return QStringLiteral("bound_to_catalyst_requires_time_condition_review");
+    }
+    return QStringLiteral("bound_to_catalyst_time_requires_condition_review");
 }
 
 } // namespace catalyst

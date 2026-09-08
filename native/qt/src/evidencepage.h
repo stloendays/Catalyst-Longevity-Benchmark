@@ -4,7 +4,10 @@
 
 #include <QWidget>
 
+class QComboBox;
+class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
 class QTableWidget;
 
 namespace catalyst {
@@ -15,25 +18,40 @@ class EvidencePage final : public QWidget {
 public:
     explicit EvidencePage(QWidget* parent = nullptr);
 
+    [[nodiscard]] QVector<EvidenceItem> evidenceItems() const;
+    void setEvidenceItems(const QVector<EvidenceItem>& items);
+    void clearEvidence();
+    void setCatalystNames(const QStringList& catalystNames);
+
+signals:
+    void evidenceChanged();
+
 private slots:
     void chooseDocument();
+    void bindSelectedEvidence();
+    void unbindSelectedEvidence();
 
 private:
-    void refreshView();
-    void clearView();
+    void refreshCurrentDocumentSummary();
+    void refreshEvidenceTable();
+    void resetCurrentDocumentSummary();
 
     QString sourcePath_;
     QString sourceText_;
-    DocumentSignals signals_;
+    DocumentSignals documentSignals_;
+    QVector<EvidenceItem> evidenceItems_;
 
     QLabel* sourceLabel_ = nullptr;
     QLabel* characterLabel_ = nullptr;
     QLabel* doiCountLabel_ = nullptr;
     QLabel* temperatureCountLabel_ = nullptr;
     QLabel* durationCountLabel_ = nullptr;
-    QLabel* keywordCountLabel_ = nullptr;
+    QLabel* evidenceCountLabel_ = nullptr;
     QTableWidget* signalsTable_ = nullptr;
-    QTableWidget* snippetsTable_ = nullptr;
+    QTableWidget* evidenceTable_ = nullptr;
+    QComboBox* catalystCombo_ = nullptr;
+    QDoubleSpinBox* timeSpin_ = nullptr;
+    QLineEdit* noteEdit_ = nullptr;
 };
 
 } // namespace catalyst

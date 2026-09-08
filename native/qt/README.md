@@ -23,16 +23,17 @@ The native application does not start a browser and does not require Streamlit o
 4. Native `.xlsx` workbook import. The importer scans workbook sheets and uses the first sheet whose header contains catalyst, time and performance columns.
 5. Native `资料分析` workspace for TXT / Markdown / CSV / TSV evidence files.
 6. Conservative document signal extraction: DOI, temperature, duration, CH4-conversion candidates, stability/deactivation keywords and source snippets.
-7. Built-in demo dataset.
-8. Catalyst trajectory visualization drawn by a native Qt widget.
-9. Per-catalyst initial/latest performance and retention.
-10. Latest shared observed time and leader determination.
-11. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
-12. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
-13. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
-14. Native PDF analysis report export including catalyst lifetime summaries, condition-audit status, mismatched pairs and guarded direct-comparison status.
-15. Native pages for project management, overview, data, evidence analysis, lifetime analysis, AI migration workspace and settings.
-16. Installer and portable Windows package workflow.
+7. Evidence-candidate binding to a selected catalyst and optional observation time.
+8. Evidence persistence inside `.clrproj`, including source path/hash, candidate value, excerpt, binding state and user note.
+9. Built-in demo dataset.
+10. Catalyst trajectory visualization drawn by a native Qt widget.
+11. Per-catalyst initial/latest performance and retention.
+12. Latest shared observed time and leader determination.
+13. Censor-aware T95/T90/T80 endpoints. Primary threshold lifetimes are not linearly interpolated into false exact values.
+14. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
+15. Condition-guard visualization showing the exact catalyst pairs/fields that block comparison.
+16. Native PDF analysis report export.
+17. Installer and portable Windows package workflow.
 
 ## Excel import
 
@@ -42,49 +43,53 @@ The same scientific column aliases used by CSV import are accepted for `.xlsx` f
 
 ## Document evidence workspace
 
-The C++ document analyzer mirrors the conservative signal-extraction policy of the Python research implementation. It treats isolated numbers as candidates rather than automatically converting them into experimental truth. The native `资料分析` page currently supports TXT, Markdown, CSV and TSV and displays source-locatable evidence snippets.
+The C++ document analyzer mirrors the conservative signal-extraction policy of the Python research implementation. It treats isolated numbers as candidates rather than automatically converting them into experimental truth. The native `资料分析` page currently supports TXT, Markdown, CSV and TSV.
 
-The analyzer extracts:
+Each extracted candidate is assigned a SHA-256 source identity and can be bound to a catalyst and optional time-on-stream value. Binding is deliberately not equivalent to scientific acceptance. The binding states remain explicit:
 
-- DOI candidates;
-- explicit temperatures;
-- explicit hour/minute durations normalized to hours;
-- CH4/methane conversion percentage candidates;
-- coking, sintering, stability/deactivation and regeneration terms;
-- short source-locatable evidence snippets.
+- `candidate_requires_condition_binding`
+- `bound_to_catalyst_requires_time_condition_review`
+- `bound_to_catalyst_time_requires_condition_review`
 
-These values do not automatically become catalyst-lifetime facts. They must be bound to a specific catalyst, observation time and relevant experimental conditions before they are eligible for ranking or other decision claims.
+These evidence items are stored separately from experimental observations. They do not silently alter performance trajectories or rankings.
 
 PDF text extraction remains intentionally on the migration roadmap rather than silently invoking OCR or introducing a weak parser. Scanned PDF content will not be promoted into structured evidence without an explicit, auditable extraction path.
 
 ## Project persistence
 
-A `.clrproj` file is a SQLite database. The current schema stores:
+A `.clrproj` file is a SQLite database. The schema stores experimental observations and, additively, an `evidence_items` table. The evidence table was added without changing the project schema version, so earlier schema-version-1 projects remain readable and simply contain zero evidence items until resaved.
 
-- project metadata and schema version;
-- catalyst identity;
-- time-on-stream and performance;
+The current project file preserves:
+
+- catalyst identity, time-on-stream and performance;
 - temperature, GHSV, WHSV and pressure when supplied;
-- feed ratio, metric and provenance/source text.
-
-The native `--self-test` performs a SQLite round trip using a temporary project file. This means the packaged build is expected to include and load the Qt SQLite driver, not merely compile against Qt SQL.
+- feed ratio, metric and provenance/source text;
+- evidence source path and SHA-256;
+- evidence category, term/value and source excerpt;
+- bound catalyst, optional bound time, review status and user note.
 
 ## Scientific guardrails already migrated
 
-The C++ engine preserves two important rules from the research implementation:
+The C++ engine preserves the core research rules:
 
 - Threshold lifetime claims remain censor-aware instead of inventing exact crossing times between sparse observations.
 - Direct catalyst ranking is blocked when explicit experimental conditions are inconsistent between candidates.
+- Extracted literature/document values remain evidence candidates until explicitly bound and reviewed.
+- Even catalyst/time-bound document evidence is not automatically injected into the experimental ranking engine.
 
-The built-in `--self-test` now verifies a matched-condition demo dataset, a deliberately mismatched-temperature case, SQLite save/load persistence, native PDF report creation, a generated `.xlsx` round trip, and conservative document-signal extraction.
+The built-in `--self-test` verifies matched-condition analysis, a deliberately mismatched-temperature case, SQLite save/load, PDF report creation, generated `.xlsx` round trip, conservative document extraction, evidence candidate generation, evidence binding and evidence persistence round trip.
+
+## Validated Windows packaging
+
+The Windows workflow uses the MSVC 2022 Qt kit on `windows-2022`, builds the native GUI, runs the self-test, smoke-tests the real desktop window, deploys Qt, re-runs the application with the Qt SDK removed from `PATH`, builds an Inno Setup installer, creates a portable ZIP and publishes a prerelease.
 
 ## Planned migration
 
-The Python implementation remains the scientific reference while modules are migrated. Next native modules are native PDF text extraction, evidence persistence inside `.clrproj`, explicit evidence-to-catalyst binding, external database clients, AI Analyst, Evidence Critic and audit logging.
+The Python implementation remains the scientific reference while modules are migrated. Next native modules are explicit condition-review approval for bound evidence, native PDF text extraction, evidence-aware PDF reporting, external database clients, AI Analyst, Evidence Critic and audit logging.
 
 ## Third-party notice
 
-QXlsx is MIT licensed. The pinned revision and full license notice are recorded in `THIRD_PARTY_NOTICES.md` and should ship with the desktop package.
+QXlsx is MIT licensed. The pinned revision and full license notice are recorded in `THIRD_PARTY_NOTICES.md` and ship with the desktop package.
 
 ## Build locally
 
@@ -95,7 +100,7 @@ cmake --build build-qt --config Release
 
 Qt 6.5+ with the MSVC 2022 x64 kit must be available to CMake. The default configure step also needs Git/network access once to fetch the pinned QXlsx revision unless `CATALYST_FETCH_QXLSX=OFF` is used with a preinstalled QXlsx package.
 
-For a quick engine, persistence, report, Excel and evidence-backend check:
+For the native engine/persistence/report/Excel/evidence check:
 
 ```powershell
 & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
