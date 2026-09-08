@@ -1,0 +1,30 @@
+name: Server transfer size
+
+on:
+  push:
+    paths:
+      - .github/workflows/server-transfer-size.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Read transfer state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            "date -Is; ls -lh /home/ubuntu/qvac-step3.tar.gz 2>/dev/null || true; stat -c '%s' /home/ubuntu/qvac-step3.tar.gz 2>/dev/null || true; df -h /; systemctl is-active rhocodec-llm.service || true"
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
