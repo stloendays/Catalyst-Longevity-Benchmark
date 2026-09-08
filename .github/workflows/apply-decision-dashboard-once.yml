@@ -1,0 +1,32 @@
+name: Apply Decision Dashboard UI Once
+
+on:
+  push:
+    branches: [ui-decision-dashboard-v4]
+    paths:
+      - ".github/workflows/apply-decision-dashboard-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui-decision-dashboard-v4
+          fetch-depth: 0
+
+      - name: Apply decision dashboard migration
+        run: python tools/apply_decision_dashboard.py
+
+      - name: Commit source changes and remove temporary migration files
+        shell: bash
+        run: |
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          rm -f tools/apply_decision_dashboard.py .github/workflows/apply-decision-dashboard-once.yml
+          git add -A
+          git commit -m "Upgrade decision dashboard and chart focus interactions"
+          git push origin ui-decision-dashboard-v4
