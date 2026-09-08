@@ -1,0 +1,168 @@
+name: Run QoI external final 4 on Tencent server
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/server-qoi-final4.yml
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    runs-on: [self-hosted, linux, x64, rhocodec]
+    timeout-minutes: 30
+    steps:
+      - name: Prepare exact frozen QoI checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          FROZEN=893f931b3045b0b628329db81999c2f439d4e830
+          sudo mkdir -p "$BASE"
+          sudo chown -R "$(id -un):$(id -gn)" "$BASE"
+
+          echo '=== server resources before setup ==='
+          hostname
+          nproc
+          free -h
+          df -h /
+
+          if [ -d "$REPO/.git" ]; then
+            echo 'Existing QoI checkout found; refreshing frozen commit.'
+          else
+            rm -rf "$REPO"
+            if GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15' \
+               git ls-remote git@github.com:stloendays/QoI.git >/dev/null 2>&1; then
+              GIT_SSH_COMMAND='ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15' \
+                git clone --no-checkout git@github.com:stloendays/QoI.git "$REPO"
+            elif GIT_TERMINAL_PROMPT=0 git ls-remote https://github.com/stloendays/QoI.git >/dev/null 2>&1; then
+              GIT_TERMINAL_PROMPT=0 git clone --no-checkout https://github.com/stloendays/QoI.git "$REPO"
+            elif [ -d "$HOME/QoI/.git" ]; then
+              echo 'Using existing home-directory QoI checkout as local source.'
+              git clone --no-checkout "$HOME/QoI" "$REPO"
+            else
+              echo 'ERROR: server runner cannot access private stloendays/QoI and no local checkout exists.' >&2
+              exit 21
+            fi
+          fi
+
+          git -C "$REPO" fetch --no-tags origin "$FROZEN" || true
+          git -C "$REPO" cat-file -e "$FROZEN^{commit}"
+          git -C "$REPO" checkout --detach --force "$FROZEN"
+          test "$(git -C "$REPO" rev-parse HEAD)" = "$FROZEN"
+          echo "Frozen QoI commit: $(git -C "$REPO" rev-parse HEAD)"
+
+      - name: Install pinned environment without pip cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          VENV="$BASE/venv"
+          python3 --version
+          if [ ! -x "$VENV/bin/python" ]; then
+            python3 -m venv "$VENV"
+          fi
+          "$VENV/bin/python" -m pip install --no-cache-dir --upgrade pip
+          "$VENV/bin/python" -m pip install --no-cache-dir -r "$REPO/validation/requirements-external-e2e.txt"
+          "$VENV/bin/python" --version
+          "$VENV/bin/python" -m pip freeze | sort > "$BASE/pip_freeze.txt"
+          sha256sum "$REPO/validation/requirements-external-e2e.txt" > "$BASE/requirements_sha256.txt"
+          df -h /
+
+      - name: Install persistent sequential service for the four remaining systems
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          mkdir -p "$BASE/results" "$BASE/logs" "$BASE/status"
+
+          cat > "$BASE/run_final4.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          BASE=/opt/qoi-final4
+          REPO="$BASE/repo"
+          PY="$BASE/venv/bin/python"
+          FROZEN=893f931b3045b0b628329db81999c2f439d4e830
+          materials=(
+            aflow-Cl1O12Pb5V3_ICSD_203074
+            aflow-B1C1F6K1_ICSD_1194
+            aflow-B6H2O13Sr3_ICSD_262541
+            aflow-Mo3Na1O16P3_ICSD_66877
+          )
+
+          cd "$REPO"
+          test "$(git rev-parse HEAD)" = "$FROZEN" || exit 90
+          printf '%s\n' "$FROZEN" > "$BASE/status/frozen_commit.txt"
+          date -Is > "$BASE/status/service_started_at.txt"
+
+          overall=0
+          for material in "${materials[@]}"; do
+            out="$BASE/results/$material"
+            log="$BASE/logs/$material.log"
+            status="$BASE/status/$material.status"
+            mkdir -p "$out"
+            printf 'RUNNING %s\n' "$(date -Is)" > "$status"
+            echo "[$(date -Is)] START $material" | tee -a "$BASE/logs/controller.log"
+
+            set +e
+            nice -n 10 "$PY" validation/formal_external_e2e.py \
+              --material-id "$material" \
+              --codecs zfp,sz3,sperr \
+              --output-dir "$out" \
+              > "$log" 2>&1
+            rc=$?
+            set -e
+
+            if [ "$rc" -eq 0 ]; then
+              printf 'SUCCESS %s rc=%s\n' "$(date -Is)" "$rc" > "$status"
+              echo "[$(date -Is)] SUCCESS $material" | tee -a "$BASE/logs/controller.log"
+            else
+              printf 'FAILED %s rc=%s\n' "$(date -Is)" "$rc" > "$status"
+              echo "[$(date -Is)] FAILED $material rc=$rc" | tee -a "$BASE/logs/controller.log"
+              overall=1
+            fi
+          done
+          date -Is > "$BASE/status/service_finished_at.txt"
+          exit "$overall"
+          SCRIPT
+          chmod +x "$BASE/run_final4.sh"
+
+          sudo tee /etc/systemd/system/qoi-final4.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=QoI frozen external final four recovery
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/opt/qoi-final4/repo
+          Environment=HOME=/home/ubuntu
+          Environment=PYTHONUNBUFFERED=1
+          ExecStart=/opt/qoi-final4/run_final4.sh
+          Restart=no
+          KillMode=control-group
+          StandardOutput=append:/opt/qoi-final4/logs/service.log
+          StandardError=append:/opt/qoi-final4/logs/service.log
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable qoi-final4.service
+          sudo systemctl restart qoi-final4.service
+          sleep 5
+          echo '=== qoi-final4 service ==='
+          sudo systemctl status qoi-final4.service --no-pager -l | head -40 || true
+          echo '=== initial status files ==='
+          find "$BASE/status" -maxdepth 1 -type f -printf '%f: ' -exec cat {} \; || true
+          echo '=== resources after launch ==='
+          free -h
+          df -h /
