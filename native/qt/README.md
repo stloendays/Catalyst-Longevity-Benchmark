@@ -21,17 +21,18 @@ The native application does not start a browser and does not require Streamlit o
 2. Save / discard / cancel protection before closing, opening another project or starting a new project.
 3. CSV data import with Chinese/English column aliases.
 4. Native `.xlsx` workbook import. The importer scans workbook sheets and uses the first sheet whose header contains catalyst, time and performance columns.
-5. Conservative text-document signal extraction for TXT / Markdown / CSV / TSV, including DOI, temperature, duration, CH4-conversion candidates, stability/deactivation keywords and source snippets.
-6. Built-in demo dataset.
-7. Catalyst trajectory visualization drawn by a native Qt widget.
-8. Per-catalyst initial/latest performance and retention.
-9. Latest shared observed time and leader determination.
-10. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
-11. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
-12. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
-13. Native PDF analysis report export including catalyst lifetime summaries, condition-audit status, mismatched pairs and guarded direct-comparison status.
-14. Native pages for project management, overview, data, lifetime analysis, AI migration workspace and settings.
-15. Installer and portable Windows package workflow.
+5. Native `资料分析` workspace for TXT / Markdown / CSV / TSV evidence files.
+6. Conservative document signal extraction: DOI, temperature, duration, CH4-conversion candidates, stability/deactivation keywords and source snippets.
+7. Built-in demo dataset.
+8. Catalyst trajectory visualization drawn by a native Qt widget.
+9. Per-catalyst initial/latest performance and retention.
+10. Latest shared observed time and leader determination.
+11. Censor-aware T95/T90/T80 endpoints, preserving the semantics used by the Python research engine: primary threshold lifetimes are not linearly interpolated into false exact values.
+12. Experimental-condition comparability guard for temperature, GHSV, WHSV, pressure and feed ratio. Explicit mismatches suppress unsafe direct cross-catalyst leader claims.
+13. Condition-guard visualization showing audit status and the exact catalyst pairs/fields that block comparison.
+14. Native PDF analysis report export including catalyst lifetime summaries, condition-audit status, mismatched pairs and guarded direct-comparison status.
+15. Native pages for project management, overview, data, evidence analysis, lifetime analysis, AI migration workspace and settings.
+16. Installer and portable Windows package workflow.
 
 ## Excel import
 
@@ -39,9 +40,9 @@ The native build uses QXlsx as a statically linked build-time dependency. CMake 
 
 The same scientific column aliases used by CSV import are accepted for `.xlsx` files. Required concepts are catalyst, time and performance. Optional columns include temperature, GHSV, WHSV, pressure, feed ratio, metric and provenance/source.
 
-## Document evidence backend
+## Document evidence workspace
 
-The C++ document analyzer mirrors the conservative signal-extraction policy of the Python research implementation. It treats isolated numbers as candidates rather than automatically converting them into experimental truth. Current native text ingestion supports TXT, Markdown, CSV and TSV. PDF text extraction is intentionally still on the migration roadmap rather than silently invoking OCR or introducing a weak parser.
+The C++ document analyzer mirrors the conservative signal-extraction policy of the Python research implementation. It treats isolated numbers as candidates rather than automatically converting them into experimental truth. The native `资料分析` page currently supports TXT, Markdown, CSV and TSV and displays source-locatable evidence snippets.
 
 The analyzer extracts:
 
@@ -51,6 +52,10 @@ The analyzer extracts:
 - CH4/methane conversion percentage candidates;
 - coking, sintering, stability/deactivation and regeneration terms;
 - short source-locatable evidence snippets.
+
+These values do not automatically become catalyst-lifetime facts. They must be bound to a specific catalyst, observation time and relevant experimental conditions before they are eligible for ranking or other decision claims.
+
+PDF text extraction remains intentionally on the migration roadmap rather than silently invoking OCR or introducing a weak parser. Scanned PDF content will not be promoted into structured evidence without an explicit, auditable extraction path.
 
 ## Project persistence
 
@@ -75,7 +80,7 @@ The built-in `--self-test` now verifies a matched-condition demo dataset, a deli
 
 ## Planned migration
 
-The Python implementation remains the scientific reference while modules are migrated. Next native modules are the document/evidence UI, native PDF text extraction, evidence persistence inside `.clrproj`, external database clients, AI Analyst, Evidence Critic and audit logging.
+The Python implementation remains the scientific reference while modules are migrated. Next native modules are native PDF text extraction, evidence persistence inside `.clrproj`, explicit evidence-to-catalyst binding, external database clients, AI Analyst, Evidence Critic and audit logging.
 
 ## Third-party notice
 
