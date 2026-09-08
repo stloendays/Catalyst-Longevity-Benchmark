@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   launch:
-    runs-on: [self-hosted, linux, x64, rhocodec]
+    runs-on: self-hosted
     timeout-minutes: 30
     steps:
       - name: Prepare exact frozen QoI checkout
