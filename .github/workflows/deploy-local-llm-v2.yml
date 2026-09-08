@@ -9,38 +9,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-local-llm-v2
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 360
     steps:
-      - name: Download verified Qwen3.5 2B Q4 model on GitHub runner
-        run: |
-          set -euo pipefail
-          MODEL_URL='https://huggingface.co/openresearchtools/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true'
-          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
-            --output /tmp/Qwen3.5-2B-Q4_K_M.gguf "$MODEL_URL"
-          echo 'd6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58  /tmp/Qwen3.5-2B-Q4_K_M.gguf' | sha256sum -c -
-          ls -lh /tmp/Qwen3.5-2B-Q4_K_M.gguf
-
-      - name: Download official llama.cpp Ubuntu x64 runtime
-        run: |
-          set -euo pipefail
-          curl -fL --retry 5 --retry-all-errors --connect-timeout 30 \
-            -o /tmp/llama-release.tar.gz \
-            'https://github.com/ggml-org/llama.cpp/releases/download/b10809/llama-b10809-bin-ubuntu-x64.tar.gz'
-          rm -rf /tmp/llama-unpack /tmp/llama-runtime
-          mkdir -p /tmp/llama-unpack /tmp/llama-runtime
-          tar -xzf /tmp/llama-release.tar.gz -C /tmp/llama-unpack
-          SERVER_BIN=$(find /tmp/llama-unpack -type f -name llama-server -print -quit)
-          test -n "$SERVER_BIN"
-          SRC_DIR=$(dirname "$SERVER_BIN")
-          cp -a "$SRC_DIR"/. /tmp/llama-runtime/
-          test -x /tmp/llama-runtime/llama-server
-          tar -C /tmp/llama-runtime -czf /tmp/llama-runtime.tar.gz .
-          /tmp/llama-runtime/llama-server --version || true
-          ls -lh /tmp/llama-runtime.tar.gz
-
       - name: Prepare SSH key
         env:
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
@@ -53,87 +30,177 @@ jobs:
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Prepare server directories without deleting partial model
+      - name: Inspect server and preserve partial downloads
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
-          sudo systemctl stop rhocodec-llm.service 2>/dev/null || true
+          MODEL_TMP='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          MODEL_FINAL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          EXPECTED_SIZE='1274396608'
+          EXPECTED_SHA='d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58'
+
           sudo mkdir -p /opt/rhocodec-llm/bin /opt/rhocodec-llm/models
           sudo chown -R ubuntu:ubuntu /opt/rhocodec-llm
-          rm -rf /opt/rhocodec-llm/bin/*
-          rm -f /tmp/llama-runtime.tar.gz
-          echo '=== PRE-TRANSFER ==='
+          sudo systemctl stop rhocodec-llm.service 2>/dev/null || true
+
+          echo '=== SERVER RESOURCES ==='
           df -h /
           free -h
-          echo '=== PARTIAL MODEL ==='
-          if [ -f /tmp/Qwen3.5-2B-Q4_K_M.gguf ]; then
-            stat -c 'bytes=%s' /tmp/Qwen3.5-2B-Q4_K_M.gguf
-            ls -lh /tmp/Qwen3.5-2B-Q4_K_M.gguf
-          else
-            echo 'bytes=0'
+          echo '=== EXISTING MODEL STATE ==='
+          for f in "$MODEL_FINAL" "$MODEL_TMP"; do
+            if [ -f "$f" ]; then
+              printf '%s bytes=' "$f"
+              stat -c '%s' "$f"
+              ls -lh "$f"
+            else
+              echo "$f missing"
+            fi
+          done
+
+          if [ -f "$MODEL_FINAL" ]; then
+            FINAL_SIZE=$(stat -c '%s' "$MODEL_FINAL")
+            if [ "$FINAL_SIZE" -eq "$EXPECTED_SIZE" ] && echo "$EXPECTED_SHA  $MODEL_FINAL" | sha256sum -c -; then
+              echo 'Installed model is already complete and verified.'
+            else
+              echo 'Installed model is incomplete or invalid; moving it back to the resumable temp path.'
+              if [ ! -f "$MODEL_TMP" ] || [ "$(stat -c '%s' "$MODEL_TMP" 2>/dev/null || echo 0)" -lt "$FINAL_SIZE" ]; then
+                mv -f "$MODEL_FINAL" "$MODEL_TMP"
+              else
+                rm -f "$MODEL_FINAL"
+              fi
+            fi
           fi
           REMOTE
 
-      - name: Transfer runtime and resume model to Tencent server
+      - name: Resume verified model directly on Tencent server
         run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
-          KEY="$HOME/.ssh/server_key"
-          HOST='ubuntu@150.158.27.206'
-          MODEL='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
-          REMOTE_MODEL='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          MODEL_TMP='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          MODEL_FINAL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          EXPECTED_SIZE='1274396608'
           EXPECTED_SHA='d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58'
-          SSH="ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i $KEY"
+          MIRROR_URL='https://hf-mirror.com/openresearchtools/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true'
+          OFFICIAL_URL='https://huggingface.co/openresearchtools/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true'
 
-          scp -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$KEY" \
-            /tmp/llama-runtime.tar.gz "$HOST:/tmp/llama-runtime.tar.gz"
-
-          LOCAL_SIZE=$(stat -c '%s' "$MODEL")
-          REMOTE_SIZE=$($SSH "$HOST" "stat -c '%s' '$REMOTE_MODEL' 2>/dev/null || echo 0")
-          echo "Local model bytes:  $LOCAL_SIZE"
-          echo "Remote model bytes: $REMOTE_SIZE"
-
-          case "$REMOTE_SIZE" in
-            ''|*[!0-9]*) echo 'Invalid remote size; resetting partial file.'; $SSH "$HOST" "rm -f '$REMOTE_MODEL'"; REMOTE_SIZE=0 ;;
-          esac
-          if [ "$REMOTE_SIZE" -gt "$LOCAL_SIZE" ]; then
-            echo 'Remote partial is larger than source; resetting it.'
-            $SSH "$HOST" "rm -f '$REMOTE_MODEL'"
-            REMOTE_SIZE=0
-          fi
-
-          if [ "$REMOTE_SIZE" -eq "$LOCAL_SIZE" ] && [ "$REMOTE_SIZE" -gt 0 ]; then
-            echo 'Remote file is full-sized; checking SHA-256 before transferring anything.'
-            if $SSH "$HOST" "echo '$EXPECTED_SHA  $REMOTE_MODEL' | sha256sum -c -"; then
-              echo 'Remote model already complete and verified.'
-            else
-              echo 'Full-sized remote file failed checksum; restarting model transfer.'
-              $SSH "$HOST" "rm -f '$REMOTE_MODEL'"
-              REMOTE_SIZE=0
+          if [ -f "$MODEL_FINAL" ]; then
+            if echo "$EXPECTED_SHA  $MODEL_FINAL" | sha256sum -c -; then
+              echo 'Verified installed model found; download step is unnecessary.'
+              exit 0
             fi
           fi
 
-          if [ "$REMOTE_SIZE" -lt "$LOCAL_SIZE" ]; then
-            START_BYTE=$((REMOTE_SIZE + 1))
-            REMAINING=$((LOCAL_SIZE - REMOTE_SIZE))
-            echo "Resuming at byte $START_BYTE; remaining bytes: $REMAINING"
-            tail -c +"$START_BYTE" "$MODEL" | \
-              $SSH "$HOST" "cat >> '$REMOTE_MODEL'"
+          if [ -f "$MODEL_TMP" ]; then
+            CURRENT_SIZE=$(stat -c '%s' "$MODEL_TMP")
+          else
+            CURRENT_SIZE=0
+          fi
+          echo "Current resumable model bytes: $CURRENT_SIZE / $EXPECTED_SIZE"
+
+          if [ "$CURRENT_SIZE" -gt "$EXPECTED_SIZE" ]; then
+            echo 'Partial model is larger than expected; resetting it.'
+            rm -f "$MODEL_TMP"
+            CURRENT_SIZE=0
           fi
 
-          FINAL_SIZE=$($SSH "$HOST" "stat -c '%s' '$REMOTE_MODEL'")
-          echo "Final remote bytes: $FINAL_SIZE"
-          test "$FINAL_SIZE" -eq "$LOCAL_SIZE"
-          $SSH "$HOST" "echo '$EXPECTED_SHA  $REMOTE_MODEL' | sha256sum -c -"
+          if [ "$CURRENT_SIZE" -eq "$EXPECTED_SIZE" ] && [ "$CURRENT_SIZE" -gt 0 ]; then
+            if echo "$EXPECTED_SHA  $MODEL_TMP" | sha256sum -c -; then
+              echo 'Resumable model is already complete and verified.'
+              exit 0
+            fi
+            echo 'Full-sized temp file failed SHA-256; restarting from zero.'
+            rm -f "$MODEL_TMP"
+            CURRENT_SIZE=0
+          fi
 
-      - name: Install local files and systemd service
+          resume_from() {
+            url="$1"
+            label="$2"
+            echo "Attempting resumable server-side download via $label"
+            curl -fL -C - \
+              --retry 12 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
+              -o "$MODEL_TMP" "$url"
+          }
+
+          if ! resume_from "$MIRROR_URL" 'hf-mirror.com'; then
+            echo 'Mirror resume failed; falling back to official Hugging Face.'
+            resume_from "$OFFICIAL_URL" 'huggingface.co'
+          fi
+
+          FINAL_SIZE=$(stat -c '%s' "$MODEL_TMP")
+          echo "Downloaded model bytes: $FINAL_SIZE"
+          if [ "$FINAL_SIZE" -ne "$EXPECTED_SIZE" ]; then
+            echo "Model size mismatch: expected $EXPECTED_SIZE, got $FINAL_SIZE"
+            exit 1
+          fi
+
+          if ! echo "$EXPECTED_SHA  $MODEL_TMP" | sha256sum -c -; then
+            echo 'SHA-256 failed after resumed download; retrying one clean download.'
+            rm -f "$MODEL_TMP"
+            if ! curl -fL --retry 12 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
+              -o "$MODEL_TMP" "$MIRROR_URL"; then
+              curl -fL --retry 12 --retry-all-errors --retry-delay 5 \
+                --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
+                -o "$MODEL_TMP" "$OFFICIAL_URL"
+            fi
+            test "$(stat -c '%s' "$MODEL_TMP")" -eq "$EXPECTED_SIZE"
+            echo "$EXPECTED_SHA  $MODEL_TMP" | sha256sum -c -
+          fi
+          REMOTE
+
+      - name: Install llama.cpp runtime and systemd service
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
-          tar -xzf /tmp/llama-runtime.tar.gz -C /opt/rhocodec-llm/bin
+          MODEL_TMP='/tmp/Qwen3.5-2B-Q4_K_M.gguf'
+          MODEL_FINAL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          EXPECTED_SHA='d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58'
+          RUNTIME_ARCHIVE='/tmp/llama-runtime.tar.gz'
+          RELEASE_ARCHIVE='/tmp/llama-release.tar.gz'
+          RELEASE_URL='https://github.com/ggml-org/llama.cpp/releases/download/b10809/llama-b10809-bin-ubuntu-x64.tar.gz'
+
+          sudo mkdir -p /opt/rhocodec-llm/bin /opt/rhocodec-llm/models
+          sudo chown -R ubuntu:ubuntu /opt/rhocodec-llm
+
+          if [ -f "$MODEL_TMP" ]; then
+            echo "$EXPECTED_SHA  $MODEL_TMP" | sha256sum -c -
+            mv -f "$MODEL_TMP" "$MODEL_FINAL"
+          fi
+          echo "$EXPECTED_SHA  $MODEL_FINAL" | sha256sum -c -
+
+          rm -rf /opt/rhocodec-llm/bin/* /tmp/llama-unpack
+          mkdir -p /tmp/llama-unpack
+
+          USE_REPACKED=0
+          if [ -s "$RUNTIME_ARCHIVE" ] && tar -tzf "$RUNTIME_ARCHIVE" >/tmp/llama-runtime-list.txt 2>/dev/null; then
+            if grep -q 'llama-server$' /tmp/llama-runtime-list.txt; then
+              USE_REPACKED=1
+            fi
+          fi
+
+          if [ "$USE_REPACKED" -eq 1 ]; then
+            echo 'Reusing the previously transferred llama.cpp runtime archive.'
+            tar -xzf "$RUNTIME_ARCHIVE" -C /opt/rhocodec-llm/bin
+          else
+            echo 'No valid cached runtime archive; downloading the official llama.cpp runtime on the server.'
+            rm -f "$RELEASE_ARCHIVE"
+            curl -fL --retry 12 --retry-all-errors --retry-delay 5 --connect-timeout 30 \
+              -o "$RELEASE_ARCHIVE" "$RELEASE_URL"
+            tar -xzf "$RELEASE_ARCHIVE" -C /tmp/llama-unpack
+            SERVER_BIN=$(find /tmp/llama-unpack -type f -name llama-server -print -quit)
+            test -n "$SERVER_BIN"
+            SRC_DIR=$(dirname "$SERVER_BIN")
+            cp -a "$SRC_DIR"/. /opt/rhocodec-llm/bin/
+          fi
+
+          test -x /opt/rhocodec-llm/bin/llama-server
           chmod +x /opt/rhocodec-llm/bin/llama-server
-          mv /tmp/Qwen3.5-2B-Q4_K_M.gguf /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
-          rm -f /tmp/llama-runtime.tar.gz
-          echo 'd6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58  /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf' | sha256sum -c -
+          /opt/rhocodec-llm/bin/llama-server --version || true
 
           sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
           [Unit]
@@ -161,14 +228,17 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable rhocodec-llm.service
           sudo systemctl restart rhocodec-llm.service
+          sudo systemctl is-enabled rhocodec-llm.service
+          echo 'systemd service installation completed.'
           REMOTE
 
       - name: Wait for local API and smoke test
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           ready=0
-          for i in $(seq 1 60); do
+          for i in $(seq 1 80); do
             if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/rhocodec-models.json 2>/dev/null; then
               ready=1
               break
@@ -178,33 +248,51 @@ jobs:
           if [ "$ready" -ne 1 ]; then
             echo 'Local model API failed to become ready.'
             sudo systemctl status rhocodec-llm.service --no-pager -l || true
-            sudo journalctl -u rhocodec-llm.service -n 160 --no-pager || true
+            sudo journalctl -u rhocodec-llm.service -n 200 --no-pager || true
             exit 1
           fi
 
+          sudo systemctl is-active --quiet rhocodec-llm.service
           MODEL_ID=$(python3 - <<'PY'
           import json
           with open('/tmp/rhocodec-models.json') as f:
-              d=json.load(f)
+              d = json.load(f)
+          assert d.get('data'), d
           print(d['data'][0]['id'])
           PY
           )
+
           python3 - "$MODEL_ID" > /tmp/rhocodec-request.json <<'PY'
-          import json,sys
+          import json, sys
           print(json.dumps({
               'model': sys.argv[1],
-              'messages': [{'role':'user','content':'Reply briefly with the words RhoCodec local model is running.'}],
+              'messages': [
+                  {'role': 'user', 'content': 'Reply briefly with the words RhoCodec local model is running.'}
+              ],
               'max_tokens': 32,
               'temperature': 0
           }))
           PY
+
           curl -fsS --max-time 180 http://127.0.0.1:18080/v1/chat/completions \
             -H 'Content-Type: application/json' \
             --data-binary @/tmp/rhocodec-request.json \
-            | tee /tmp/rhocodec-smoke.json
-          echo
+            -o /tmp/rhocodec-smoke.json
+
+          python3 - <<'PY'
+          import json
+          with open('/tmp/rhocodec-smoke.json') as f:
+              d = json.load(f)
+          choices = d.get('choices') or []
+          assert choices, d
+          content = choices[0].get('message', {}).get('content', '')
+          assert content.strip(), d
+          print('Smoke response:', content.strip())
+          print('LOCAL_API_SMOKE_TEST=PASS')
+          PY
+
           echo '=== SERVICE ==='
-          sudo systemctl status rhocodec-llm.service --no-pager -l | head -30 || true
+          sudo systemctl status rhocodec-llm.service --no-pager -l | head -40 || true
           echo '=== RESOURCES ==='
           free -h
           df -h /
