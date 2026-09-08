@@ -31,11 +31,11 @@ std::optional<double> optionalDouble(const QVariant& value) {
     return value.isNull() ? std::nullopt : std::optional<double>(value.toDouble());
 }
 
-bool execOrSetError(QSqlQuery& query, QString* errorMessage, const QString& context) {
-    if (query.exec()) {
+bool execOrSetError(QSqlQuery& query, QString* errorMessage, const QString& sql) {
+    if (query.exec(sql)) {
         return true;
     }
-    setError(errorMessage, QStringLiteral("%1：%2").arg(context, query.lastError().text()));
+    setError(errorMessage, QStringLiteral("%1：%2").arg(sql, query.lastError().text()));
     return false;
 }
 
