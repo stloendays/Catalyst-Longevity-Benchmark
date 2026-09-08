@@ -1,0 +1,76 @@
+{
+  "stage": 3,
+  "status": "frozen_recipe_before_training",
+  "model": "Qwen/Qwen3.5-2B",
+  "seed": 20260908,
+  "dataset": {
+    "generator": "generate_stage2_dataset.py",
+    "train_records": 16000,
+    "validation_records": 1600,
+    "test_records": 1600,
+    "train_sha256": "d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303",
+    "validation_sha256": "89e4aca2f72fc4efd6bab0a88299a68a32cd637edc0561d7d2c95b2b27463990",
+    "test_sha256": "460b5308f6791eb53692fc0736a53e6f6b553a925207caa34517b456e28d78f2"
+  },
+  "task_repeat_weights": {
+    "clarify": 3,
+    "scope_guard": 3,
+    "no_tool": 2,
+    "explicit_write": 2,
+    "search_then_read": 2,
+    "zh_search_then_read": 2,
+    "tool_error_recovery": 2,
+    "stat_then_read": 2,
+    "two_reads": 2
+  },
+  "quantization": {
+    "bits": 4,
+    "type": "nf4",
+    "double_quant": true,
+    "compute_dtype": "bf16_if_supported_else_fp16"
+  },
+  "lora": {
+    "r": 16,
+    "alpha": 32,
+    "dropout": 0.05,
+    "bias": "none",
+    "target_scope": "all quantized linear modules under model.language_model only"
+  },
+  "training": {
+    "assistant_only_loss": true,
+    "max_length": 2048,
+    "packing": false,
+    "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 16,
+    "learning_rate": 0.0001,
+    "lr_scheduler": "cosine",
+    "warmup_ratio": 0.05,
+    "epochs": 1.0,
+    "optim": "paged_adamw_8bit",
+    "gradient_checkpointing": true,
+    "eval_steps": 100,
+    "save_steps": 100,
+    "save_total_limit": 2
+  },
+  "package_versions": {
+    "transformers": "5.16.1",
+    "trl": "1.12.0",
+    "peft": "0.20.0",
+    "bitsandbytes": "0.50.0",
+    "datasets": "5.0.1",
+    "accelerate": "1.14.0",
+    "huggingface_hub": "1.30.0"
+  },
+  "promotion_gate": {
+    "base_call_exact_accuracy": 0.7333333333333333,
+    "base_no_tool_precision": 0.4,
+    "base_false_tool_call_rate": 0.6,
+    "base_api_or_parse_error_rate": 0.0,
+    "required_direction": {
+      "call_exact_accuracy": "up",
+      "no_tool_precision": "up",
+      "false_tool_call_rate": "down",
+      "api_or_parse_error_rate": "not_worse"
+    }
+  }
+}
