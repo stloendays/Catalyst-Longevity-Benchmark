@@ -28,14 +28,14 @@ jobs:
           echo '=== TIME ==='; date -Is
           echo '=== DISK ==='; df -h /
           echo '=== MEMORY ==='; free -h
-          echo '=== LLAMA FILES ==='; ls -lah ~/.local/bin/llama ~/.llama-app/llama 2>/dev/null || true
-          echo '=== INSTALL/DOWNLOAD PROCESSES ==='
-          ps -eo pid,ppid,user,%mem,%cpu,etime,args | grep -E 'llama|curl|npm|journalctl|ssh.*bash -s' | grep -v grep || true
-          echo '=== LLM SERVICE ==='; systemctl status rhocodec-llm.service --no-pager -l 2>/dev/null || true
-          echo '=== MODEL CACHE ==='; du -sh ~/.cache/huggingface ~/.cache/llama.cpp ~/.cache 2>/dev/null || true
+          echo '=== STEP2 PROCESSES ==='
+          ps -eo pid,ppid,user,%cpu,%mem,etime,args | grep -E 'benchmark_tool_use.py|llama-server' | grep -v grep || true
+          echo '=== STEP2 TMP ==='
+          find /tmp/local2b-mcp-step2 -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS %s %p\n' 2>/dev/null | sort || true
+          echo '=== LLM SERVICE ==='; systemctl is-active rhocodec-llm.service || true
+          echo '=== RECENT LLM LOG ==='
+          journalctl -u rhocodec-llm.service --since '15 minutes ago' --no-pager -n 60 2>/dev/null || true
           REMOTE
       - name: Remove key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-
-# Triggered to observe disk usage while the verified model is transferred.
