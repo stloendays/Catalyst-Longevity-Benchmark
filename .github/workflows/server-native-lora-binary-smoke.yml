@@ -11,7 +11,7 @@ permissions:
 jobs:
   train-smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - name: Prepare SSH key
         env:
@@ -22,65 +22,24 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Download pinned QVAC source on runner
-        env:
-          PIN: 657fb2ec6a841f259b4d3d20861864323d5f2737
-        run: |
-          curl -fL --retry 4 --retry-delay 2 \
-            "https://github.com/tetherto/qvac-fabric-llm.cpp/archive/${PIN}.tar.gz" \
-            -o "$RUNNER_TEMP/qvac.tar.gz"
-          mkdir -p "$RUNNER_TEMP/qvac"
-          tar -xzf "$RUNNER_TEMP/qvac.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/qvac"
-          echo "SOURCE_ARCHIVE_BYTES=$(stat -c '%s' "$RUNNER_TEMP/qvac.tar.gz")"
-
-      - name: Build portable CPU LoRA trainer on runner
-        run: |
-          cmake -S "$RUNNER_TEMP/qvac" -B "$RUNNER_TEMP/qvac/build" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CUDA=OFF \
-            -DGGML_VULKAN=OFF \
-            -DGGML_BACKEND_DL=OFF \
-            -DLLAMA_CURL=OFF
-          cmake --build "$RUNNER_TEMP/qvac/build" --target llama-finetune-lora -j 2
-          TRAINER="$RUNNER_TEMP/qvac/build/bin/llama-finetune-lora"
-          test -x "$TRAINER"
-          echo '=== LDD ==='
-          ldd "$TRAINER" || true
-          mkdir -p "$RUNNER_TEMP/stage"
-          cp "$TRAINER" "$RUNNER_TEMP/stage/"
-          tar -C "$RUNNER_TEMP/stage" -czf "$RUNNER_TEMP/qvac-trainer.tar.gz" llama-finetune-lora
-          echo "TRAINER_BYTES=$(stat -c '%s' "$TRAINER")"
-          echo "BUNDLE_BYTES=$(stat -c '%s' "$RUNNER_TEMP/qvac-trainer.tar.gz")"
-          ls -lh "$TRAINER" "$RUNNER_TEMP/qvac-trainer.tar.gz"
-
-      - name: Transfer trainer bundle to server
-        run: |
-          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
-            "$RUNNER_TEMP/qvac-trainer.tar.gz" ubuntu@150.158.27.206:/home/ubuntu/qvac-trainer-step3.tar.gz
-
-      - name: Run real Q4 CPU LoRA smoke training on server
+      - name: Retry real Q4 CPU LoRA training on server
         run: |
           ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o ConnectTimeout=15 \
             -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
-          ROOT=/home/ubuntu/qvac-trainer-step3
-          TRAINER="$ROOT/llama-finetune-lora"
+          TRAINER=/home/ubuntu/qvac-trainer-step3/llama-finetune-lora
           MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
-          DATA=/tmp/local2b_lora_smoke_v3.jsonl
-          OUT=/tmp/local2b_lora_smoke_v3.gguf
-          LOG=/tmp/local2b_lora_smoke_v3.log
-
-          rm -rf "$ROOT"
-          mkdir -p "$ROOT"
-          tar -xzf /home/ubuntu/qvac-trainer-step3.tar.gz -C "$ROOT"
-          chmod +x "$TRAINER"
-          "$TRAINER" --help >/tmp/qvac-trainer-help.txt 2>&1 || true
-          grep -E 'lora-rank|assistant-loss-only|num-epochs' /tmp/qvac-trainer-help.txt | head -20 || true
+          DATA=/tmp/local2b_lora_smoke_v4.jsonl
+          OUT=/tmp/local2b_lora_smoke_v4.gguf
+          LOG=/tmp/local2b_lora_smoke_v4.log
+          test -x "$TRAINER"
+          test -s "$MODEL"
 
           cat > "$DATA" <<'JSONL'
           {"messages":[{"role":"system","content":"You are a compact local work agent."},{"role":"user","content":"Reply exactly OK."},{"role":"assistant","content":"OK"}]}
+          {"messages":[{"role":"system","content":"You are a compact local work agent."},{"role":"user","content":"Reply exactly YES."},{"role":"assistant","content":"YES"}]}
+          {"messages":[{"role":"system","content":"You are a compact local work agent."},{"role":"user","content":"Reply exactly READY."},{"role":"assistant","content":"READY"}]}
+          {"messages":[{"role":"system","content":"You are a compact local work agent."},{"role":"user","content":"Reply exactly DONE."},{"role":"assistant","content":"DONE"}]}
           JSONL
           rm -f "$OUT" "$LOG"
 
@@ -99,7 +58,6 @@ jobs:
           echo '=== SERVER PRETRAIN ==='
           date -Is
           free -h
-          df -h /
           set +e
           timeout 900 "$TRAINER" \
             -m "$MODEL" \
@@ -112,14 +70,15 @@ jobs:
             --lora-seed 20260908 \
             --learning-rate 1e-5 \
             --weight-decay 0 \
+            --checkpoint-save-steps 0 \
             --output-adapter "$OUT" \
-            -c 128 -b 32 -ub 32 -ngl 0 -fa off \
+            -c 64 -b 8 -ub 8 -ngl 0 -fa off \
             2>&1 | tee "$LOG"
           RC=${PIPESTATUS[0]}
           set -e
 
           echo "TRAIN_RC=$RC"
-          tail -100 "$LOG" || true
+          tail -120 "$LOG" || true
           ls -lh "$OUT" 2>/dev/null || true
           free -h
 
@@ -129,7 +88,7 @@ jobs:
           echo "SERVICE=$(systemctl is-active rhocodec-llm.service || true)"
           if [ "$RC" -ne 0 ]; then exit "$RC"; fi
           test -s "$OUT"
-          echo 'SERVER_NATIVE_LORA_SMOKE=PASS'
+          echo 'SERVER_NATIVE_LORA_SMOKE_V2=PASS'
           REMOTE
 
       - name: Remove key
