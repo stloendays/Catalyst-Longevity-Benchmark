@@ -26,15 +26,13 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           echo '=== TIME ==='; date -Is
-          echo '=== DISK ==='; df -h /
-          echo '=== MEMORY ==='; free -h
           echo '=== STEP2 PROCESSES ==='
           ps -eo pid,ppid,user,%cpu,%mem,etime,args | grep -E 'benchmark_tool_use.py|llama-server' | grep -v grep || true
-          echo '=== STEP2 TMP ==='
-          find /tmp/local2b-mcp-step2 -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS %s %p\n' 2>/dev/null | sort || true
-          echo '=== LLM SERVICE ==='; systemctl is-active rhocodec-llm.service || true
-          echo '=== RECENT LLM LOG ==='
-          journalctl -u rhocodec-llm.service --since '15 minutes ago' --no-pager -n 60 2>/dev/null || true
+          echo '=== REQUESTS SINCE BENCHMARK START ==='
+          journalctl -u rhocodec-llm.service --since '2026-09-08 22:30:10' --no-pager 2>/dev/null | grep -c 'processing task' || true
+          echo '=== BASELINE FILE ==='
+          ls -lah /tmp/local2b-mcp-step2/base-q4-baseline.json 2>/dev/null || true
+          echo '=== SERVICE ==='; systemctl is-active rhocodec-llm.service || true
           REMOTE
       - name: Remove key
         if: always()
