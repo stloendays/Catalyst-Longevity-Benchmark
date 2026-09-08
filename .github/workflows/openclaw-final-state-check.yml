@@ -1,0 +1,101 @@
+name: Verify final OpenClaw state
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-final-state-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Verify server state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+
+          "$OC" --version | tee /tmp/version.txt
+          grep -q '2026.9.2' /tmp/version.txt
+          "$OC" config validate
+          "$OC" gateway status --deep --json >/tmp/gateway.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/gateway.json'))
+          assert ((d.get('service') or {}).get('runtime') or {}).get('status') == 'running', d
+          assert (d.get('rpc') or {}).get('ok') is True, d
+          assert ((d.get('rpc') or {}).get('server') or {}).get('version') == '2026.9.2', d
+          print('Gateway runtime and RPC: PASS')
+          PY
+
+          curl -fsS http://127.0.0.1:18080/v1/models >/tmp/local-models.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/local-models.json'))
+          r=(d.get('data') or [])[0]
+          assert r.get('id') == 'qwen3.5-2b-q4', d
+          assert int((r.get('meta') or {}).get('n_ctx') or 0) >= 16384, d
+          print('Local model:', r.get('id'), 'context=', (r.get('meta') or {}).get('n_ctx'))
+          PY
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/home/ubuntu/.openclaw/openclaw.json'))
+          terms=('qqbot','openclaw-qqbot','weixin','openclaw-weixin','wechat','wecom','yuanbao','dingtalk','ddingtalk')
+          bad=[]
+          channels=d.get('channels') if isinstance(d.get('channels'),dict) else {}
+          entries=((d.get('plugins') or {}).get('entries') or {}) if isinstance(d.get('plugins'),dict) else {}
+          for section,mapping in [('channels',channels),('plugins.entries',entries)]:
+              for key in mapping:
+                  if any(t in key.lower() for t in terms): bad.append(section+'.'+key)
+          assert not bad, bad
+          local2b=((d.get('agents') or {}).get('entries') or {}).get('local2b')
+          assert isinstance(local2b,dict), d
+          assert local2b.get('model') == 'llama-cpp/qwen3.5-2b-q4', local2b
+          assert local2b.get('skills') == [], local2b
+          assert ((local2b.get('tools') or {}).get('profile')) == 'minimal', local2b
+          print('Active social chat config residue: none')
+          print('Minimal Local2B agent config: PASS')
+          PY
+
+          residue=$(sudo find /home/ubuntu/.openclaw/extensions /root/.openclaw/extensions -mindepth 1 -maxdepth 1 \
+            \( -iname '*qqbot*' -o -iname '*weixin*' -o -iname '*wechat*' -o -iname '*wecom*' -o -iname '*yuanbao*' -o -iname '*dingtalk*' -o -iname '*ddingtalk*' \) -print 2>/dev/null || true)
+          test -z "$residue" || { echo "$residue"; exit 1; }
+          echo 'External social chat extension directories: none'
+
+          if pgrep -u root -f '^openclaw-gateway$' >/dev/null 2>&1 || pgrep -u root -f '^openclaw$' >/dev/null 2>&1; then
+            echo 'Legacy root OpenClaw process found'
+            exit 1
+          fi
+          echo 'Legacy root OpenClaw process: none'
+
+          if sudo ss -lntp | grep -q ':11931'; then
+            sudo ss -lntp | grep ':11931'
+            exit 1
+          fi
+          echo 'Legacy port 11931: closed'
+
+          echo '=== ACTIVE PORTS ==='
+          sudo ss -lntp | grep -E '(:18080|:18789|:11931)' || true
+          echo '=== MEMORY ==='
+          free -h
+          df -h /
+          REMOTE
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
