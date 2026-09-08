@@ -1,0 +1,50 @@
+name: Inspect live OpenClaw local inference
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/openclaw-inference-live-inspect.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Inspect inference state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set +e
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          echo '=== TIME ==='; date -Is
+          echo '=== OPENCLAW PROCESSES ==='
+          ps -eo pid,ppid,user,%cpu,%mem,etime,args --sort=-%cpu | grep -E 'openclaw|llama-server' | grep -v grep | head -80
+          echo '=== GATEWAY STATUS ==='
+          openclaw gateway status --deep --json 2>&1 | head -c 5000; echo
+          echo '=== LLAMA SERVICE ==='
+          sudo systemctl status rhocodec-llm.service --no-pager -l | head -35
+          echo '=== LLAMA RECENT JOURNAL ==='
+          sudo journalctl -u rhocodec-llm.service -n 100 --no-pager | tail -100
+          echo '=== GATEWAY RECENT JOURNAL ==='
+          journalctl --user -u openclaw-gateway.service -n 100 --no-pager | tail -100
+          echo '=== TEMP PROBE OUTPUTS ==='
+          for f in /tmp/local-transport.json /tmp/local-gateway.json /tmp/local-agent.json; do
+            echo "--- $f ---"
+            if [ -f "$f" ]; then wc -c "$f"; head -c 2000 "$f"; echo; else echo missing; fi
+          done
+          REMOTE
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
