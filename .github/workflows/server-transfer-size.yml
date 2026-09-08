@@ -26,7 +26,7 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           echo '=== TIME ==='; date -Is
           echo '=== FILES ==='; ls -lh /home/ubuntu/local2b-training/step3a 2>/dev/null || true
-          echo '=== LOG ==='; tail -60 /home/ubuntu/local2b-training/step3a/train.log 2>/dev/null || true
+          echo '=== LOG ==='; tail -80 /home/ubuntu/local2b-training/step3a/train.log 2>/dev/null || true
           echo '=== PROCESS ==='; ps -eo pid,user,%cpu,%mem,etime,args | grep -E 'llama-finetune-lora|llama-server' | grep -v grep || true
           echo '=== MEMORY ==='; free -h
           echo '=== SERVICE ==='; systemctl is-active rhocodec-llm.service || true
@@ -34,3 +34,4 @@ jobs:
       - name: Remove key
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
+# stage3a progress probe 2
