@@ -1,0 +1,70 @@
+name: Local2B MCP Step 3 preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - local2b-qlora-step3
+    paths:
+      - training/local2b_mcp/generate_stage2_dataset.py
+      - training/local2b_mcp/validate_dataset.py
+      - training/local2b_mcp/preflight_step3.py
+      - training/local2b_mcp/train_qlora.py
+      - training/local2b_mcp/qlora_step3_config.json
+      - training/local2b_mcp/requirements-step3.txt
+      - .github/workflows/local2b-mcp-step3-preflight.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install CPU preflight dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install transformers==5.16.1 pillow
+
+      - name: Generate frozen Step-2 dataset
+        run: |
+          rm -rf build/local2b-step3-preflight
+          mkdir -p build/local2b-step3-preflight
+          python training/local2b_mcp/generate_stage2_dataset.py \
+            --out build/local2b-step3-preflight/dataset \
+            --train 16000 --val 1600 --test 1600 --seed 20260908
+          python training/local2b_mcp/validate_dataset.py build/local2b-step3-preflight/dataset
+
+      - name: Verify Qwen3.5 tool chat template
+        run: |
+          python training/local2b_mcp/preflight_step3.py \
+            --data-dir build/local2b-step3-preflight/dataset \
+            --samples-per-type 1
+
+      - name: Static training-code checks
+        run: |
+          python -m py_compile \
+            training/local2b_mcp/train_qlora.py \
+            training/local2b_mcp/preflight_step3.py
+          python -m json.tool training/local2b_mcp/qlora_step3_config.json >/dev/null
+          python - <<'PY'
+          import json
+          cfg = json.load(open('training/local2b_mcp/qlora_step3_config.json'))
+          assert cfg['model'] == 'Qwen/Qwen3.5-2B'
+          assert cfg['quantization']['type'] == 'nf4'
+          assert cfg['lora']['target_scope'].endswith('only')
+          assert cfg['training']['assistant_only_loss'] is True
+          assert cfg['promotion_gate']['base_call_exact_accuracy'] == 0.7333333333333333
+          print('STEP3_STATIC_CONFIG=PASS')
+          PY
