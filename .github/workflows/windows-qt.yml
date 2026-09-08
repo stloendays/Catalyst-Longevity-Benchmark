@@ -50,8 +50,13 @@ jobs:
       - name: Run native engine persistence report Excel and evidence self-test
         shell: pwsh
         run: |
-          & "build-qt\Release\Catalyst Longevity Research.exe" --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Native self-test failed with exit code $LASTEXITCODE" }
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          # This target uses the Windows GUI subsystem. Invoke it as a process
+          # and wait explicitly; PowerShell's $LASTEXITCODE can stay unset for
+          # GUI applications launched with the call operator.
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+          Write-Host "Native self-test passed."
 
       - name: Smoke-test native desktop window
         shell: pwsh
@@ -90,11 +95,12 @@ jobs:
           $originalPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
-            & "dist-qt\app\Catalyst Longevity Research.exe" --self-test
-            if ($LASTEXITCODE -ne 0) { throw "Deployed app self-test failed with exit code $LASTEXITCODE" }
-
             $exe = (Resolve-Path "dist-qt\app\Catalyst Longevity Research.exe").Path
-            $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            $workingDir = Split-Path $exe
+            $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory $workingDir -Wait -PassThru
+            if ($test.ExitCode -ne 0) { throw "Deployed app self-test failed with exit code $($test.ExitCode)" }
+
+            $process = Start-Process -FilePath $exe -WorkingDirectory $workingDir -PassThru
             try {
               Start-Sleep -Seconds 6
               if ($process.HasExited) {
