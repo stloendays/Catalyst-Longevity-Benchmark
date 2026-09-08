@@ -1,0 +1,455 @@
+from pathlib import Path
+
+
+def replace_once(text: str, old: str, new: str, label: str) -> str:
+    if old not in text:
+        raise RuntimeError(f"missing pattern: {label}")
+    return text.replace(old, new, 1)
+
+
+# Main window: black/white product system, card hierarchy, semantic states and AI workspace.
+p = Path("native/qt/src/mainwindow.cpp")
+text = p.read_text(encoding="utf-8")
+if "#gptSurface" not in text:
+    text = replace_once(text, '#include <QTableWidget>\n', '#include <QTableWidget>\n#include <QTimer>\n#include <QStyle>\n', "mainwindow includes")
+    marker = 'namespace {\n\nQLabel* heading'
+    style = r'''namespace {
+
+QString gptMonochromeStyle() {
+    return QStringLiteral(R"(
+        QMainWindow, QWidget { background:#F7F7F8; color:#111111; font-family:"Microsoft YaHei UI"; font-size:13px; }
+        QMainWindow { background:#F7F7F8; }
+        QStatusBar { background:#FFFFFF; color:#71717A; border-top:1px solid #E7E7E9; min-height:30px; }
+        QStatusBar QLabel { color:#71717A; padding:0 8px; }
+        #sidebar { background:#111111; border-right:1px solid #242424; }
+        #brand { color:#FFFFFF; background:transparent; border:none; padding:8px 8px 14px; font-size:16px; font-weight:700; letter-spacing:.3px; }
+        #sidebarFoot { color:#737373; font-size:11px; padding:8px 4px; }
+        #navButton { color:#D4D4D4; background:transparent; border:1px solid transparent; border-radius:10px; padding:10px 12px; text-align:left; font-weight:500; min-height:24px; }
+        #navButton:hover { background:#242424; border-color:#333333; color:#FFFFFF; }
+        #navButton:checked { background:#2F2F2F; border-color:#3C3C3C; color:#FFFFFF; font-weight:650; }
+        #navButton:pressed { background:#383838; }
+        #pageHeading { color:#111111; font-size:24px; font-weight:700; }
+        #mutedText { color:#71717A; line-height:1.55; }
+        #sectionTitle { color:#18181B; font-size:15px; font-weight:700; }
+        #metricTitle { color:#71717A; font-size:12px; font-weight:500; }
+        #metricValue { color:#111111; font-size:21px; font-weight:700; }
+        #sourcePath { color:#27272A; font-weight:650; }
+        #metricCard { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; min-height:70px; }
+        #metricCard:hover { background:#FCFCFC; border-color:#CFCFD2; }
+        #panel, #gptSurface, #evidenceSurface, #aiSurface { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; }
+        #panel:hover, #gptSurface:hover, #evidenceSurface:hover, #aiSurface:hover { background:#FEFEFE; border-color:#CFCFD2; }
+        #gptSurface { border-color:#DEDEE1; }
+        #evidenceSurface { border-left:3px solid #18181B; }
+        #aiSurface { background:#FAFAFA; border-color:#DCDCE0; }
+        #infoPanel { background:#FAFAFA; border:1px solid #E4E4E7; border-radius:12px; }
+        #statusNeutral, #statusGood, #statusWarn, #statusBad { border-radius:9px; padding:5px 9px; font-size:12px; font-weight:650; }
+        #statusNeutral { color:#52525B; background:#F4F4F5; border:1px solid #E4E4E7; }
+        #statusGood { color:#166534; background:#F0FDF4; border:1px solid #BBF7D0; }
+        #statusWarn { color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; }
+        #statusBad { color:#991B1B; background:#FEF2F2; border:1px solid #FECACA; }
+        #guardStatus { color:#18181B; font-size:14px; font-weight:700; padding:4px 0; }
+        #primaryButton { background:#111111; color:#FFFFFF; border:1px solid #111111; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
+        #primaryButton:hover { background:#2F2F2F; border-color:#2F2F2F; }
+        #primaryButton:pressed { background:#444444; border-color:#444444; }
+        #primaryButton:disabled { background:#B4B4B4; border-color:#B4B4B4; color:#F5F5F5; }
+        #secondaryButton { background:#FFFFFF; color:#27272A; border:1px solid #D4D4D8; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
+        #secondaryButton:hover { background:#F4F4F5; border-color:#A1A1AA; color:#111111; }
+        #secondaryButton:pressed { background:#EDEDEF; }
+        QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit { background:#FFFFFF; color:#18181B; border:1px solid #D4D4D8; border-radius:9px; padding:7px 9px; selection-background-color:#27272A; selection-color:#FFFFFF; }
+        QLineEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QTextEdit:hover { border-color:#A1A1AA; }
+        QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QTextEdit:focus { border:1px solid #52525B; background:#FFFFFF; }
+        QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled { background:#F4F4F5; color:#A1A1AA; }
+        QComboBox::drop-down, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { border:none; background:transparent; }
+        QTableWidget { background:#FFFFFF; alternate-background-color:#FAFAFA; border:1px solid #E4E4E7; border-radius:10px; gridline-color:#F0F0F1; selection-background-color:#F0F0F1; selection-color:#111111; }
+        QHeaderView::section { background:#F7F7F8; color:#52525B; border:none; border-right:1px solid #ECECEF; border-bottom:1px solid #E4E4E7; padding:9px 8px; font-weight:650; }
+        QTableWidget::item { padding:7px; border:none; }
+        QTableWidget::item:hover { background:#F5F5F6; }
+        QTableWidget::item:selected { background:#EDEDEF; color:#111111; }
+        QScrollBar:vertical { background:transparent; width:10px; margin:3px 2px; }
+        QScrollBar::handle:vertical { background:#D4D4D8; border-radius:4px; min-height:28px; }
+        QScrollBar::handle:vertical:hover { background:#A1A1AA; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+        QScrollBar:horizontal { background:transparent; height:10px; margin:2px 3px; }
+        QScrollBar::handle:horizontal { background:#D4D4D8; border-radius:4px; min-width:28px; }
+        QScrollBar::handle:horizontal:hover { background:#A1A1AA; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
+        QToolTip { background:#18181B; color:#FFFFFF; border:1px solid #3F3F46; border-radius:7px; padding:6px 8px; }
+    )");
+}
+
+QLabel* heading'''
+    text = replace_once(text, marker, style, "monochrome style insertion")
+    text = replace_once(
+        text,
+        '''    buildUi();
+    applyTheme();
+    newProject();
+}''',
+        '''    buildUi();
+    applyTheme();
+    newProject();
+    QTimer::singleShot(0, this, [this]() {
+        setStyleSheet(gptMonochromeStyle());
+        for (auto* frame : findChildren<QFrame*>()) {
+            frame->setAttribute(Qt::WA_Hover, true);
+            frame->setMouseTracking(true);
+            if (frame->objectName() != QStringLiteral("sidebar")) frame->setGraphicsEffect(nullptr);
+        }
+        for (auto* table : findChildren<QTableWidget*>()) table->setMouseTracking(true);
+    });
+}''',
+        "deferred polish",
+    )
+    text = text.replace('heading(QStringLiteral("催化剂长期表现总览"))', 'heading(QStringLiteral("总览  Dashboard"))', 1)
+    text = text.replace('chartFrame->setObjectName(QStringLiteral("panel"));', 'chartFrame->setObjectName(QStringLiteral("gptSurface"));', 1)
+    text = text.replace('tableFrame->setObjectName(QStringLiteral("panel"));', 'tableFrame->setObjectName(QStringLiteral("gptSurface"));', 1)
+    text = text.replace('auto* chartTitle = new QLabel(QStringLiteral("性能随时间变化"));', 'auto* chartTitle = new QLabel(QStringLiteral("长期性能轨迹  ·  Long-term performance"));', 1)
+    text = text.replace('auto* tableTitle = new QLabel(QStringLiteral("催化剂概览"));', 'auto* tableTitle = new QLabel(QStringLiteral("催化剂概览  ·  Decision summary"));', 1)
+    text = text.replace('conditionStatusLabel_->setObjectName(QStringLiteral("guardStatus"));', 'conditionStatusLabel_->setObjectName(QStringLiteral("statusNeutral"));', 1)
+
+    start = text.index('QWidget* MainWindow::buildAiPage() {')
+    end = text.index('QWidget* MainWindow::buildSettingsPage() {')
+    ai_page = '''QWidget* MainWindow::buildAiPage() {
+    auto* page = new QWidget;
+    auto* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(34, 28, 34, 28);
+    layout->setSpacing(16);
+    layout->addWidget(heading(QStringLiteral("AI 智能研判")));
+    layout->addWidget(muted(QStringLiteral(
+        "AI 只在受控证据边界内工作。先构建证据包，再完成分析、证据审查与可追溯输出；任何阶段都不会自动改写原始实验观测。")));
+
+    auto* readiness = new QFrame;
+    readiness->setObjectName(QStringLiteral("aiSurface"));
+    auto* readinessLayout = new QHBoxLayout(readiness);
+    readinessLayout->setContentsMargins(20, 16, 20, 16);
+    readinessLayout->setSpacing(14);
+    auto* readinessTitle = new QLabel(QStringLiteral("证据就绪度"));
+    readinessTitle->setObjectName(QStringLiteral("sectionTitle"));
+    auto* readinessState = new QLabel(QStringLiteral("本地证据链已启用"));
+    readinessState->setObjectName(QStringLiteral("statusGood"));
+    readinessLayout->addWidget(readinessTitle);
+    readinessLayout->addWidget(muted(QStringLiteral("实验数据、资料候选与人工复核状态保持分层。")), 1);
+    readinessLayout->addWidget(readinessState);
+    layout->addWidget(readiness);
+
+    auto* stages = new QGridLayout;
+    stages->setHorizontalSpacing(12);
+    stages->setVerticalSpacing(12);
+    const QStringList titles = {
+        QStringLiteral("01  证据包"), QStringLiteral("02  AI 分析器"),
+        QStringLiteral("03  证据审查器"), QStringLiteral("04  审计输出")
+    };
+    const QStringList descriptions = {
+        QStringLiteral("只纳入已绑定并完成人工条件复核的上下文证据。"),
+        QStringLiteral("基于证据包生成候选解释、比较与下一步建议。"),
+        QStringLiteral("检查引用、条件错配、删失语义与过度外推。"),
+        QStringLiteral("保留输入边界、证据 ID、审查状态与最终结论。")
+    };
+    const QStringList states = {
+        QStringLiteral("可审计"), QStringLiteral("待接入 API"),
+        QStringLiteral("待接入 API"), QStringLiteral("本地基础已就绪")
+    };
+    for (int i = 0; i < titles.size(); ++i) {
+        auto* card = new QFrame;
+        card->setObjectName(QStringLiteral("aiSurface"));
+        auto* cardLayout = new QVBoxLayout(card);
+        cardLayout->setContentsMargins(20, 18, 20, 18);
+        cardLayout->setSpacing(8);
+        auto* title = new QLabel(titles[i]);
+        title->setObjectName(QStringLiteral("sectionTitle"));
+        auto* state = new QLabel(states[i]);
+        state->setObjectName(i == 0 || i == 3 ? QStringLiteral("statusNeutral") : QStringLiteral("statusWarn"));
+        cardLayout->addWidget(title);
+        cardLayout->addWidget(muted(descriptions[i]));
+        cardLayout->addStretch();
+        cardLayout->addWidget(state, 0, Qt::AlignLeft);
+        stages->addWidget(card, i / 2, i % 2);
+    }
+    layout->addLayout(stages, 1);
+
+    auto* boundary = new QFrame;
+    boundary->setObjectName(QStringLiteral("infoPanel"));
+    auto* boundaryLayout = new QVBoxLayout(boundary);
+    boundaryLayout->setContentsMargins(18, 14, 18, 14);
+    auto* boundaryTitle = new QLabel(QStringLiteral("AI 输入边界"));
+    boundaryTitle->setObjectName(QStringLiteral("sectionTitle"));
+    boundaryLayout->addWidget(boundaryTitle);
+    boundaryLayout->addWidget(muted(QStringLiteral(
+        "未绑定候选、条件未复核条目和外部背景记录不会直接成为寿命结论。最终输出必须保留证据来源与审查状态。")));
+    layout->addWidget(boundary);
+    return page;
+}
+
+'''
+    text = text[:start] + ai_page + text[end:]
+
+    old_condition = '''        conditionStatusLabel_->setStyleSheet(analysis_.conditionAudit.blocksDirectRanking()
+            ? QStringLiteral("color: #B91C1C; font-size: 15px; font-weight: 700; padding: 3px 0;")
+            : QStringLiteral("color: #166534; font-size: 15px; font-weight: 700; padding: 3px 0;"));'''
+    new_condition = '''        conditionStatusLabel_->setStyleSheet(QString());
+        conditionStatusLabel_->setObjectName(analysis_.conditionAudit.blocksDirectRanking()
+            ? QStringLiteral("statusBad")
+            : QStringLiteral("statusGood"));
+        conditionStatusLabel_->style()->unpolish(conditionStatusLabel_);
+        conditionStatusLabel_->style()->polish(conditionStatusLabel_);'''
+    text = replace_once(text, old_condition, new_condition, "condition status")
+    p.write_text(text, encoding="utf-8")
+
+
+# Evidence page: distinct evidence surfaces, hoverable tables, semantic state chips.
+p = Path("native/qt/src/evidencepage.cpp")
+text = p.read_text(encoding="utf-8")
+if 'QStringLiteral("evidenceSurface")' not in text:
+    text = text.replace('#include <QComboBox>\n', '#include <QComboBox>\n#include <QColor>\n')
+    text = text.replace('#include <QTableWidget>\n', '#include <QTableWidget>\n#include <QStyle>\n')
+    text = text.replace('sourceFrame->setObjectName(QStringLiteral("panel"));', 'sourceFrame->setObjectName(QStringLiteral("evidenceSurface"));', 1)
+    text = text.replace('signalFrame->setObjectName(QStringLiteral("panel"));', 'signalFrame->setObjectName(QStringLiteral("gptSurface"));', 1)
+    text = text.replace('evidenceFrame->setObjectName(QStringLiteral("panel"));', 'evidenceFrame->setObjectName(QStringLiteral("evidenceSurface"));', 1)
+    text = text.replace('packetFrame->setObjectName(QStringLiteral("panel"));', 'packetFrame->setObjectName(QStringLiteral("aiSurface"));', 1)
+    text = text.replace('packetStatusLabel_->setObjectName(QStringLiteral("guardStatus"));', 'packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));', 1)
+    text = text.replace('evidenceTable_->setWordWrap(true);', 'evidenceTable_->setWordWrap(true);\n    evidenceTable_->setMouseTracking(true);', 1)
+    text = text.replace('signalsTable_->setMaximumHeight(165);', 'signalsTable_->setMaximumHeight(165);\n    signalsTable_->setMouseTracking(true);', 1)
+    text = replace_once(
+        text,
+        '        evidenceTable_->setItem(row, 4, readOnlyItem(statusLabel(item.status)));',
+        '''        auto* statusItem = readOnlyItem(statusLabel(item.status));
+        if (item.status == QStringLiteral("condition_reviewed_context_only")) {
+            statusItem->setForeground(QColor(QStringLiteral("#166534")));
+            statusItem->setBackground(QColor(QStringLiteral("#F0FDF4")));
+        } else if (item.status == QStringLiteral("candidate_requires_condition_binding")) {
+            statusItem->setForeground(QColor(QStringLiteral("#71717A")));
+            statusItem->setBackground(QColor(QStringLiteral("#F4F4F5")));
+        } else {
+            statusItem->setForeground(QColor(QStringLiteral("#92400E")));
+            statusItem->setBackground(QColor(QStringLiteral("#FFFBEB")));
+        }
+        evidenceTable_->setItem(row, 4, statusItem);''',
+        "evidence status cells",
+    )
+    text = replace_once(
+        text,
+        '        packetStatusLabel_->setStyleSheet(QStringLiteral("color:#166534;font-weight:700;"));',
+        '''        packetStatusLabel_->setStyleSheet(QString());
+        packetStatusLabel_->setObjectName(QStringLiteral("statusGood"));
+        packetStatusLabel_->style()->unpolish(packetStatusLabel_);
+        packetStatusLabel_->style()->polish(packetStatusLabel_);''',
+        "packet good status",
+    )
+    text = replace_once(
+        text,
+        '        packetStatusLabel_->setStyleSheet(QStringLiteral("color:#B45309;font-weight:700;"));',
+        '''        packetStatusLabel_->setStyleSheet(QString());
+        packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));
+        packetStatusLabel_->style()->unpolish(packetStatusLabel_);
+        packetStatusLabel_->style()->polish(packetStatusLabel_);''',
+        "packet warning status",
+    )
+    p.write_text(text, encoding="utf-8")
+
+
+# Interactive black/gray chart: varied line patterns + point hover crosshair and tooltip.
+Path("native/qt/src/chartwidget.h").write_text(r'''#pragma once
+
+#include "models.h"
+
+#include <QEvent>
+#include <QMouseEvent>
+#include <QPointF>
+#include <QWidget>
+#include <optional>
+
+namespace catalyst {
+
+class ChartWidget final : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit ChartWidget(QWidget* parent = nullptr);
+    void setRecords(const QVector<Record>& records);
+
+protected:
+    void paintEvent(QPaintEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+
+private:
+    struct HoverPoint {
+        QString catalyst;
+        double timeHours = 0.0;
+        double performance = 0.0;
+        QPointF screen;
+    };
+    QVector<Record> records_;
+    QVector<HoverPoint> renderedPoints_;
+    std::optional<HoverPoint> hovered_;
+};
+
+} // namespace catalyst
+''', encoding="utf-8")
+
+Path("native/qt/src/chartwidget.cpp").write_text(r'''#include "chartwidget.h"
+
+#include <QFontMetrics>
+#include <QMap>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
+#include <algorithm>
+#include <cmath>
+
+namespace catalyst {
+
+ChartWidget::ChartWidget(QWidget* parent) : QWidget(parent) {
+    setMinimumHeight(330);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    setMouseTracking(true);
+}
+
+void ChartWidget::setRecords(const QVector<Record>& records) {
+    records_ = records;
+    hovered_.reset();
+    update();
+}
+
+void ChartWidget::mouseMoveEvent(QMouseEvent* event) {
+    constexpr double radius = 15.0;
+    double bestDistance = radius;
+    std::optional<HoverPoint> best;
+    for (const auto& point : renderedPoints_) {
+        const double dx = point.screen.x() - event->position().x();
+        const double dy = point.screen.y() - event->position().y();
+        const double distance = std::sqrt(dx * dx + dy * dy);
+        if (distance < bestDistance) { bestDistance = distance; best = point; }
+    }
+    const bool changed = best.has_value() != hovered_.has_value()
+        || (best && hovered_ && (best->catalyst != hovered_->catalyst
+            || !qFuzzyCompare(best->timeHours + 1.0, hovered_->timeHours + 1.0)
+            || !qFuzzyCompare(best->performance + 1.0, hovered_->performance + 1.0)));
+    if (changed) { hovered_ = best; update(); }
+    QWidget::mouseMoveEvent(event);
+}
+
+void ChartWidget::leaveEvent(QEvent* event) {
+    hovered_.reset();
+    update();
+    QWidget::leaveEvent(event);
+}
+
+void ChartWidget::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.fillRect(rect(), QColor(QStringLiteral("#FFFFFF")));
+    renderedPoints_.clear();
+
+    if (records_.isEmpty()) {
+        painter.setPen(QColor(QStringLiteral("#71717A")));
+        painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("导入数据后显示长期性能曲线"));
+        return;
+    }
+
+    QMap<QString, QVector<Record>> grouped;
+    double minTime = records_.front().timeHours, maxTime = minTime;
+    double minPerformance = records_.front().performance, maxPerformance = minPerformance;
+    for (const auto& record : records_) {
+        grouped[record.catalyst].append(record);
+        minTime = qMin(minTime, record.timeHours); maxTime = qMax(maxTime, record.timeHours);
+        minPerformance = qMin(minPerformance, record.performance); maxPerformance = qMax(maxPerformance, record.performance);
+    }
+    for (auto it = grouped.begin(); it != grouped.end(); ++it) {
+        std::sort(it.value().begin(), it.value().end(), [](const Record& a, const Record& b) { return a.timeHours < b.timeHours; });
+    }
+    if (qFuzzyCompare(minTime, maxTime)) maxTime = minTime + 1.0;
+    if (qFuzzyCompare(minPerformance, maxPerformance)) maxPerformance = minPerformance + 1.0;
+    const double pad = qMax(1.0, (maxPerformance - minPerformance) * 0.12);
+    minPerformance -= pad; maxPerformance += pad;
+
+    const QRectF plotRect = rect().adjusted(70, 42, -30, -62);
+    const auto mapX = [&](double t) { return plotRect.left() + ((t - minTime) / (maxTime - minTime)) * plotRect.width(); };
+    const auto mapY = [&](double v) { return plotRect.bottom() - ((v - minPerformance) / (maxPerformance - minPerformance)) * plotRect.height(); };
+
+    painter.setPen(QPen(QColor(QStringLiteral("#ECECEE")), 1));
+    for (int i = 0; i <= 5; ++i) {
+        const double ratio = double(i) / 5.0;
+        const double y = plotRect.top() + ratio * plotRect.height();
+        painter.drawLine(QPointF(plotRect.left(), y), QPointF(plotRect.right(), y));
+        painter.setPen(QColor(QStringLiteral("#71717A")));
+        painter.drawText(QRectF(2, y - 9, 58, 18), Qt::AlignRight | Qt::AlignVCenter,
+                         QString::number(maxPerformance - ratio * (maxPerformance - minPerformance), 'f', 1));
+        painter.setPen(QPen(QColor(QStringLiteral("#ECECEE")), 1));
+    }
+    painter.setPen(QColor(QStringLiteral("#71717A")));
+    for (int i = 0; i <= 5; ++i) {
+        const double ratio = double(i) / 5.0;
+        const double x = plotRect.left() + ratio * plotRect.width();
+        painter.drawText(QRectF(x - 35, plotRect.bottom() + 9, 70, 20), Qt::AlignCenter,
+                         QString::number(minTime + ratio * (maxTime - minTime), 'g', 5));
+    }
+    painter.drawText(QRectF(plotRect.left(), plotRect.bottom() + 34, plotRect.width(), 20),
+                     Qt::AlignCenter, QStringLiteral("时间 / Time on stream (h)"));
+
+    const QList<QColor> tones = { QColor("#111111"), QColor("#3F3F46"), QColor("#71717A"), QColor("#A1A1AA"), QColor("#52525B"), QColor("#27272A"), QColor("#8B8B92"), QColor("#18181B") };
+    const QList<Qt::PenStyle> styles = { Qt::SolidLine, Qt::DashLine, Qt::DotLine, Qt::DashDotLine, Qt::SolidLine, Qt::DashLine, Qt::DotLine, Qt::DashDotLine };
+
+    int seriesIndex = 0;
+    double legendX = plotRect.left();
+    for (auto it = grouped.constBegin(); it != grouped.constEnd(); ++it, ++seriesIndex) {
+        const QColor tone = tones[seriesIndex % tones.size()];
+        const auto penStyle = styles[seriesIndex % styles.size()];
+        QPainterPath path;
+        const auto& rows = it.value();
+        for (qsizetype i = 0; i < rows.size(); ++i) {
+            const QPointF point(mapX(rows[i].timeHours), mapY(rows[i].performance));
+            renderedPoints_.append({it.key(), rows[i].timeHours, rows[i].performance, point});
+            if (i == 0) path.moveTo(point); else path.lineTo(point);
+        }
+        painter.setPen(QPen(tone, 2.2, penStyle, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush); painter.drawPath(path);
+        for (const auto& row : rows) {
+            const QPointF point(mapX(row.timeHours), mapY(row.performance));
+            painter.setPen(QPen(tone, 1.8)); painter.setBrush(Qt::white); painter.drawEllipse(point, 4.2, 4.2);
+        }
+        painter.setPen(QPen(tone, 2.2, penStyle)); painter.drawLine(QPointF(legendX, 20), QPointF(legendX + 18, 20));
+        painter.setPen(QColor("#52525B"));
+        const int width = QFontMetrics(painter.font()).horizontalAdvance(it.key());
+        painter.drawText(QRectF(legendX + 24, 12, width + 8, 17), Qt::AlignVCenter, it.key());
+        legendX += width + 52;
+    }
+
+    if (hovered_) {
+        const QPointF point = hovered_->screen;
+        painter.setPen(QPen(QColor("#C7C7CC"), 1, Qt::DashLine));
+        painter.drawLine(QPointF(point.x(), plotRect.top()), QPointF(point.x(), plotRect.bottom()));
+        painter.drawLine(QPointF(plotRect.left(), point.y()), QPointF(plotRect.right(), point.y()));
+        painter.setPen(QPen(QColor("#111111"), 2.2)); painter.setBrush(Qt::white); painter.drawEllipse(point, 6.2, 6.2);
+
+        const QString title = hovered_->catalyst;
+        const QString detail = QStringLiteral("%1 h   ·   %2").arg(
+            QString::number(hovered_->timeHours, 'g', 6), QString::number(hovered_->performance, 'g', 7));
+        const QFontMetrics fm(painter.font());
+        const int width = qMax(fm.horizontalAdvance(title), fm.horizontalAdvance(detail)) + 28;
+        const int height = 58;
+        double x = point.x() + 14, y = point.y() - height - 12;
+        if (x + width > rect().right() - 8) x = point.x() - width - 14;
+        if (y < 8) y = point.y() + 14;
+        const QRectF tip(x, y, width, height);
+        painter.setPen(QPen(QColor("#D4D4D8"), 1)); painter.setBrush(Qt::white); painter.drawRoundedRect(tip, 9, 9);
+        QFont bold = painter.font(); bold.setBold(true); painter.setFont(bold); painter.setPen(QColor("#111111"));
+        painter.drawText(tip.adjusted(12, 8, -12, -30), Qt::AlignLeft | Qt::AlignVCenter, title);
+        bold.setBold(false); painter.setFont(bold); painter.setPen(QColor("#71717A"));
+        painter.drawText(tip.adjusted(12, 29, -12, -7), Qt::AlignLeft | Qt::AlignVCenter, detail);
+    }
+}
+
+} // namespace catalyst
+''', encoding="utf-8")
+
+
+# Existing vector/application icons also move to monochrome.
+p = Path("native/qt/src/main.cpp")
+text = p.read_text(encoding="utf-8")
+text = text.replace('gradient.setColorAt(0.0, QColor(QStringLiteral("#0F766E")));', 'gradient.setColorAt(0.0, QColor(QStringLiteral("#111111")));')
+text = text.replace('gradient.setColorAt(1.0, QColor(QStringLiteral("#0B4F6C")));', 'gradient.setColorAt(1.0, QColor(QStringLiteral("#3F3F46")));')
+text = text.replace('painter.setBrush(QColor(QStringLiteral("#BFE8E3")));', 'painter.setBrush(QColor(QStringLiteral("#D4D4D8")));')
+text = text.replace('color = QColor(QStringLiteral("#D8E5F2"));', 'color = QColor(QStringLiteral("#E5E5E5"));')
+text = text.replace('QColor color(QStringLiteral("#344054"));', 'QColor color(QStringLiteral("#3F3F46"));')
+p.write_text(text, encoding="utf-8")
