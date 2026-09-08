@@ -1,0 +1,75 @@
+{
+  "benchmark": "local2b_mcp_step2_decision_benchmark_v1",
+  "status": "frozen_base_before_lora",
+  "model": "qwen3.5-2b-q4",
+  "base_checkpoint": "Qwen/Qwen3.5-2B",
+  "runtime": "llama.cpp Q4_K_M",
+  "endpoint": "http://127.0.0.1:18080/v1/chat/completions",
+  "mcp_protocol_target": "2026-07-28",
+  "seed": 20260908,
+  "dataset": {
+    "train_records": 16000,
+    "validation_records": 1600,
+    "test_records": 1600,
+    "train_sha256": "d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303",
+    "validation_sha256": "89e4aca2f72fc4efd6bab0a88299a68a32cd637edc0561d7d2c95b2b27463990",
+    "test_sha256": "460b5308f6791eb53692fc0736a53e6f6b553a925207caa34517b456e28d78f2"
+  },
+  "benchmark_sample": {
+    "records_loaded": 80,
+    "assistant_decisions": 105,
+    "tool_expected": 90,
+    "no_tool_expected": 15
+  },
+  "counts": {
+    "tool_gate_correct": 95,
+    "tool_sequence_exact": 87,
+    "valid_argument_shape": 88,
+    "call_exact": 66,
+    "no_tool_correct": 6,
+    "false_tool_call": 9,
+    "api_or_parse_error": 0
+  },
+  "metrics": {
+    "tool_gate_accuracy": 0.9047619047619048,
+    "tool_sequence_exact_accuracy": 0.9666666666666667,
+    "call_exact_accuracy": 0.7333333333333333,
+    "valid_argument_shape_rate": 0.9777777777777777,
+    "no_tool_precision": 0.4,
+    "false_tool_call_rate": 0.6,
+    "api_or_parse_error_rate": 0.0,
+    "mean_latency_s": 5.4681728837568135
+  },
+  "critical_task_findings": {
+    "calculator_call_exact": "5/5",
+    "directory_list_call_exact": "5/5",
+    "evidence_lookup_call_exact": "5/5",
+    "single_read_call_exact": "5/5",
+    "tool_selection_collision_call_exact": "5/5",
+    "zh_single_read_call_exact": "5/5",
+    "explicit_write_call_exact": "1/5",
+    "clarify_no_tool_correct": "0/5",
+    "scope_guard_no_tool_correct": "1/5",
+    "search_then_read_call_exact": "5/10",
+    "zh_search_then_read_call_exact": "5/10",
+    "tool_error_recovery_call_exact": "10/15",
+    "stat_then_read_call_exact": "7/10",
+    "two_reads_call_exact": "3/5"
+  },
+  "github": {
+    "source_commit": "f21d399360cd604adc268912efb756db9c1dc479",
+    "workflow_run_id": 34238595617,
+    "artifact_id": 10061400673,
+    "artifact_sha256": "28f760a76944087ed9881ed687fa3705bcc0d6af6e15bc64a2cc5b02e31ebd4c"
+  },
+  "interpretation": {
+    "strength": "Base 2B already generalizes tool selection to held-out aliases and emits valid structured calls reliably.",
+    "primary_lora_targets": [
+      "learn when not to call a tool",
+      "ask for clarification instead of guessing",
+      "respect workspace scope before tool invocation",
+      "improve exact write arguments",
+      "improve exact arguments in later steps of multi-step trajectories"
+    ]
+  }
+}
