@@ -49,6 +49,7 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/chartwidget.cpp
     src/mainwindow.h
     src/mainwindow.cpp
+    resources/windows.rc
 )
 
 target_link_libraries(CatalystLongevityResearch PRIVATE
