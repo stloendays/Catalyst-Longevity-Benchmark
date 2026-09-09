@@ -315,7 +315,10 @@ QFrame* decisionCard(const QString& title, QLabel** statusLabel, QLabel** detail
 
 void setStatusChip(QLabel* label, const QString& text, const QString& objectName) {
     if (!label) return;
-    label->setText(text);
+    const bool semantic = objectName == QStringLiteral("statusGood")
+        || objectName == QStringLiteral("statusWarn")
+        || objectName == QStringLiteral("statusBad");
+    label->setText(semantic ? QStringLiteral("●  %1").arg(text) : text);
     if (label->objectName() != objectName) {
         label->setObjectName(objectName);
         if (label->style()) {
@@ -406,6 +409,7 @@ void MainWindow::buildUi() {
     pages_->addWidget(buildAiPage());
     pages_->addWidget(buildSettingsPage());
     root->addWidget(pages_, 1);
+    pages_->setCurrentIndex(1);
 
     connect(evidencePage_, &EvidencePage::evidenceChanged, this, [this]() {
         projectDirty_ = true;
@@ -910,13 +914,12 @@ QWidget* MainWindow::buildSettingsPage() {
     card->setObjectName(QStringLiteral("panel"));
     auto* cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(22, 20, 22, 20);
-        auto* productName = new QLabel(QStringLiteral("智策"));
-    productName->setObjectName(QStringLiteral("sectionTitle"));
+    auto* productName = new QLabel(QStringLiteral("智策"));
+    productName->setObjectName(QStringLiteral("pageHeading"));
     cardLayout->addWidget(productName);
-    cardLayout->addWidget(muted(QStringLiteral("催化剂长期稳定性评估与实验决策系统")));
-    cardLayout->addWidget(muted(QStringLiteral("Windows 原生桌面应用 · C++20 + Qt 6 + SQLite")));
+    cardLayout->addWidget(muted(QStringLiteral("催化剂长期稳定性评估与实验决策")));
     cardLayout->addSpacing(10);
-    cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("技术架构：C++20 · Qt 6 · SQLite。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("数据输入：CSV / Excel .xlsx。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("项目存储：本地 .clrproj 文件（实验数据、资料关联和确认状态）。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("核心功能：数据检查、寿命分析、同时间对比、实验建议、资料整理和 PDF 报告。")));
@@ -952,7 +955,7 @@ void MainWindow::openProject() {
         this,
         QStringLiteral("打开催化剂寿命分析项目"),
         QString(),
-        QStringLiteral("Catalyst Longevity 项目 (*.clrproj);;所有文件 (*.*)"));
+        QStringLiteral("智策项目 (*.clrproj);;所有文件 (*.*)"));
     if (path.isEmpty() || !confirmProjectTransition()) return;
 
     QVector<Record> loaded;
@@ -985,8 +988,8 @@ void MainWindow::saveProjectAs() {
     QString path = QFileDialog::getSaveFileName(
         this,
         QStringLiteral("保存催化剂寿命分析项目"),
-        currentProjectPath_.isEmpty() ? QStringLiteral("催化剂寿命分析项目.clrproj") : currentProjectPath_,
-        QStringLiteral("催化剂寿命分析项目 (*.clrproj)"));
+        currentProjectPath_.isEmpty() ? QStringLiteral("智策项目.clrproj") : currentProjectPath_,
+        QStringLiteral("智策项目 (*.clrproj)"));
     if (path.isEmpty()) return;
     if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".clrproj");
     saveProjectTo(path);
@@ -1018,7 +1021,7 @@ void MainWindow::exportReport() {
     }
 
     const QString suggested = currentProjectPath_.isEmpty()
-        ? QStringLiteral("Catalyst-Longevity-Analysis-Report.pdf")
+        ? QStringLiteral("智策-分析报告.pdf")
         : QStringLiteral("%1-Analysis-Report.pdf").arg(QFileInfo(currentProjectPath_).completeBaseName());
     QString path = QFileDialog::getSaveFileName(
         this,
@@ -1060,8 +1063,8 @@ bool MainWindow::confirmProjectTransition() {
         QString path = QFileDialog::getSaveFileName(
             this,
             QStringLiteral("保存当前项目"),
-            QStringLiteral("催化剂寿命分析项目.clrproj"),
-            QStringLiteral("催化剂寿命分析项目 (*.clrproj)"));
+            QStringLiteral("智策项目.clrproj"),
+            QStringLiteral("智策项目 (*.clrproj)"));
         if (path.isEmpty()) return false;
         if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".clrproj");
         return saveProjectTo(path);
