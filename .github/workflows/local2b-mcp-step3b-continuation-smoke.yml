@@ -1,0 +1,85 @@
+name: Local2B MCP Step 3B continuation smoke
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step3b-continuation-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Verify LoRA continuation on server
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=40 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/home/ubuntu/local2b-training/step3b-continuation-smoke
+          SOURCE=/home/ubuntu/local2b-training/step3a/train.jsonl
+          STAGE3A=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
+          WRAPPER=/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          mkdir -p "$ROOT"
+          test -s "$SOURCE"
+          test -s "$STAGE3A"
+          bash -n "$WRAPPER"
+          head -n 4 "$SOURCE" > "$ROOT/train.jsonl"
+          test "$(wc -l < "$ROOT/train.jsonl")" -eq 4
+          rm -rf "$ROOT/checkpoints"
+          flock -n /home/ubuntu/local2b-training/server-lora.lock \
+            "$WRAPPER" \
+            --data "$ROOT/train.jsonl" \
+            --lora-init "$STAGE3A" \
+            --output "$ROOT/continued-r4-qv.gguf" \
+            --context 576 --batch 8 --ubatch 8 \
+            --rank 4 --alpha 8 --modules attn_q,attn_v \
+            --epochs 1 --learning-rate 1e-5 --seed 20260908 \
+            --timeout-seconds 900 \
+            --checkpoint-steps 1 \
+            --checkpoint-dir "$ROOT/checkpoints" \
+            --log "$ROOT/train.log" \
+            --result "$ROOT/result.txt"
+          test -s "$ROOT/continued-r4-qv.gguf"
+          echo "CONTINUATION_ADAPTER_SHA256=$(sha256sum "$ROOT/continued-r4-qv.gguf" | awk '{print $1}')"
+          cat "$ROOT/result.txt"
+          curl -fsS http://127.0.0.1:18080/v1/models >/dev/null
+          echo 'STAGE3B_CONTINUATION_SMOKE=PASS'
+          REMOTE
+
+      - name: Collect smoke evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/step3b-continuation-smoke"
+          for f in result.txt train.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3b-continuation-smoke/$f" \
+              "$RUNNER_TEMP/step3b-continuation-smoke/$f" || true
+          done
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3b-continuation-smoke
+          path: ${{ runner.temp }}/step3b-continuation-smoke/
+          if-no-files-found: warn
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
