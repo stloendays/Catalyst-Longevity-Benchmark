@@ -80,8 +80,8 @@ QString buildHtml(
         ".small{font-size:8.5pt;color:#4b5563;}"
         "</style></head><body>");
 
-    html += QStringLiteral("<h1>Catalyst Longevity Research</h1>");
-    html += QStringLiteral("<p class='meta'>催化剂长期表现分析报告</p>");
+    html += QStringLiteral("<h1>催化剂寿命分析与实验决策软件 V1.0</h1>");
+    html += QStringLiteral("<p class='meta'>催化剂寿命与实验决策分析报告</p>");
     html += QStringLiteral("<p class='meta'>生成时间：%1<br/>数据源：%2</p>")
         .arg(escape(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))),
              escape(sourceLabel.isEmpty() ? QStringLiteral("未标记") : sourceLabel));
@@ -254,8 +254,8 @@ bool writePdf(
 
     QPdfWriter writer(path);
     writer.setPageSize(QPageSize(QPageSize::A4));
-    writer.setTitle(QStringLiteral("Catalyst Longevity Research Analysis Report"));
-    writer.setCreator(QStringLiteral("Catalyst Longevity Research"));
+    writer.setTitle(QStringLiteral("催化剂寿命与实验决策分析报告"));
+    writer.setCreator(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0"));
     writer.setResolution(120);
 
     QTextDocument document;

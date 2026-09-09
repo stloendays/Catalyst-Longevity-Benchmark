@@ -620,7 +620,7 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
 }
 
 void applyWindowPolish(catalyst::MainWindow& window) {
-    window.setWindowTitle(QStringLiteral("催化剂寿命研究工作台"));
+    window.setWindowTitle(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0"));
     window.statusBar()->setSizeGripEnabled(false);
 
     if (auto* sidebar = window.findChild<QFrame*>(QStringLiteral("sidebar"))) {
@@ -668,7 +668,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("Catalyst Longevity Research"));
     app.setApplicationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationDisplayName(QStringLiteral("催化剂寿命研究工作台"));
+    app.setApplicationDisplayName(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0"));
     app.setStyle(QStringLiteral("Fusion"));
     app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
     app.setWindowIcon(makeApplicationIcon());
