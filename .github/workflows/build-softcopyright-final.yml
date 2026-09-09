@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - tools/build_softcopyright_final_package.py
+      - tools/build_softcopyright_final_package_v2.py
       - .github/workflows/build-softcopyright-final.yml
       - native/qt/src/**
       - docs/软件操作说明.md
@@ -39,7 +40,7 @@ jobs:
       - name: Build final software copyright materials
         run: |
           rm -rf docs/software-copyright/final
-          python tools/build_softcopyright_final_package.py \
+          python tools/build_softcopyright_final_package_v2.py \
             --repo-root . \
             --output-dir docs/software-copyright/final \
             --source-sha "$GITHUB_SHA"
