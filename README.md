@@ -1,214 +1,173 @@
-# 催化剂智能分析平台
+# 催化剂寿命数据分析与实验辅助系统
 
-**Catalyst Intelligence Workspace** 是一个中文版优先的催化剂资料、长期表现与智能决策分析工具。
+**Catalyst Longevity Research** 是本项目的工程名称。当前主要软件产品是一套 Windows 原生桌面应用，用于催化剂长期稳定性实验的数据检查、寿命分析、条件核对、同时间比较、后续实验辅助、资料整理和 PDF 报告输出。
 
-用户不需要先把所有资料整理成科研标准格式。平台可以接收：
+核心桌面程序采用 **C++20 + Qt 6 + SQLite**，实验分析可以在本地完成，不依赖浏览器和外部 AI 服务。
 
-- CSV / Excel 实验数据；
-- PDF 论文、报告和文本资料；
-- DOI；
-- 外部数据库检索结果；
-- 用户提出的催化剂选择或下一步实验问题。
-
-系统将这些信息组织成可追溯证据，再进行长期表现分析、条件可比性检查、AI 综合和独立 Evidence Critic 审查。
-
-## 用户工作流
+## 核心使用流程
 
 ```text
-用户数据 / PDF / DOI / 外部数据库
-              ↓
-        Evidence Packet
-              ↓
-实验条件守门 + 长期表现分析
-              ↓
-          AI Analyst
-              ↓
-       Evidence Critic
-              ↓
-通过 / 需复核 / 阻止
-              ↓
-中文结论 + 风险 + 下一步建议
+内置数据集 / CSV / Excel
+          ↓
+数据质量检查
+          ↓
+实验条件检查
+          ↓
+长期性能与 T95 / T90 / T80
+          ↓
+同时间催化剂比较
+          ↓
+下一轮实验建议
+          ↓
+资料整理与人工确认
+          ↓
+本地项目保存 / PDF 报告
 ```
 
-## 1. 长期表现分析
+## 内置数据集
 
-最简单的数据只需要三列：
+桌面程序原生内置 5 组模拟数据，用户无需准备外部文件即可体验完整分析流程。
+
+| 数据集 | 主要展示功能 |
+| --- | --- |
+| 长期稳定性对比 | 多催化剂长期曲线、保持率、T90、同时间比较 |
+| T90 区间定位 | 区间寿命表达与加密采样建议 |
+| 长周期寿命下限 | 测试结束仍未达到 T90 时的寿命下限和延长测试建议 |
+| 实验条件差异检查 | 条件不一致识别与直接排名阻止 |
+| 数据质量检查 | 重复时间点、条件缺失、条件变化和完整度评分 |
+
+内置数据明确标记为**模拟数据**，用于软件功能演示、培训和流程验证，不作为真实实验结论。
+
+## 数据导入
+
+支持：
+
+- CSV `.csv`
+- Excel `.xlsx`
+- 内置数据集
+
+最少需要三列：
 
 | 催化剂 | 时间 | 性能 |
-|---|---:|---:|
+| --- | ---: | ---: |
 | Catalyst A | 0 | 82 |
-| Catalyst A | 20 | 70 |
+| Catalyst A | 20 | 78 |
+| Catalyst A | 50 | 73 |
 | Catalyst B | 0 | 76 |
-| Catalyst B | 20 | 72 |
+| Catalyst B | 20 | 74 |
+| Catalyst B | 50 | 72 |
 
-系统可以回答：谁起点高、谁保持得更久、是否发生反超、t95/t90/t80 是否真的被测试到，以及下一次最值得增加哪些时间点。
+为了进行可靠的跨催化剂比较，建议同时提供温度、GHSV/WHSV、压力、进料比、指标和数据来源。
 
-如果提供 **温度、GHSV/WHSV、压力、进料比、反应类型**，系统会先检查实验条件是否可比。存在明确条件不匹配时，相关催化剂对的直接排名会被自动禁用。
+## 数据检查
 
-## 2. 资料分析
+载入数据后自动检查：
 
-`资料分析` 页面支持 PDF / TXT / Markdown / CSV / TSV。
+- 重复时间点；
+- 无效和异常性能值；
+- 实验条件缺失；
+- 同一催化剂测试过程中的条件变化；
+- 不同催化剂之间的条件差异。
 
-当前保守提取：
+系统给出数据完整度评分以及逐条处理建议。
 
-- DOI；
-- 温度；
-- 测试时长；
-- CH4 转化率候选值；
-- stability / deactivation / coking / sintering 等证据词；
-- 原文证据片段。
+## 寿命分析
 
-孤立的数值不会直接变成实验事实。候选值只有绑定到具体 **催化剂 + 时间 + 条件** 后，才允许进入排名计算。
+桌面程序计算并展示：
 
-资料页生成的 Evidence Graph 会传入 AI 工作区，但保持 `candidate_requires_condition_binding` 等证据状态。
+- 初始性能；
+- 最新性能；
+- 性能保持率；
+- T95；
+- T90；
+- T80；
+- 长期性能曲线。
 
-## 3. 外部数据库 Hub
+阈值只被两个实际观测点夹住时，系统保留区间表达；测试结束仍未达到阈值时，系统保留寿命下限。不会把插值结果冒充为直接测得的精确寿命。
 
-当前已接入五类来源：
+## 条件检查与同时间比较
 
-- **Crossref**：DOI、标题、作者、期刊、年份等论文身份元数据；
-- **Semantic Scholar**：相关论文、引用/参考数量、摘要和开放获取入口；
-- **Catalysis-Hub**：计算催化反应能、活化能和化学组成；
-- **Materials Project**：材料结构与性质背景，如相稳定性、energy above hull、band gap、density；
-- **PubChem**：化合物 CID、分子式、分子量、SMILES、InChI / InChIKey。
+系统在跨催化剂比较前检查已提供的温度、空速、压力和进料条件。
 
-数据库结果可以由用户加入 **AI 证据篮**。这些结果统一标记为 `external_context`，不能自动充当催化剂长期稳定性真值。
+- 条件一致：允许继续比较；
+- 条件缺失：结果仅作参考；
+- 条件明确不一致：停止输出直接领先结论。
 
-### API Key
+同时间比较使用两个催化剂最近的共同实际观测时间，而不是直接比较各自最后一个数据点。
 
-- Crossref：无需 key；
-- PubChem：无需 key；
-- Semantic Scholar：可无 key 尝试，支持用户自己的 API key；
-- Materials Project：需要用户自己的 API key；
-- OpenAI AI Analyst：需要用户自己的 OpenAI API key。
+## 实验建议
 
-密钥只从运行时界面或环境变量读取，不写入仓库、Evidence Packet 或下载报告。
+系统根据当前观测状态自动给出规则化建议，例如：
 
-支持环境变量：
+- 时间点过少时补充采样；
+- T90 尚未达到时延长测试；
+- T90 落在两个时间点之间时在区间内增加采样；
+- 首次观测已经低于阈值时提前首个采样时间；
+- 实验条件不足时补齐记录。
 
-```text
-OPENAI_API_KEY
-OPENAI_MODEL
-SEMANTIC_SCHOLAR_API_KEY
-MP_API_KEY
-```
+这些建议用于实验计划讨论，不替代研究人员对具体催化体系的专业判断。
 
-## 4. AI Analyst + Evidence Critic
+## 资料整理
 
-AI 不是独立证据源。
+资料页支持带文本层的 PDF、TXT、Markdown、CSV 和 TSV，可识别 DOI、温度、测试时长、转化率等候选信息。
 
-平台先将确定性分析结果、文档 Evidence Graph 和用户选择的外部数据库记录构造成 **Evidence Packet**，每一项都有稳定 Evidence ID。
+资料可以关联到具体催化剂和实验时间点，并由用户人工确认。未确认资料不会自动修改实验数据或进入受控 AI 资料范围。
 
-`AI Analyst` 必须：
+## 本地项目与报告
 
-- 只依据 Evidence Packet 回答；
-- 每条主要 claim 引用 Evidence ID；
-- 不补造实验值；
-- 不把稀疏点写成精确 crossover time；
-- 不把外部材料/计算数据库直接当 longevity 证据。
+项目可保存为 `.clrproj` 本地文件，持续保存实验数据、实验条件、资料关联和确认状态。
 
-随后由独立的 `Evidence Critic` 检查：
+PDF 报告可包含：
 
-- 实验条件是否匹配；
-- evidence ID 是否真实存在；
-- source-observed / digitized / derived / external 是否混淆；
-- censoring 是否被错误解释成精确寿命；
-- 是否发生过度外推；
-- 关键结论是否缺证据。
+- 数据检查；
+- 条件检查；
+- 寿命摘要；
+- 同时间比较；
+- 实验建议；
+- 资料来源和确认状态。
 
-最终状态只有三类：
+## 原生桌面构建
+
+原生桌面源码位于：
 
 ```text
-approved      可作为当前证据下的辅助决策建议
-needs_review  需要修改/补证据后再用于决策
-blocked       当前证据不允许形成强决策结论
+native/qt/
 ```
 
-## 5. Evidence Graph / Evidence Packet
+主要依赖：
 
-```text
-用户资料
- ├─ DOI
- ├─ 实验条件
- ├─ 数值候选
- └─ 原文片段
-       ↓
-外部身份/背景数据库
-       ↓
-结构化 TOS 轨迹
-       ↓
-长期表现与条件审计
-       ↓
-Evidence Packet（稳定 Evidence IDs）
-       ↓
-AI Analyst → Evidence Critic
-```
+- Qt 6 Widgets
+- Qt SQL / SQLite
+- Qt PDF
+- QXlsx
 
-最终目标是让每个重要建议都能回答：
-
-> 这个结论来自哪些资料、哪些观测值、什么实验条件，以及哪些部分是模型/计算得到的？
-
-## 安装与启动
+使用 CMake 构建：
 
 ```bash
-python -m pip install -r requirements-ui.txt
-python launch.py
+cmake -S native/qt -B build-qt
+cmake --build build-qt --config Release
 ```
 
-Windows 也可以双击：
+Windows 构建产物使用工程文件名 `Catalyst Longevity Research.exe`，运行后的窗口和文档使用中文产品名称。
 
-```text
-首次安装_Windows.bat
-启动软件_Windows.bat
-```
+## 研究与原型代码
 
-左侧页面：
+仓库中仍保留 Python / Streamlit、外部数据库和 AI 分析等研究原型，用于算法验证和后续能力探索。这些模块与当前原生桌面软件并存，但登记材料应以已经稳定实现并通过原生构建测试的桌面功能为主。
 
-```text
-长期表现分析
-资料分析
-外部数据库检索
-AI 智能分析
-```
-
-## 软件结构
-
-```text
-Catalyst-Longevity-Benchmark/
-├── app.py
-├── pages/
-│   ├── 1_资料分析.py
-│   ├── 2_外部数据库检索.py
-│   └── 3_AI智能分析.py
-├── src/catlongevity/
-│   ├── io.py
-│   ├── endpoints.py
-│   ├── ranking.py
-│   ├── analysis.py
-│   ├── condition_matcher.py
-│   ├── advisor.py
-│   ├── documents.py
-│   ├── evidence.py
-│   ├── external_databases.py
-│   ├── ai_analyst.py
-│   └── reporting.py
-├── data/
-├── protocols/
-├── docs/
-└── tests/
-```
-
-## 后台强制规则
-
-用户友好界面不会削弱底层约束：
+## 关键原则
 
 - 不虚构缺失实验点；
-- 测试 100 h 不自动等于寿命 100 h；
-- 稀疏观测不生成假的精确反超时间；
-- 条件不匹配会阻止直接排名；
-- 文档候选数字必须先绑定催化剂/时间/条件；
-- 外部数据库只作背景 enrichment；
-- source-observed、digitized、model-derived、external-context 始终分层；
-- AI 输出必须再次通过 Evidence Critic。
+- 不把测试结束时间直接当成精确寿命；
+- 不把稀疏观测之间的插值结果冒充为实测值；
+- 条件明确不一致时停止直接排名；
+- 资料与实验观测分开保存；
+- 内置模拟数据与用户真实数据明确区分；
+- 报告保留数据来源和分析边界。
 
-内部研究数据仍以 **Ni/Al2O3-based dry reforming of methane (DRM)** 为主要验证案例，但软件工作流面向更广泛的催化剂稳定性和性能随时间变化问题。
+## 文档
+
+- `docs/快速开始.md`
+- `docs/软件操作说明.md`
+- `docs/BUILTIN_DATASETS_CN.md`
+- `docs/SOFTWARE_COPYRIGHT_CN.md`
+- `docs/知识产权与软著准备说明.md`
