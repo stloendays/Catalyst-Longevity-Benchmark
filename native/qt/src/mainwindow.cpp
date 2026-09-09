@@ -478,10 +478,14 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir, QStri
     selectAnalysisTab(1);
     if (!saveShot(QStringLiteral("04_分析_同时间对比.png"))) return false;
 
-    loadDataset(1);
+    loadDataset(3);
     if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);
     if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);
     refreshResearchSupportViews();
+    if (!adviceTable_ || adviceTable_->rowCount() == 0) {
+        if (errorMessage) *errorMessage = QStringLiteral("实验建议截图场景未产生可执行建议。");
+        return false;
+    }
     selectPage(4, QStringLiteral("分析"));
     selectAnalysisTab(2);
     if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;
