@@ -19,34 +19,18 @@ jobs:
         with:
           ref: zhice-copyright-screenshots
 
-      - name: Finalize semantic styling and capture scenario
+      - name: Use a guaranteed recommendation scenario
         shell: pwsh
         run: |
           @'
           from pathlib import Path
           p = Path("native/qt/src/mainwindow.cpp")
           text = p.read_text(encoding="utf-8")
-          replacements = {
-              '                level->setBackground(QColor(QStringLiteral("#FEF2F2")));\n': '',
-              '                level->setBackground(QColor(QStringLiteral("#FFFBEB")));\n': '',
-              '                level->setBackground(QColor(QStringLiteral("#F4F4F5")));\n': '',
-              '                status->setBackground(QColor(QStringLiteral("#FEF2F2")));\n': '',
-              '                status->setBackground(QColor(QStringLiteral("#FFFBEB")));\n': '',
-              '                status->setBackground(QColor(QStringLiteral("#F0FDF4")));\n': '',
-              '                priority->setBackground(QColor(QStringLiteral("#FEF2F2")));\n': '',
-              '                priority->setBackground(QColor(QStringLiteral("#FFFBEB")));\n': '',
-              '                priority->setBackground(QColor(QStringLiteral("#F4F4F5")));\n': '',
-              '                feasibility->setBackground(QColor(QStringLiteral("#F0FDF4")));\n': '',
-              '                feasibility->setBackground(QColor(QStringLiteral("#FFFBEB")));\n': '',
-              '                feasibility->setBackground(QColor(QStringLiteral("#FEF2F2")));\n': '',
-              '    loadDataset(2);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(120.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(24.0);\n': '    loadDataset(1);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);\n',
-              '    QString title = QStringLiteral("催化剂长期稳定性评估与实验决策系统");\n': '    QString title = QStringLiteral("智策");\n',
-          }
-          for old,new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f"missing source marker: {old[:80]!r}")
-              text = text.replace(old,new,1)
-          p.write_text(text, encoding="utf-8")
+          old = '''    loadDataset(1);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);\n    refreshResearchSupportViews();\n    selectPage(4, QStringLiteral("分析"));\n    selectAnalysisTab(2);\n    if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;\n'''
+          new = '''    loadDataset(3);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);\n    refreshResearchSupportViews();\n    if (!adviceTable_ || adviceTable_->rowCount() == 0) {\n        if (errorMessage) *errorMessage = QStringLiteral("实验建议截图场景未产生可执行建议。");\n        return false;\n    }\n    selectPage(4, QStringLiteral("分析"));\n    selectAnalysisTab(2);\n    if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;\n'''
+          if old not in text:
+              raise SystemExit("experiment screenshot scenario marker not found")
+          p.write_text(text.replace(old,new,1),encoding="utf-8")
           '@ | python -
 
       - name: Install Qt 6
@@ -90,7 +74,7 @@ jobs:
           path: ui-screenshots/*.png
           if-no-files-found: error
 
-      - name: Commit validated UI cleanup
+      - name: Commit validated capture scenario
         shell: pwsh
         run: |
           if (Test-Path "build-qt") { Remove-Item -Recurse -Force "build-qt" }
@@ -98,5 +82,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add native/qt/src/mainwindow.cpp
-          git commit -m "Remove residual status fills and improve Zhice capture scenarios"
+          git commit -m "Validate experiment-advice documentation screenshot"
           git push origin zhice-copyright-screenshots
