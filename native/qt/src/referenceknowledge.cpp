@@ -102,7 +102,7 @@ QString matchReason(
         parts.append(QStringLiteral("压力 %1 vs %2 bar")
             .arg(QString::number(*pressure, 'g', 5), QString::number(*reference.pressureBar, 'g', 5)));
     }
-    if (oneToOne && reference.feed.contains(QStringLiteral("1:1"))) parts.append(QStringLiteral("进料比例接近 1:1"));
+    if (oneToOne && reference.feed.contains(QStringLiteral("1:1"))) parts.append(QStringLiteral("CH4/CO2 主进料比例接近 1:1"));
     return parts.join(QStringLiteral("；"));
 }
 
@@ -137,7 +137,7 @@ QVector<ReferenceEntry> ReferenceKnowledgeBase::entries() {
          QStringLiteral("https://doi.org/10.1002/cctc.201500379"), QString::fromLatin1(kSnapshotDate)},
         {ReferenceKind::Literature, QStringLiteral("公开论文 / DOI"),
          QStringLiteral("He et al., Processes (2021)"), QStringLiteral("10.3390/pr9040706"),
-         QStringLiteral("Ni/Al2O3 DRM；700 ℃；0.1 MPa；GHSV 24000 mL g^-1 h^-1；50 h 稳定性筛选，并报告 200 h 长周期测试"),
+         QStringLiteral("Ni/Al2O3 DRM；700 ℃；0.1 MPa；GHSV 24000 mL g^-1 h^-1；CH4:CO2:Ar=1:1:3；50 h 与 200 h 稳定性测试"),
          QStringLiteral("用于给同类 DRM 的筛选/长周期测试建议提供公开实验窗口参照"),
          QStringLiteral("https://doi.org/10.3390/pr9040706"), QString::fromLatin1(kSnapshotDate)}
     };
@@ -168,7 +168,7 @@ QVector<ExperimentReference> ReferenceKnowledgeBase::experimentReferences() {
             700.0,
             24000.0,
             1.0,
-            QStringLiteral("DRM；公开文献 50 h 稳定性筛选"),
+            QStringLiteral("CH4:CO2:Ar=1:1:3"),
             50.0,
             QStringLiteral("阶段性稳定性筛选"),
             QStringLiteral("https://doi.org/10.3390/pr9040706")
