@@ -22,6 +22,8 @@ jobs:
           if (-not (Test-Path "docs/BUILTIN_REFERENCE_KB_CN.md")) { throw "reference knowledge documentation missing" }
           $hits = Select-String -Path "native/qt/src/referenceknowledge.cpp" -Pattern "CID 297|10.1002/cctc.201500379|10.3390/pr9040706"
           if ($hits.Count -lt 3) { throw "expected public reference identifiers missing" }
+          $planning = Select-String -Path "native/qt/src/mainwindow.cpp" -Pattern "实验排期约束|单阶段最多追加|最小采样间隔"
+          if ($planning.Count -lt 3) { throw "experiment planning controls missing" }
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -59,4 +61,4 @@ jobs:
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
 
-# Re-run after the reference-aware advice type fixes so validation is pinned to the latest branch head.
+# Final branch-only native validation for public references and practical planning constraints.
