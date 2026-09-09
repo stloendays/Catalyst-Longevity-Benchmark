@@ -14,6 +14,8 @@
 #include <QAbstractItemView>
 #include <QButtonGroup>
 #include <QCloseEvent>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -25,6 +27,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPixmap>
 #include <QSet>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -48,6 +51,7 @@ QString gptMonochromeStyle() {
             font-size:13px;
         }
         QMainWindow { background:#F5F5F5; }
+        QLabel { background:transparent; }
         QStatusBar {
             background:#FFFFFF;
             color:#737373;
@@ -392,6 +396,167 @@ MainWindow::MainWindow(QWidget* parent)
         }
         for (auto* table : findChildren<QTableWidget*>()) table->setMouseTracking(true);
     });
+}
+
+bool MainWindow::captureDocumentationScreenshots(const QString& outputDir, QString* errorMessage) {
+    const auto datasets = BuiltInDatasets::all();
+    if (datasets.size() < 5) {
+        if (errorMessage) *errorMessage = QStringLiteral("内置数据集不足，无法生成说明书截图。");
+        return false;
+    }
+
+    QDir output(outputDir);
+    if (!output.exists() && !output.mkpath(QStringLiteral("."))) {
+        if (errorMessage) *errorMessage = QStringLiteral("无法创建截图目录：%1").arg(outputDir);
+        return false;
+    }
+
+    resize(1440, 900);
+    show();
+
+    const auto settle = [this]() {
+        for (int i = 0; i < 4; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 80);
+            repaint();
+        }
+    };
+
+    const auto selectPage = [this, &settle](int pageIndex, const QString& navText) {
+        pages_->setCurrentIndex(pageIndex);
+        for (auto* button : findChildren<QPushButton*>()) {
+            if (button->objectName() == QStringLiteral("navButton")) {
+                button->setChecked(button->text() == navText);
+            }
+        }
+        settle();
+    };
+
+    const auto loadDataset = [this, &datasets, &settle](int index) {
+        const auto& dataset = datasets[index];
+        setRecords(dataset.records, QStringLiteral("内置数据集 · %1").arg(dataset.name), false);
+        projectDirty_ = false;
+        updateProjectUi();
+        settle();
+    };
+
+    const auto selectAnalysisTab = [this, &settle](int tabIndex) {
+        for (auto* tabs : findChildren<QTabWidget*>()) {
+            if (tabs->count() >= 4) {
+                tabs->setCurrentIndex(tabIndex);
+                break;
+            }
+        }
+        settle();
+    };
+
+    const auto saveShot = [this, &output, &settle, errorMessage](const QString& fileName) {
+        settle();
+        const QPixmap image = grab();
+        const QString path = output.filePath(fileName);
+        if (image.isNull() || !image.save(path, "PNG")) {
+            if (errorMessage) *errorMessage = QStringLiteral("截图保存失败：%1").arg(path);
+            return false;
+        }
+        return true;
+    };
+
+    loadDataset(0);
+    selectPage(1, QStringLiteral("首页"));
+    if (!saveShot(QStringLiteral("01_首页_长期稳定性总览.png"))) return false;
+
+    loadDataset(4);
+    selectPage(2, QStringLiteral("数据"));
+    if (!saveShot(QStringLiteral("02_数据_质量检查.png"))) return false;
+
+    loadDataset(1);
+    selectPage(4, QStringLiteral("分析"));
+    selectAnalysisTab(0);
+    if (!saveShot(QStringLiteral("03_分析_T90寿命指标.png"))) return false;
+
+    loadDataset(0);
+    selectPage(4, QStringLiteral("分析"));
+    selectAnalysisTab(1);
+    if (!saveShot(QStringLiteral("04_分析_同时间对比.png"))) return false;
+
+    loadDataset(2);
+    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(120.0);
+    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(24.0);
+    refreshResearchSupportViews();
+    selectPage(4, QStringLiteral("分析"));
+    selectAnalysisTab(2);
+    if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;
+
+    loadDataset(0);
+    selectPage(4, QStringLiteral("分析"));
+    selectAnalysisTab(3);
+    if (!saveShot(QStringLiteral("06_分析_公开参考库.png"))) return false;
+
+    QVector<EvidenceItem> evidence;
+    EvidenceItem item1;
+    item1.sourcePath = QStringLiteral("公开资料_长期稳定性研究.pdf");
+    item1.sourceSha256 = QStringLiteral("7e8d2d3c9b3a8a6a1dd7d60e128fe20c");
+    item1.sourcePage = 3;
+    item1.category = QStringLiteral("doi");
+    item1.term = QStringLiteral("DOI");
+    item1.valueText = QStringLiteral("10.1002/cctc.201500379");
+    item1.snippet = QStringLiteral("Ni 基催化剂在高温条件下开展长期稳定性测试，并报告了随时间变化的转化性能。");
+    item1.boundCatalyst = QStringLiteral("Ni-CeO2");
+    item1.boundTimeHours = 96.0;
+    item1.status = QStringLiteral("condition_reviewed_context_only");
+    item1.note = QStringLiteral("已核对催化剂、温度、时间点和性能指标，仅作为分析上下文。 ");
+    evidence.append(item1);
+
+    EvidenceItem item2;
+    item2.sourcePath = QStringLiteral("公开资料_长期稳定性研究.pdf");
+    item2.sourceSha256 = item1.sourceSha256;
+    item2.sourcePage = 4;
+    item2.category = QStringLiteral("temperature_c");
+    item2.term = QStringLiteral("temperature");
+    item2.valueText = QStringLiteral("700 °C");
+    item2.snippet = QStringLiteral("长期稳定性评价在约 700 °C 条件下进行，用于对照当前实验温度量级。");
+    item2.boundCatalyst = QStringLiteral("Ni-CeO2");
+    item2.boundTimeHours = 144.0;
+    item2.status = QStringLiteral("condition_reviewed_context_only");
+    item2.note = QStringLiteral("温度与进料条件已人工核对。 ");
+    evidence.append(item2);
+
+    EvidenceItem item3;
+    item3.sourcePath = QStringLiteral("待核对资料_补充实验.pdf");
+    item3.sourceSha256 = QStringLiteral("a7b8c9d0e1f2a3b4c5d6e7f809101112");
+    item3.sourcePage = 7;
+    item3.category = QStringLiteral("duration_h");
+    item3.term = QStringLiteral("duration");
+    item3.valueText = QStringLiteral("200 h");
+    item3.snippet = QStringLiteral("文献给出约 200 h 的稳定性测试窗口，尚需核对催化剂体系与空速条件。");
+    item3.boundCatalyst = QStringLiteral("Ni-Al2O3");
+    item3.boundTimeHours = 200.0;
+    item3.status = QStringLiteral("bound_to_catalyst_time_requires_condition_review");
+    item3.note = QStringLiteral("待确认空速和压力条件。 ");
+    evidence.append(item3);
+
+    if (evidencePage_) evidencePage_->setEvidenceItems(evidence);
+    refreshDecisionOverview();
+    selectPage(3, QStringLiteral("资料"));
+    if (!saveShot(QStringLiteral("07_资料_关联与确认.png"))) return false;
+
+    selectPage(5, QStringLiteral("AI 助手"));
+    if (!saveShot(QStringLiteral("08_AI助手_资料准备.png"))) return false;
+
+    selectPage(0, QStringLiteral("项目"));
+    if (!saveShot(QStringLiteral("09_项目_本地管理.png"))) return false;
+
+    selectPage(6, QStringLiteral("设置"));
+    if (!saveShot(QStringLiteral("10_设置_软件信息.png"))) return false;
+
+    loadDataset(3);
+    selectPage(4, QStringLiteral("分析"));
+    selectAnalysisTab(0);
+    if (!saveShot(QStringLiteral("11_分析_条件差异阻止比较.png"))) return false;
+
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("已生成 11 张智策实际 Qt 界面截图：%1").arg(output.absolutePath());
+    }
+    return true;
 }
 
 void MainWindow::buildUi() {

@@ -267,7 +267,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     packetTop->addWidget(packetStatusLabel_);
     packetLayout->addLayout(packetTop);
     packetLayout->addWidget(mutedLabel(QStringLiteral(
-        "Packet 只包含已完成人工条件复核且绑定到明确催化剂与时间的证据；其他候选自动排除。这里展示的 Markdown 将作为后续 AI Analyst / Evidence Critic 的可审计上下文基础。")));
+        "只有已关联到明确催化剂和时间点，并经人工确认的资料会进入 AI 可用内容；其余条目保留在资料列表中，不参与自动分析。")));
     packetPreview_ = new QTextEdit;
     packetPreview_->setReadOnly(true);
     packetPreview_->setMaximumHeight(210);
@@ -280,7 +280,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* noteLayout = new QVBoxLayout(note);
     noteLayout->addWidget(new QLabel(QStringLiteral("资料说明")));
     noteLayout->addWidget(mutedLabel(QStringLiteral(
-        "原生 PDF 读取只使用 PDF 自带文本层，不自动 OCR 扫描页；这避免 OCR 错误直接进入实验事实链。“条件已复核”仍只是人工上下文核对状态，不是实验真值认证，也不会自动进入性能轨迹、T90 或直接排名。")));
+        "PDF 读取优先使用文件自带文本层，不自动对扫描页执行 OCR。人工确认只表示关键上下文已经核对，不会修改实验观测，也不会自动进入性能轨迹、T90 或直接排名。")));
     layout->addWidget(note);
 
     resetCurrentDocumentSummary();
@@ -513,14 +513,13 @@ void EvidencePage::refreshEvidenceTable() {
         evidenceTable_->setItem(row, 3, readOnlyItem(displayCandidate(item)));
         auto* statusItem = readOnlyItem(statusLabel(item.status));
         if (item.status == QStringLiteral("condition_reviewed_context_only")) {
+            statusItem->setText(QStringLiteral("●  %1").arg(statusItem->text()));
             statusItem->setForeground(QColor(QStringLiteral("#166534")));
-            statusItem->setBackground(QColor(QStringLiteral("#F0FDF4")));
         } else if (item.status == QStringLiteral("candidate_requires_condition_binding")) {
             statusItem->setForeground(QColor(QStringLiteral("#71717A")));
-            statusItem->setBackground(QColor(QStringLiteral("#F4F4F5")));
         } else {
-            statusItem->setForeground(QColor(QStringLiteral("#92400E")));
-            statusItem->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            statusItem->setText(QStringLiteral("●  %1").arg(statusItem->text()));
+            statusItem->setForeground(QColor(QStringLiteral("#8A5A00")));
         }
         evidenceTable_->setItem(row, 4, statusItem);
         evidenceTable_->setItem(row, 5, readOnlyItem(item.boundCatalyst.isEmpty()
