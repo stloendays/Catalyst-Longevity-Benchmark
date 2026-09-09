@@ -1,0 +1,79 @@
+name: Local2B MCP Step 3A recover
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step3a-recover.yml
+      - training/local2b_mcp/run_server_qvac_lora.sh
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout Step 3 branch
+        uses: actions/checkout@v4
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Transfer reusable trainer wrapper
+        run: |
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/run_server_qvac_lora.sh \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'chmod +x /home/ubuntu/local2b-training/run_server_qvac_lora.sh'
+      - name: Complete Stage 3A on server
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=120 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/home/ubuntu/local2b-training/step3a-recover
+          mkdir -p "$ROOT"
+          cp /home/ubuntu/local2b-training/step3a/train.jsonl "$ROOT/train.jsonl"
+          cp /home/ubuntu/local2b-training/step3a/manifest.json "$ROOT/manifest.json"
+          rm -rf "$ROOT/checkpoints"
+          /home/ubuntu/local2b-training/run_server_qvac_lora.sh \
+            --data "$ROOT/train.jsonl" \
+            --output "$ROOT/local2b-mcp-step3a-r4-qv.gguf" \
+            --context 512 --batch 32 --ubatch 16 \
+            --rank 4 --alpha 8 --modules attn_q,attn_v \
+            --epochs 1 --learning-rate 1e-5 --seed 20260908 \
+            --timeout-seconds 4200 \
+            --checkpoint-steps 2 \
+            --checkpoint-dir "$ROOT/checkpoints" \
+            --log "$ROOT/train.log" \
+            --result "$ROOT/result.txt" \
+            --install /opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
+          echo '=== RESULT ==='
+          cat "$ROOT/result.txt"
+          echo '=== LOSS TAIL ==='
+          tail -80 "$ROOT/train.log"
+          REMOTE
+      - name: Collect Stage 3A result
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/step3a-recover"
+          for f in manifest.json result.txt train.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3a-recover/$f" \
+              "$RUNNER_TEMP/step3a-recover/$f" || true
+          done
+      - name: Upload Stage 3A result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3a-recovered
+          path: ${{ runner.temp }}/step3a-recover/
+          if-no-files-found: warn
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
