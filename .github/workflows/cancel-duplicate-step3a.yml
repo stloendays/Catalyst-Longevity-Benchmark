@@ -13,10 +13,12 @@ jobs:
   cancel:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel duplicate recovery run
+      - name: Cancel duplicate recovery runs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --method POST \
-            repos/${{ github.repository }}/actions/runs/34296317190/cancel
-          echo 'DUPLICATE_RUN_CANCEL_REQUESTED=34296317190'
+          for run_id in 34296317190 34296487002; do
+            gh api --method POST \
+              repos/${{ github.repository }}/actions/runs/${run_id}/cancel || true
+            echo "DUPLICATE_RUN_CANCEL_REQUESTED=${run_id}"
+          done
