@@ -89,7 +89,7 @@ QString buildHtml(
              escape(sourceLabel.isEmpty() ? QStringLiteral("未标记") : sourceLabel));
 
     html += QStringLiteral("<h2>分析概览</h2>");
-    html += QStringLiteral("<table><tr><th>催化剂数量</th><th>观测点</th><th>最长测试</th><th>条件守门</th></tr>");
+    html += QStringLiteral("<table><tr><th>催化剂数量</th><th>观测点</th><th>最长测试</th><th>条件检查</th></tr>");
     html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3 h</td><td>%4</td></tr></table>")
         .arg(result.catalysts.size())
         .arg(result.totalObservations)
@@ -114,7 +114,7 @@ QString buildHtml(
     }
     html += QStringLiteral("</table>");
 
-    html += QStringLiteral("<h2>实验条件守门</h2>");
+    html += QStringLiteral("<h2>实验条件检查</h2>");
     const bool blocked = result.conditionAudit.blocksDirectRanking();
     html += QStringLiteral("<p class='%1'>%2</p>")
         .arg(blocked ? QStringLiteral("warn") : QStringLiteral("ok"),
@@ -212,7 +212,7 @@ QString buildHtml(
         "<p class='note'><b>实验建议说明：</b>上述建议由当前观测点、T90 状态、采样间隔和实验条件规则自动生成，"
         "用于辅助下一轮实验设计，不替代研究人员对具体反应体系的专业判断。</p>");
 
-    html += QStringLiteral("<h2>Evidence Packet</h2>");
+    html += QStringLiteral("<h2>AI 可用资料</h2>");
     html += QStringLiteral(
         "<table><tr><th>AI 可用</th><th>已复核上下文</th><th>待复核/排除</th><th>来源</th><th>催化剂</th></tr>");
     html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td></tr></table>")
@@ -223,7 +223,7 @@ QString buildHtml(
         .arg(packet.catalystCount);
 
     if (!packet.warnings.isEmpty()) {
-        html += QStringLiteral("<p class='note'><b>Packet guardrails：</b><br/>");
+        html += QStringLiteral("<p class='note'><b>资料使用规则：</b><br/>");
         for (const auto& warning : packet.warnings) {
             html += QStringLiteral("• %1<br/>").arg(escape(warning));
         }
@@ -253,10 +253,10 @@ QString buildHtml(
     }
 
     html += QStringLiteral(
-        "<p class='note'><b>Evidence Packet 语义：</b>只有完成催化剂、时间和人工条件复核的条目进入 AI 上下文。"
+        "<p class='note'><b>AI 可用资料说明：</b>只有完成催化剂、时间和人工条件复核的条目进入 AI 上下文。"
         "Packet 为 context-only，不得覆盖实验观测、寿命阈值或直接排名。</p>");
 
-    html += QStringLiteral("<h2>资料证据审计附录</h2>");
+    html += QStringLiteral("<h2>资料记录附录</h2>");
     if (evidenceItems.isEmpty()) {
         html += QStringLiteral("<p>当前项目未保存资料证据候选。</p>");
     } else {
@@ -268,11 +268,11 @@ QString buildHtml(
             else if (item.boundCatalyst.isEmpty()) ++unbound;
             else ++boundPending;
         }
-        html += QStringLiteral("<table><tr><th>证据候选</th><th>未绑定</th><th>已绑定待复核</th><th>条件已人工复核</th></tr>");
+        html += QStringLiteral("<table><tr><th>资料条目</th><th>未关联</th><th>已关联待确认</th><th>已确认</th></tr>");
         html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td></tr></table>")
             .arg(evidenceItems.size()).arg(unbound).arg(boundPending).arg(reviewed);
         html += QStringLiteral(
-            "<p class='note'><b>重要：</b>“条件已人工复核”只表示用户完成了资料上下文核对。"
+            "<p class='note'><b>重要：</b>“已确认”表示用户已经核对该条资料的关键实验条件。"
             "这些资料证据仍不会自动修改实验观测、寿命阈值或排名。</p>");
 
         html += QStringLiteral(
@@ -301,7 +301,7 @@ QString buildHtml(
     }
 
     html += QStringLiteral(
-        "<p class='note'><b>证据语义：</b> T95 / T90 / T80 采用离散观测的删失语义。"
+        "<p class='note'><b>结果说明：</b> T95 / T90 / T80 采用离散观测的删失语义。"
         "报告不会把两个实际观测点之间的插值结果冒充为直接测得的精确寿命。"
         "PDF 页码、来源 SHA-256、绑定与人工复核状态用于可追溯性；资料证据与实验观测在项目文件中分开存储。</p>");
     html += QStringLiteral("</body></html>");

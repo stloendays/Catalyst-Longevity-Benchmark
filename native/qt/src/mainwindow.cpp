@@ -287,11 +287,11 @@ QWidget* MainWindow::buildSidebar() {
     group->setExclusive(true);
     const QStringList labels = {
         QStringLiteral("项目"),
-        QStringLiteral("总览"),
+        QStringLiteral("首页"),
         QStringLiteral("数据"),
-        QStringLiteral("资料分析"),
-        QStringLiteral("寿命分析"),
-        QStringLiteral("AI 工作区"),
+        QStringLiteral("资料"),
+        QStringLiteral("分析"),
+        QStringLiteral("AI 助手"),
         QStringLiteral("设置")
     };
 
@@ -414,7 +414,7 @@ QWidget* MainWindow::buildOverviewPage() {
     metrics->addWidget(metricCard(QStringLiteral("催化剂"), &metricCatalysts_), 0, 0);
     metrics->addWidget(metricCard(QStringLiteral("数据点"), &metricPoints_), 0, 1);
     metrics->addWidget(metricCard(QStringLiteral("最长测试"), &metricLongest_), 0, 2);
-    metrics->addWidget(metricCard(QStringLiteral("条件守门"), &metricCondition_), 0, 3);
+    metrics->addWidget(metricCard(QStringLiteral("条件检查"), &metricCondition_), 0, 3);
     metrics->addWidget(metricCard(QStringLiteral("共同时间领先"), &metricLeader_), 0, 4);
     layout->addLayout(metrics);
 
@@ -932,7 +932,7 @@ void MainWindow::refreshAnalysisViews() {
     metricCondition_->setText(ConditionGuard::statusText(analysis_.conditionAudit.status));
 
     if (analysis_.conditionAudit.blocksDirectRanking()) {
-        metricLeader_->setText(QStringLiteral("已阻止"));
+        metricLeader_->setText(QStringLiteral("暂不比较"));
     } else if (analysis_.latestSharedTimeHours.has_value() && !analysis_.latestSharedLeader.isEmpty()) {
         metricLeader_->setText(QStringLiteral("%1 @ %2 h")
             .arg(analysis_.latestSharedLeader, QString::number(*analysis_.latestSharedTimeHours, 'g', 8)));
