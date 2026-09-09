@@ -763,7 +763,7 @@ QWidget* MainWindow::buildSettingsPage() {
     card->setObjectName(QStringLiteral("panel"));
     auto* cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(22, 20, 22, 20);
-    cardLayout->addWidget(new QLabel(QStringLiteral("催化剂寿命数据分析与实验辅助系统")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("催化剂长期稳定性评估与实验决策系统")));
     cardLayout->addWidget(muted(QStringLiteral("Windows 原生桌面应用 · C++20 + Qt 6 + SQLite")));
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
@@ -1350,7 +1350,7 @@ void MainWindow::updateProjectUi() {
         }
     }
 
-    QString title = QStringLiteral("催化剂寿命数据分析与实验辅助系统");
+    QString title = QStringLiteral("催化剂长期稳定性评估与实验决策系统");
     title += currentProjectPath_.isEmpty()
         ? QStringLiteral(" — 未命名项目")
         : QStringLiteral(" — %1").arg(QFileInfo(currentProjectPath_).completeBaseName());
