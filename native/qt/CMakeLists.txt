@@ -57,6 +57,7 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/chartwidget.cpp
     src/mainwindow.h
     src/mainwindow.cpp
+    src/settingspolish.cpp
     resources/windows.rc
 )
 
