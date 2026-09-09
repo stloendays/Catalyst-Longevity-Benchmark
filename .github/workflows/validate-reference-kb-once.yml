@@ -58,3 +58,5 @@ jobs:
           finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
+
+# Re-run after the reference-aware advice type fixes so validation is pinned to the latest branch head.
