@@ -23,6 +23,21 @@ jobs:
         shell: pwsh
         run: python tools/apply_zhice_screenshot_capture.py
 
+      - name: Remove label background blocks
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p = Path("native/qt/src/mainwindow.cpp")
+          text = p.read_text(encoding="utf-8")
+          marker = "        QMainWindow { background:#F5F5F5; }\n"
+          replacement = marker + "        QLabel { background:transparent; }\n"
+          if marker not in text:
+              raise SystemExit("QMainWindow style marker not found")
+          text = text.replace(marker, replacement, 1)
+          p.write_text(text, encoding="utf-8")
+          '@ | python -
+
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
         with:
