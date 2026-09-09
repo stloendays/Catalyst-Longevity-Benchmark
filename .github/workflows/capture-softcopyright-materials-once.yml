@@ -1,0 +1,101 @@
+name: Capture Software Copyright Materials Once
+
+on:
+  push:
+    branches: [softcopyright-capture]
+    paths:
+      - ".github/workflows/capture-softcopyright-materials-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: softcopyright-capture
+          fetch-depth: 0
+
+      - name: Apply temporary capture support
+        shell: pwsh
+        run: python tools/apply_softcopyright_capture.py
+
+      - name: Build source bundle
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          files = [
+              'native/qt/src/main.cpp',
+              'native/qt/src/models.h',
+              'native/qt/src/analysisengine.h', 'native/qt/src/analysisengine.cpp',
+              'native/qt/src/conditionguard.h', 'native/qt/src/conditionguard.cpp',
+              'native/qt/src/csvreader.h', 'native/qt/src/csvreader.cpp',
+              'native/qt/src/builtindatasets.h', 'native/qt/src/builtindatasets.cpp',
+              'native/qt/src/referenceknowledge.h', 'native/qt/src/referenceknowledge.cpp',
+              'native/qt/src/documentanalyzer.h', 'native/qt/src/documentanalyzer.cpp',
+              'native/qt/src/evidencepacket.h', 'native/qt/src/evidencepacket.cpp',
+              'native/qt/src/evidencepage.h', 'native/qt/src/evidencepage.cpp',
+              'native/qt/src/projectstore.h', 'native/qt/src/projectstore.cpp',
+              'native/qt/src/reportexporter.h', 'native/qt/src/reportexporter.cpp',
+              'native/qt/src/researchadvisor.h', 'native/qt/src/researchadvisor.cpp',
+              'native/qt/src/integrationgateway.h', 'native/qt/src/integrationgateway.cpp',
+              'native/qt/src/chartwidget.h', 'native/qt/src/chartwidget.cpp',
+              'native/qt/src/mainwindow.h', 'native/qt/src/mainwindow.cpp',
+          ]
+          out = Path('softcopyright-output/source')
+          out.mkdir(parents=True, exist_ok=True)
+          bundle = []
+          manifest = []
+          total = 0
+          for name in files:
+              path = Path(name)
+              lines = path.read_text(encoding='utf-8').splitlines()
+              bundle.append(f'// ===== FILE: {name} =====')
+              bundle.extend(lines)
+              bundle.append('')
+              manifest.append(f'{name}\t{len(lines)} lines')
+              total += len(lines) + 2
+          (out / 'source_bundle.txt').write_text('\n'.join(bundle) + '\n', encoding='utf-8')
+          (out / 'source_manifest.txt').write_text('\n'.join(manifest) + f'\nTOTAL\t{total} lines\n', encoding='utf-8')
+          print(f'Bundled {len(files)} source files, {total} lines')
+          '@ | Set-Content -Encoding utf8 build_source_bundle.py
+          python build_source_bundle.py
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+
+      - name: Build native desktop app
+        shell: pwsh
+        run: cmake --build build-qt --config Release --parallel
+
+      - name: Capture real Qt interface screenshots
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "softcopyright-output\screenshots" | Out-Null
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $arg = "--copyright-capture=$((Resolve-Path 'softcopyright-output\screenshots').Path)"
+          $capture = Start-Process -FilePath $exe -ArgumentList $arg -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($capture.ExitCode -ne 0) { throw "Screenshot capture failed with exit code $($capture.ExitCode)" }
+          $shots = Get-ChildItem "softcopyright-output\screenshots\*.png"
+          if ($shots.Count -lt 10) { throw "Expected at least 10 screenshots, got $($shots.Count)" }
+          $shots | Select-Object Name, Length
+
+      - name: Upload software copyright materials
+        uses: actions/upload-artifact@v4
+        with:
+          name: Software-Copyright-Materials
+          path: softcopyright-output/**
+          if-no-files-found: error
