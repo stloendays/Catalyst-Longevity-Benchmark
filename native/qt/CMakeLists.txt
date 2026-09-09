@@ -35,6 +35,8 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/conditionguard.cpp
     src/csvreader.h
     src/csvreader.cpp
+    src/builtindatasets.h
+    src/builtindatasets.cpp
     src/documentanalyzer.h
     src/documentanalyzer.cpp
     src/evidencepacket.h
