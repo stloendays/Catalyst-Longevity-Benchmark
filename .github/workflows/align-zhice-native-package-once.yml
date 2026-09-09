@@ -1,0 +1,88 @@
+name: Align Zhice Native Package Once
+
+on:
+  push:
+    branches: [ui-zhice-final-polish]
+    paths:
+      - ".github/workflows/align-zhice-native-package-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-zhice-final-polish
+          fetch-depth: 0
+
+      - name: Apply package and typography alignment
+        shell: pwsh
+        run: python tools/align_zhice_native_package.py
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure and build renamed executable
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP "zhice-package-build"
+          cmake -S native/qt -B $build -G "Visual Studio 17 2022" -A x64
+          cmake --build $build --config Release --parallel
+          $exe = Join-Path $build "Release\智策.exe"
+          if (-not (Test-Path $exe)) { throw "Renamed executable not produced: $exe" }
+          "ZHICE_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run self-test and smoke test
+        shell: pwsh
+        run: |
+          $test = Start-Process -FilePath $env:ZHICE_EXE -ArgumentList "--self-test" -WorkingDirectory (Split-Path $env:ZHICE_EXE) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+          $process = Start-Process -FilePath $env:ZHICE_EXE -WorkingDirectory (Split-Path $env:ZHICE_EXE) -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Desktop app exited unexpectedly with code $($process.ExitCode)" }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Validate deploy and installer
+        shell: pwsh
+        run: |
+          $dist = Join-Path $env:RUNNER_TEMP "zhice-dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item $env:ZHICE_EXE (Join-Path $dist "智策.exe") -Force
+          Copy-Item "native\qt\THIRD_PARTY_NOTICES.md" (Join-Path $dist "THIRD_PARTY_NOTICES.md") -Force
+          windeployqt --release --no-translations --compiler-runtime (Join-Path $dist "智策.exe")
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found" }
+          $out = Join-Path $env:RUNNER_TEMP "zhice-installer"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & $iscc "/DSourceDir=$dist" "/DOutputDir=$out" "native\qt\installer\CatalystLongevity.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          if (-not (Test-Path (Join-Path $out "Zhice-Setup.exe"))) { throw "Zhice installer not produced" }
+
+      - name: Commit validated source changes
+        shell: pwsh
+        run: |
+          Remove-Item "tools/align_zhice_native_package.py" -Force
+          Remove-Item ".github/workflows/align-zhice-native-package-once.yml" -Force
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add -A
+          if (git diff --cached --quiet) { throw "No package/UI changes produced" }
+          git commit -m "Align Zhice package identity and UI typography"
+          git push origin HEAD:ui-zhice-final-polish
