@@ -1,3 +1,4 @@
+# one-shot retry after idempotency fix
 name: Finalize Chinese Soft Copyright Copy Once
 
 on:
