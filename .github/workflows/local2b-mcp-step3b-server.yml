@@ -1,21 +1,24 @@
 name: Local2B MCP Step 3B server LoRA
 
 on:
-  push:
-    paths:
-      - .github/workflows/local2b-mcp-step3b-server.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
 jobs:
-  prepare-only:
+  train:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 300
     steps:
       - name: Checkout Step 3 branch
         uses: actions/checkout@v4
-      - name: Rebuild frozen train and freeze Stage 3B curriculum
+
+      - name: Rebuild and verify frozen Stage 3B curriculum
         run: |
           rm -rf "$RUNNER_TEMP/local2b-s2" "$RUNNER_TEMP/local2b-s3b"
           python3 training/local2b_mcp/generate_stage2_dataset.py \
@@ -27,18 +30,78 @@ jobs:
             --output "$RUNNER_TEMP/local2b-s3b/train.jsonl" \
             --manifest "$RUNNER_TEMP/local2b-s3b/manifest.json" \
             --seed 20260908 --max-tools 2
-          cat "$RUNNER_TEMP/local2b-s3b/manifest.json"
-          python3 - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("${{ runner.temp }}/local2b-s3b/train.jsonl")
-          rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
-          assert len(rows) == 64, len(rows)
-          assert all(r.get("messages") for r in rows)
-          print("STEP3B_CURRICULUM_PRECHECK=PASS")
-          PY
-      - name: Upload frozen Stage 3B curriculum
+          EXPECTED=0ea19f7143ebcf2de083a4c62ea076050032c49cd6d6e3e6073bf5b0bfc3528c
+          ACTUAL=$(sha256sum "$RUNNER_TEMP/local2b-s3b/train.jsonl" | awk '{print $1}')
+          test "$ACTUAL" = "$EXPECTED"
+          echo "STEP3B_DATA_SHA256=$ACTUAL"
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Transfer curriculum and training wrapper
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'mkdir -p /home/ubuntu/local2b-training/step3b'
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            "$RUNNER_TEMP/local2b-s3b/train.jsonl" \
+            "$RUNNER_TEMP/local2b-s3b/manifest.json" \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3b/
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/run_server_qvac_lora.sh \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'chmod +x /home/ubuntu/local2b-training/run_server_qvac_lora.sh'
+
+      - name: Continue Stage 3B from Stage 3A adapter on server
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=600 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/home/ubuntu/local2b-training/step3b
+          STAGE3A=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
+          test -s "$STAGE3A"
+          rm -rf "$ROOT/checkpoints"
+          flock -n /home/ubuntu/local2b-training/server-lora.lock \
+            /home/ubuntu/local2b-training/run_server_qvac_lora.sh \
+            --data "$ROOT/train.jsonl" \
+            --lora-init "$STAGE3A" \
+            --output "$ROOT/local2b-mcp-step3b-r4-qv.gguf" \
+            --context 576 --batch 16 --ubatch 8 \
+            --rank 4 --alpha 8 --modules attn_q,attn_v \
+            --epochs 1 --learning-rate 1e-5 --seed 20260908 \
+            --timeout-seconds 14400 \
+            --checkpoint-steps 2 \
+            --checkpoint-dir "$ROOT/checkpoints" \
+            --log "$ROOT/train.log" \
+            --result "$ROOT/result.txt" \
+            --install /opt/rhocodec-llm/adapters/local2b-mcp-step3b-r4-qv.gguf
+          cat "$ROOT/result.txt"
+          REMOTE
+
+      - name: Collect Stage 3B metadata
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/step3b-result"
+          for f in manifest.json result.txt train.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3b/$f" \
+              "$RUNNER_TEMP/step3b-result/$f" || true
+          done
+
+      - name: Upload Stage 3B metadata
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: local2b-mcp-step3b-curriculum
-          path: ${{ runner.temp }}/local2b-s3b/
-          if-no-files-found: error
+          name: local2b-mcp-step3b-server-result
+          path: ${{ runner.temp }}/step3b-result/
+          if-no-files-found: warn
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
