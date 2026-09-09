@@ -19,18 +19,58 @@ jobs:
         with:
           ref: zhice-copyright-screenshots
 
-      - name: Use a guaranteed recommendation scenario
+      - name: Polish materials workspace and advice rows
         shell: pwsh
         run: |
           @'
           from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f"missing marker: {label}")
+              return text.replace(old, new, 1)
+
+          p = Path("native/qt/src/evidencepage.cpp")
+          text = p.read_text(encoding="utf-8")
+          text = replace_once(text,
+              '    label->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 20, QFont::DemiBold));\n',
+              '    QFont font = label->font();\n    font.setPointSize(20);\n    font.setWeight(QFont::DemiBold);\n    label->setFont(font);\n',
+              'evidence heading font')
+          text = replace_once(text,
+              '        "原生读取带文本层的 PDF 论文，以及 TXT / Markdown / CSV / TSV。保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据，并保留 PDF 页码。只有完成催化剂、时间和人工条件复核的条目才进入 Evidence Packet；候选值不会自动改写实验数据或排名。"',
+              '        "导入 PDF 或文本资料，识别 DOI、温度、测试时长等信息；关联到催化剂和时间并确认后，可作为 AI 分析上下文。资料不会自动改写实验数据。"',
+              'evidence intro')
+          old_source = '''    auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));\n    sourceTitle->setObjectName(QStringLiteral("sectionTitle"));\n    sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));\n    sourceLabel_->setObjectName(QStringLiteral("sourcePath"));\n    sourceLabel_->setWordWrap(true);\n    sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);\n    documentInfoLabel_ = mutedLabel(QStringLiteral("—"));\n    warningLabel_ = mutedLabel(QString());\n    warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));\n    sourceLayout->addWidget(sourceTitle);\n    sourceLayout->addWidget(sourceLabel_);\n    sourceLayout->addWidget(documentInfoLabel_);\n    sourceLayout->addWidget(warningLabel_);\n    layout->addWidget(sourceFrame);\n'''
+          new_source = '''    sourceFrame->setMaximumHeight(96);\n    auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));\n    sourceTitle->setObjectName(QStringLiteral("sectionTitle"));\n    sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));\n    sourceLabel_->setObjectName(QStringLiteral("sourcePath"));\n    sourceLabel_->setWordWrap(false);\n    sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);\n    documentInfoLabel_ = mutedLabel(QStringLiteral("—"));\n    warningLabel_ = mutedLabel(QString());\n    warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));\n    auto* sourceTop = new QHBoxLayout;\n    sourceTop->addWidget(sourceTitle);\n    sourceTop->addSpacing(10);\n    sourceTop->addWidget(sourceLabel_, 1);\n    sourceLayout->addLayout(sourceTop);\n    sourceLayout->addWidget(documentInfoLabel_);\n    sourceLayout->addWidget(warningLabel_);\n    layout->addWidget(sourceFrame);\n'''
+          text = replace_once(text, old_source, new_source, 'source summary layout')
+          text = replace_once(text,
+              '    signalsTable_->setMaximumHeight(165);\n',
+              '    signalsTable_->setMaximumHeight(82);\n    signalFrame->setMaximumHeight(135);\n',
+              'signals height')
+          text = replace_once(text,
+              '    evidenceTable_->setWordWrap(true);\n    evidenceTable_->setMouseTracking(true);\n    evidenceLayout->addWidget(evidenceTable_, 1);\n',
+              '    evidenceTable_->setWordWrap(false);\n    evidenceTable_->setMouseTracking(true);\n    evidenceTable_->setMinimumHeight(105);\n    evidenceTable_->setMaximumHeight(135);\n    evidenceLayout->addWidget(evidenceTable_);\n',
+              'evidence table height')
+          old_actions = '''    bindRow->addWidget(new QLabel(QStringLiteral("关联催化剂")));\n    bindRow->addWidget(catalystCombo_);\n    bindRow->addWidget(new QLabel(QStringLiteral("时间")));\n    bindRow->addWidget(timeSpin_);\n    bindRow->addWidget(noteEdit_, 1);\n    bindRow->addWidget(bindButton);\n    bindRow->addWidget(reviewButton);\n    bindRow->addWidget(returnButton);\n    bindRow->addWidget(unbindButton);\n    evidenceLayout->addLayout(bindRow);\n    layout->addWidget(evidenceFrame, 1);\n'''
+          new_actions = '''    bindRow->addWidget(new QLabel(QStringLiteral("关联催化剂")));\n    bindRow->addWidget(catalystCombo_);\n    bindRow->addWidget(new QLabel(QStringLiteral("时间")));\n    bindRow->addWidget(timeSpin_);\n    bindRow->addWidget(noteEdit_, 1);\n    evidenceLayout->addLayout(bindRow);\n    auto* actionRow = new QHBoxLayout;\n    actionRow->addStretch();\n    actionRow->addWidget(bindButton);\n    actionRow->addWidget(reviewButton);\n    actionRow->addWidget(returnButton);\n    actionRow->addWidget(unbindButton);\n    evidenceLayout->addLayout(actionRow);\n    evidenceFrame->setMaximumHeight(260);\n    layout->addWidget(evidenceFrame);\n'''
+          text = replace_once(text, old_actions, new_actions, 'evidence action rows')
+          text = replace_once(text,
+              '    packetPreview_->setMaximumHeight(210);\n',
+              '    packetPreview_->setMinimumHeight(50);\n    packetPreview_->setMaximumHeight(68);\n    packetFrame->setMaximumHeight(155);\n',
+              'packet preview height')
+          p.write_text(text, encoding="utf-8")
+
           p = Path("native/qt/src/mainwindow.cpp")
           text = p.read_text(encoding="utf-8")
-          old = '''    loadDataset(1);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);\n    refreshResearchSupportViews();\n    selectPage(4, QStringLiteral("分析"));\n    selectAnalysisTab(2);\n    if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;\n'''
-          new = '''    loadDataset(3);\n    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);\n    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);\n    refreshResearchSupportViews();\n    if (!adviceTable_ || adviceTable_->rowCount() == 0) {\n        if (errorMessage) *errorMessage = QStringLiteral("实验建议截图场景未产生可执行建议。");\n        return false;\n    }\n    selectPage(4, QStringLiteral("分析"));\n    selectAnalysisTab(2);\n    if (!saveShot(QStringLiteral("05_分析_实验建议.png"))) return false;\n'''
-          if old not in text:
-              raise SystemExit("experiment screenshot scenario marker not found")
-          p.write_text(text.replace(old,new,1),encoding="utf-8")
+          text = replace_once(text,
+              '    configureTable(adviceTable_);\n    adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);\n',
+              '    configureTable(adviceTable_);\n    adviceTable_->setWordWrap(false);\n    adviceTable_->verticalHeader()->setDefaultSectionSize(36);\n    adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);\n',
+              'advice compact table')
+          text = replace_once(text,
+              '        adviceTable_->resizeRowsToContents();\n',
+              '',
+              'advice row resize')
+          p.write_text(text, encoding="utf-8")
           '@ | python -
 
       - name: Install Qt 6
@@ -65,7 +105,6 @@ jobs:
           if ($capture.ExitCode -ne 0) { throw "Screenshot capture failed with exit code $($capture.ExitCode)" }
           $shots = Get-ChildItem "ui-screenshots" -Filter "*.png"
           if ($shots.Count -lt 11) { throw "Expected at least 11 screenshots, got $($shots.Count)" }
-          $shots | Select-Object Name, Length
 
       - name: Upload real screenshots
         uses: actions/upload-artifact@v4
@@ -74,13 +113,13 @@ jobs:
           path: ui-screenshots/*.png
           if-no-files-found: error
 
-      - name: Commit validated capture scenario
+      - name: Commit validated workspace polish
         shell: pwsh
         run: |
           if (Test-Path "build-qt") { Remove-Item -Recurse -Force "build-qt" }
           if (Test-Path "ui-screenshots") { Remove-Item -Recurse -Force "ui-screenshots" }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add native/qt/src/mainwindow.cpp
-          git commit -m "Validate experiment-advice documentation screenshot"
+          git add native/qt/src/mainwindow.cpp native/qt/src/evidencepage.cpp
+          git commit -m "Polish Zhice materials workspace and experiment advice table"
           git push origin zhice-copyright-screenshots
