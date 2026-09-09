@@ -1,0 +1,9 @@
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/CMakeFiles/CatalystLongevityResearch.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/CMakeFiles/PACKAGE.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/CMakeFiles/INSTALL.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/CMakeFiles/ALL_BUILD.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/CMakeFiles/ZERO_CHECK.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-build/CMakeFiles/QXlsx.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-build/CMakeFiles/PACKAGE.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-build/CMakeFiles/INSTALL.dir
+D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-build/CMakeFiles/ALL_BUILD.dir

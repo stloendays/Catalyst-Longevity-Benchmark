@@ -1,0 +1,150 @@
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-MKDIR.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -Dcfgdir=/Debug -P D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/tmp/qxlsx-populate-mkdirs.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-mkdir
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-DOWNLOAD.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/tmp/qxlsx-populate-gitclone.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-download
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-UPDATE.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-src
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -Dcan_fetch=YES -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/tmp/qxlsx-populate-gitupdate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-PATCH.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-patch
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-CONFIGURE.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-configure
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-BUILD.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-build
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-INSTALL.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-install
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\570D9CFEB8411F03AC1FFE6D6D1F67C1\QXLSX-POPULATE-TEST.RULE
+setlocal
+cd D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-test
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\8E9D885A1DF6F78F3763420A3D44FE85\QXLSX-POPULATE-COMPLETE.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/CMakeFiles/Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/CMakeFiles/Debug/qxlsx-populate-complete
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/qxlsx-populate-prefix/src/qxlsx-populate-stamp/Debug/qxlsx-populate-done
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKEFILES\4DB69D4892AEA47D6AD3AB52105D5B96\QXLSX-POPULATE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\A\CATALYST-LONGEVITY-BENCHMARK\CATALYST-LONGEVITY-BENCHMARK\BUILD-QT\_DEPS\QXLSX-SUBBUILD\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild -BD:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild --check-stamp-file D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-subbuild/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

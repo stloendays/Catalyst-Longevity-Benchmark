@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\570d9cfeb8411f03ac1ffe6d6d1f67c1\qxlsx-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\8e9d885a1df6f78f3763420a3d44fe85\qxlsx-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\4db69d4892aea47d6ad3ab52105d5b96\qxlsx-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\qxlsx-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{AB2F78F6-5E98-3BC3-A710-1D1592190C14}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

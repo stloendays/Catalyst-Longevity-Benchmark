@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\CatalystLongevityResearch_autogen\mocs_compilation_Debug.cpp">
+      <Filter>Source Files\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\analysisengine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\conditionguard.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\csvreader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\builtindatasets.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\referenceknowledge.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\documentanalyzer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\evidencepacket.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\evidencepage.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\projectstore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\reportexporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\researchadvisor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\integrationgateway.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\chartwidget.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\mainwindow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\CatalystLongevityResearch_autogen\mocs_compilation_Release.cpp">
+      <Filter>Source Files\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\CatalystLongevityResearch_autogen\mocs_compilation_MinSizeRel.cpp">
+      <Filter>Source Files\Generated</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\CatalystLongevityResearch_autogen\mocs_compilation_RelWithDebInfo.cpp">
+      <Filter>Source Files\Generated</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\models.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\analysisengine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\conditionguard.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\csvreader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\builtindatasets.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\referenceknowledge.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\documentanalyzer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\evidencepacket.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\evidencepage.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\projectstore.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\reportexporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\researchadvisor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\integrationgateway.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\chartwidget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\src\mainwindow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\native\qt\resources\windows.rc">
+      <Filter>Source Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{628F8AAF-92E8-3E2F-BC1E-F9215E848DB7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{404E2FE4-20EB-3438-A909-35D8A4E45CE1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Generated">
+      <UniqueIdentifier>{D38DBC80-A3ED-3883-A19C-39E32DC58324}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

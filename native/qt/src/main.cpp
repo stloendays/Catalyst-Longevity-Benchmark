@@ -16,6 +16,7 @@
 #include <QColor>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
 #include <QIcon>
@@ -499,6 +500,19 @@ QString polishedStyleSheet() {
     )");
 }
 
+QString preferredUiFontFamily() {
+    const QStringList families = QFontDatabase::families();
+    const QStringList preferred = {
+        QStringLiteral("DengXian"),
+        QStringLiteral("Microsoft YaHei UI"),
+        QStringLiteral("Microsoft YaHei")
+    };
+    for (const auto& family : preferred) {
+        if (families.contains(family, Qt::CaseInsensitive)) return family;
+    }
+    return QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
+}
+
 void polishChineseCopy(catalyst::MainWindow& window) {
     const auto labels = window.findChildren<QLabel*>();
     for (auto* label : labels) {
@@ -623,7 +637,7 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
 }
 
 void applyWindowPolish(catalyst::MainWindow& window) {
-    window.setWindowTitle(QStringLiteral("催化剂长期稳定性评估与实验决策系统"));
+    window.setWindowTitle(QStringLiteral("智策"));
     window.statusBar()->setSizeGripEnabled(false);
 
     if (auto* sidebar = window.findChild<QFrame*>(QStringLiteral("sidebar"))) {
@@ -641,7 +655,7 @@ void applyWindowPolish(catalyst::MainWindow& window) {
 
         QColor color(QStringLiteral("#3F3F46"));
         if (button->objectName() == QStringLiteral("navButton")) {
-            color = QColor(QStringLiteral("#E5E5E5"));
+            color = QColor(QStringLiteral("#4B5563"));
             button->setIconSize(QSize(19, 19));
         } else if (button->objectName() == QStringLiteral("primaryButton")) {
             color = QColor(QStringLiteral("#FFFFFF"));
@@ -653,16 +667,6 @@ void applyWindowPolish(catalyst::MainWindow& window) {
         button->setToolTip(tooltip);
     }
 
-    const auto frames = window.findChildren<QFrame*>();
-    for (auto* frame : frames) {
-        const QString objectName = frame->objectName();
-        if (objectName != QStringLiteral("panel") && objectName != QStringLiteral("metricCard")) continue;
-        auto* shadow = new QGraphicsDropShadowEffect(frame);
-        shadow->setBlurRadius(objectName == QStringLiteral("metricCard") ? 18.0 : 24.0);
-        shadow->setOffset(0.0, objectName == QStringLiteral("metricCard") ? 2.0 : 3.0);
-        shadow->setColor(QColor(15, 23, 42, objectName == QStringLiteral("metricCard") ? 18 : 14));
-        frame->setGraphicsEffect(shadow);
-    }
 }
 
 } // namespace
@@ -670,10 +674,10 @@ void applyWindowPolish(catalyst::MainWindow& window) {
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationDisplayName(QStringLiteral("催化剂长期稳定性评估与实验决策系统"));
+    app.setApplicationName(QStringLiteral("智策"));
+    app.setApplicationDisplayName(QStringLiteral("智策"));
     app.setStyle(QStringLiteral("Fusion"));
-    app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
+    app.setFont(QFont(preferredUiFontFamily(), 10));
     app.setWindowIcon(makeApplicationIcon());
 
     if (app.arguments().contains(QStringLiteral("--self-test"))) {

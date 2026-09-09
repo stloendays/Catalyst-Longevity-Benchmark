@@ -1,0 +1,5 @@
+set(__QT_DEPLOY_TARGET_QXlsx_FILE D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/_deps/qxlsx-build/Debug/QXlsxQt6.lib)
+set(__QT_DEPLOY_TARGET_QXlsx_TYPE STATIC_LIBRARY)
+set(__QT_DEPLOY_TARGET_CatalystLongevityResearch_FILE D:/a/Catalyst-Longevity-Benchmark/Catalyst-Longevity-Benchmark/build-qt/Debug/Catalyst Longevity Research.exe)
+set(__QT_DEPLOY_TARGET_CatalystLongevityResearch_TYPE EXECUTABLE)
+set(__QT_DEPLOY_TARGET_CatalystLongevityResearch_RUNTIME_DLLS D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Widgetsd.dll;D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Sqld.dll;D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Pdfd.dll;D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Networkd.dll;D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Guid.dll;D:/a/Catalyst-Longevity-Benchmark/Qt/6.8.3/msvc2022_64/bin/Qt6Cored.dll)

@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\a\Catalyst-Longevity-Benchmark\Catalyst-Longevity-Benchmark\build-qt\_deps\qxlsx-subbuild\CMakeFiles\4db69d4892aea47d6ad3ab52105d5b96\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{AB2F78F6-5E98-3BC3-A710-1D1592190C14}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
