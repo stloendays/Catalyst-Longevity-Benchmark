@@ -94,6 +94,8 @@ private:
     QTableWidget* dataCheckTable_ = nullptr;
     QTableWidget* comparisonTable_ = nullptr;
     QTableWidget* adviceTable_ = nullptr;
+    QLabel* referenceMatchSummary_ = nullptr;
+    QTableWidget* referenceTable_ = nullptr;
     ChartWidget* chart_ = nullptr;
 };
 
