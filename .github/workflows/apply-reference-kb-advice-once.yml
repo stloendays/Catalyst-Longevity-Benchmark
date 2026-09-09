@@ -17,17 +17,17 @@ jobs:
         with:
           ref: real-reference-kb-feasible-advice
           fetch-depth: 0
-      - name: Apply source integration
-        run: python tools/apply_reference_kb_advice.py
-      - name: Commit integration
+      - name: Apply type fixes
+        run: python tools/fix_reference_kb_types.py
+      - name: Commit fixes
         shell: bash
         run: |
           git config user.name "stloendays"
           git config user.email "157110190+stloendays@users.noreply.github.com"
-          git add native/qt/CMakeLists.txt native/qt/src/mainwindow.cpp native/qt/src/reportexporter.cpp native/qt/src/main.cpp
+          git add native/qt/src/researchadvisor.cpp
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "Integrate public reference snapshots with experiment advice"
+            git commit -m "Fix reference-aware advice type handling"
             git push origin HEAD:real-reference-kb-feasible-advice
           fi
