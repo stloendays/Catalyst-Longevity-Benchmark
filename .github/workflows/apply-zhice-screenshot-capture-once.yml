@@ -1,0 +1,78 @@
+name: Apply Zhice Screenshot Capture Once
+
+on:
+  push:
+    branches: [zhice-copyright-screenshots]
+    paths:
+      - ".github/workflows/apply-zhice-screenshot-capture-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-capture-validate:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: zhice-copyright-screenshots
+
+      - name: Apply screenshot capture source changes
+        shell: pwsh
+        run: python tools/apply_zhice_screenshot_capture.py
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+          cmake --build build-qt --config Release --parallel
+          if (-not (Test-Path "build-qt\Release\智策.exe")) { throw "智策.exe was not produced" }
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Capture real Qt screenshots
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "ui-screenshots" | Out-Null
+          $output = (Resolve-Path "ui-screenshots").Path
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $capture = Start-Process -FilePath $exe -ArgumentList @("--capture-screenshots", $output) -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($capture.ExitCode -ne 0) { throw "Screenshot capture failed with exit code $($capture.ExitCode)" }
+          $shots = Get-ChildItem "ui-screenshots" -Filter "*.png"
+          if ($shots.Count -lt 11) { throw "Expected at least 11 screenshots, got $($shots.Count)" }
+          $shots | Select-Object Name, Length
+
+      - name: Upload real screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhice-Real-UI-Screenshots
+          path: ui-screenshots/*.png
+          if-no-files-found: error
+
+      - name: Commit validated source changes and clean temporary migration
+        shell: pwsh
+        run: |
+          Remove-Item -Force "tools\apply_zhice_screenshot_capture.py"
+          Remove-Item -Force ".github\workflows\apply-zhice-screenshot-capture-once.yml"
+          if (Test-Path "build-qt") { Remove-Item -Recurse -Force "build-qt" }
+          if (Test-Path "ui-screenshots") { Remove-Item -Recurse -Force "ui-screenshots" }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add real Qt screenshot capture for Zhice documentation"
+          git push origin zhice-copyright-screenshots
