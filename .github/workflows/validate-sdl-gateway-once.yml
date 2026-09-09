@@ -117,3 +117,5 @@ jobs:
         run: |
           if (-not (Test-Path "integration/sdl_gateway.openapi.yaml")) { throw "OpenAPI contract missing" }
           if (-not (Test-Path "docs/SELF_DRIVING_LAB_GATEWAY_CN.md")) { throw "SDL gateway documentation missing" }
+
+# Re-run after the Qt no-ASCII compatibility fix; validates all three network surfaces.
