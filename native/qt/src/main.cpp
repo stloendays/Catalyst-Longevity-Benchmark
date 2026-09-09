@@ -3,6 +3,7 @@
 #include "csvreader.h"
 #include "documentanalyzer.h"
 #include "evidencepacket.h"
+#include "integrationgateway.h"
 #include "mainwindow.h"
 #include "projectstore.h"
 #include "reportexporter.h"
@@ -686,6 +687,26 @@ int main(int argc, char* argv[]) {
         const auto referenceMatches = catalyst::ReferenceKnowledgeBase::matchExperimentContext(builtInDatasets.front().records);
         if (referenceMatches.isEmpty() || referenceMatches.front().relevanceScore < 45) return 33;
 
+        catalyst::IntegrationGateway selfTestGateway;
+        catalyst::IntegrationGatewayConfig selfTestGatewayConfig;
+        selfTestGatewayConfig.bindAddress = QStringLiteral("127.0.0.1");
+        selfTestGatewayConfig.controlPort = 0;
+        selfTestGatewayConfig.eventPort = 0;
+        selfTestGatewayConfig.instrumentPort = 0;
+        selfTestGatewayConfig.accessToken = QStringLiteral("self-test-token-0123456789abcdef");
+        QString gatewayTestMessage;
+        if (!selfTestGateway.start(selfTestGatewayConfig, &gatewayTestMessage)) return 35;
+        if (!selfTestGateway.isRunning()
+            || selfTestGateway.controlPort() == 0
+            || selfTestGateway.eventPort() == 0
+            || selfTestGateway.instrumentPort() == 0
+            || selfTestGateway.accessToken() != selfTestGatewayConfig.accessToken) return 36;
+        const auto gatewayCapabilities = selfTestGateway.capabilities();
+        if (gatewayCapabilities.value(QStringLiteral("safety")).toObject()
+                .value(QStringLiteral("hardware_actuation")).toBool(true)) return 37;
+        selfTestGateway.stop();
+        if (selfTestGateway.isRunning()) return 38;
+
         const auto records = catalyst::CsvReader::demoData();
         const auto result = catalyst::AnalysisEngine::analyze(records);
         if (result.totalObservations != 6 || result.catalysts.size() != 2) return 2;
@@ -852,8 +873,23 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    catalyst::IntegrationGateway integrationGateway;
+    const auto integrationConfig = catalyst::IntegrationGateway::configFromArguments(app.arguments());
+    QString integrationMessage;
+    const bool integrationStarted = !integrationConfig.enabled
+        || integrationGateway.start(integrationConfig, &integrationMessage);
+
     catalyst::MainWindow window;
     applyWindowPolish(window);
+    if (!integrationConfig.enabled) {
+        window.statusBar()->showMessage(QStringLiteral("自驱动实验室接口已禁用。"), 8000);
+    } else if (!integrationStarted) {
+        window.statusBar()->showMessage(QStringLiteral("自驱动实验室接口未启动：%1").arg(integrationMessage), 15000);
+    } else {
+        window.statusBar()->showMessage(integrationMessage, 8000);
+    }
     window.show();
-    return app.exec();
+    const int exitCode = app.exec();
+    integrationGateway.stop();
+    return exitCode;
 }
