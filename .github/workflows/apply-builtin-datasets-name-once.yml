@@ -1,0 +1,32 @@
+name: Apply Built-in Datasets and Product Name Once
+
+on:
+  push:
+    branches: [builtin-datasets-copyright-name]
+    paths:
+      - ".github/workflows/apply-builtin-datasets-name-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: builtin-datasets-copyright-name
+          fetch-depth: 0
+
+      - name: Apply source changes
+        run: python tools/apply_builtin_datasets_and_name.py
+
+      - name: Commit source changes and cleanup
+        shell: bash
+        run: |
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          rm -f tools/apply_builtin_datasets_and_name.py .github/workflows/apply-builtin-datasets-name-once.yml
+          git add native/qt/src/mainwindow.cpp native/qt/src/main.cpp native/qt/src/reportexporter.cpp tools/apply_builtin_datasets_and_name.py .github/workflows/apply-builtin-datasets-name-once.yml
+          git commit -m "Integrate built-in datasets and update product name"
+          git push origin builtin-datasets-copyright-name
