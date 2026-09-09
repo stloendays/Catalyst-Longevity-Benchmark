@@ -1,0 +1,73 @@
+name: Validate SDL Gateway Once
+
+on:
+  push:
+    branches: [sdl-integration-gateway]
+    paths:
+      - ".github/workflows/validate-sdl-gateway-once.yml"
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sdl-integration-gateway
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+
+      - name: Build native desktop app
+        shell: pwsh
+        run: cmake --build build-qt --config Release --parallel
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Smoke-test SDL HTTP control port
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            $health = $null
+            for ($i = 0; $i -lt 20; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:49321/v1/health" -Method Get -TimeoutSec 2
+                break
+              } catch {}
+            }
+            if (-not $health -or -not $health.ok) { throw "SDL health endpoint did not become ready" }
+            $cap = Invoke-RestMethod -Uri "http://127.0.0.1:49321/v1/capabilities" -Method Get -TimeoutSec 3
+            if ($cap.ports.control_http -ne 49321) { throw "Unexpected SDL control port" }
+            if ($cap.safety.hardware_actuation -ne $false) { throw "Hardware actuation must remain disabled" }
+            $pair = Invoke-RestMethod -Uri "http://127.0.0.1:49321/v1/pairing" -Method Get -TimeoutSec 3
+            if ([string]::IsNullOrWhiteSpace($pair.token)) { throw "Loopback pairing token missing" }
+            $headers = @{ Authorization = "Bearer $($pair.token)" }
+            $state = Invoke-RestMethod -Uri "http://127.0.0.1:49321/v1/state" -Headers $headers -Method Get -TimeoutSec 3
+            if ($state.control_port -ne 49321) { throw "Authenticated SDL state endpoint failed" }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Verify interface contract files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "integration/sdl_gateway.openapi.yaml")) { throw "OpenAPI contract missing" }
+          if (-not (Test-Path "docs/SELF_DRIVING_LAB_GATEWAY_CN.md")) { throw "SDL gateway documentation missing" }
