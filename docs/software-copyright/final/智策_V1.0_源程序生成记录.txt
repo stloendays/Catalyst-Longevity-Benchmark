@@ -1,0 +1,41 @@
+软件全称：催化剂长期稳定性评估与实验决策系统
+软件简称：智策
+版本号：V1.0
+交存方式：前30页 + 后30页
+源程序非空行总数：6976
+本鉴别材料页数：60
+每页源程序行数：50
+第一方源码：native/qt/src 的 .cpp/.h
+第三方依赖源码未纳入。
+源文件顺序：
+- native/qt/src/main.cpp
+- native/qt/src/analysisengine.h
+- native/qt/src/analysisengine.cpp
+- native/qt/src/builtindatasets.h
+- native/qt/src/builtindatasets.cpp
+- native/qt/src/chartwidget.h
+- native/qt/src/chartwidget.cpp
+- native/qt/src/conditionguard.h
+- native/qt/src/conditionguard.cpp
+- native/qt/src/csvreader.h
+- native/qt/src/csvreader.cpp
+- native/qt/src/documentanalyzer.h
+- native/qt/src/documentanalyzer.cpp
+- native/qt/src/evidencepacket.h
+- native/qt/src/evidencepacket.cpp
+- native/qt/src/evidencepage.h
+- native/qt/src/evidencepage.cpp
+- native/qt/src/integrationgateway.h
+- native/qt/src/integrationgateway.cpp
+- native/qt/src/mainwindow.h
+- native/qt/src/mainwindow.cpp
+- native/qt/src/models.h
+- native/qt/src/projectstore.h
+- native/qt/src/projectstore.cpp
+- native/qt/src/referenceknowledge.h
+- native/qt/src/referenceknowledge.cpp
+- native/qt/src/reportexporter.h
+- native/qt/src/reportexporter.cpp
+- native/qt/src/researchadvisor.h
+- native/qt/src/researchadvisor.cpp
+- native/qt/src/settingspolish.cpp
