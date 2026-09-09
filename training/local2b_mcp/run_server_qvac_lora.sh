@@ -13,6 +13,7 @@ Required:
 Options:
   --trainer FILE           llama-finetune-lora binary
   --model FILE             Base Q4 GGUF
+  --lora-init FILE         Continue training from an existing LoRA adapter
   --rank N                 LoRA rank (default: 4)
   --alpha N                LoRA alpha (default: 8)
   --modules LIST           Target modules (default: attn_q,attn_v)
@@ -36,6 +37,7 @@ TRAINER=/home/ubuntu/qvac-trainer-step3/llama-finetune-lora
 MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
 DATA=
 OUTPUT=
+LORA_INIT=
 RANK=4
 ALPHA=8
 MODULES=attn_q,attn_v
@@ -59,6 +61,7 @@ while [ "$#" -gt 0 ]; do
     --model) MODEL=$2; shift 2 ;;
     --data) DATA=$2; shift 2 ;;
     --output) OUTPUT=$2; shift 2 ;;
+    --lora-init) LORA_INIT=$2; shift 2 ;;
     --rank) RANK=$2; shift 2 ;;
     --alpha) ALPHA=$2; shift 2 ;;
     --modules) MODULES=$2; shift 2 ;;
@@ -94,12 +97,18 @@ for path in "$TRAINER" "$MODEL" "$DATA"; do
     exit 3
   fi
 done
+if [ -n "$LORA_INIT" ] && [ ! -s "$LORA_INIT" ]; then
+  echo "Initial LoRA adapter missing or empty: $LORA_INIT" >&2
+  exit 3
+fi
 
 mkdir -p "$(dirname "$OUTPUT")" "$(dirname "$LOG")" "$(dirname "$RESULT")" "$CHECKPOINT_DIR"
 rm -f "$OUTPUT" "$LOG" "$RESULT"
 
 MODEL_SHA=$(sha256sum "$MODEL" | awk '{print $1}')
 DATA_SHA=$(sha256sum "$DATA" | awk '{print $1}')
+LORA_INIT_SHA=""
+if [ -n "$LORA_INIT" ]; then LORA_INIT_SHA=$(sha256sum "$LORA_INIT" | awk '{print $1}'); fi
 WAS_ACTIVE=0
 
 restore_service() {
@@ -117,27 +126,31 @@ fi
 echo "SERVER_QVAC_TRAIN_START=$(date -Is)"
 echo "BASE_MODEL_SHA256=$MODEL_SHA"
 echo "DATA_SHA256=$DATA_SHA"
+[ -n "$LORA_INIT_SHA" ] && echo "LORA_INIT_SHA256=$LORA_INIT_SHA"
 free -h || true
+
+ARGS=(
+  -m "$MODEL"
+  -f "$DATA"
+  --assistant-loss-only
+  --num-epochs "$EPOCHS"
+  --lora-rank "$RANK"
+  --lora-alpha "$ALPHA"
+  --lora-modules "$MODULES"
+  --lora-seed "$SEED"
+  --learning-rate "$LR"
+  --weight-decay 0
+  --lr-scheduler constant
+  --checkpoint-save-steps "$CHECKPOINT_STEPS"
+  --checkpoint-save-dir "$CHECKPOINT_DIR"
+  --output-adapter "$OUTPUT"
+  -c "$CONTEXT" -b "$BATCH" -ub "$UBATCH" -ngl 0 -fa off
+)
+if [ -n "$LORA_INIT" ]; then ARGS+=(--lora "$LORA_INIT"); fi
 
 START=$(date +%s)
 set +e
-timeout "$TIMEOUT_SECONDS" "$TRAINER" \
-  -m "$MODEL" \
-  -f "$DATA" \
-  --assistant-loss-only \
-  --num-epochs "$EPOCHS" \
-  --lora-rank "$RANK" \
-  --lora-alpha "$ALPHA" \
-  --lora-modules "$MODULES" \
-  --lora-seed "$SEED" \
-  --learning-rate "$LR" \
-  --weight-decay 0 \
-  --lr-scheduler constant \
-  --checkpoint-save-steps "$CHECKPOINT_STEPS" \
-  --checkpoint-save-dir "$CHECKPOINT_DIR" \
-  --output-adapter "$OUTPUT" \
-  -c "$CONTEXT" -b "$BATCH" -ub "$UBATCH" -ngl 0 -fa off \
-  2>&1 | tee "$LOG"
+timeout "$TIMEOUT_SECONDS" "$TRAINER" "${ARGS[@]}" 2>&1 | tee "$LOG"
 RC=${PIPESTATUS[0]}
 set -e
 END=$(date +%s)
@@ -172,6 +185,8 @@ fi
   echo "base_model_sha256=$MODEL_SHA"
   echo "data=$DATA"
   echo "data_sha256=$DATA_SHA"
+  echo "lora_init=$LORA_INIT"
+  echo "lora_init_sha256=$LORA_INIT_SHA"
   echo "adapter=$OUTPUT"
   echo "adapter_sha256=$ADAPTER_SHA"
   echo "adapter_bytes=$ADAPTER_BYTES"
