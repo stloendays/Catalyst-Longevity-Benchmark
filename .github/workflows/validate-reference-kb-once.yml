@@ -26,6 +26,8 @@ jobs:
           if ($planning.Count -lt 3) { throw "experiment planning controls missing" }
           $matching = Select-String -Path "native/qt/src/researchadvisor.cpp" -Pattern "matchExperimentContext\(rows\)"
           if (-not $matching) { throw "per-catalyst public reference matching missing" }
+          $familyGate = Select-String -Path "native/qt/src/referenceknowledge.cpp" -Pattern "familyScore == 0"
+          if (-not $familyGate) { throw "catalyst-family compatibility gate missing" }
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -63,4 +65,4 @@ jobs:
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
 
-# Final branch-only native validation after per-catalyst public reference matching.
+# Final branch-only native validation after adding catalyst-family compatibility gating.
