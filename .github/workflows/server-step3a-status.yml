@@ -25,31 +25,27 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           ROOT=/home/ubuntu/local2b-training/step3a-recover
-          SMOKE=/home/ubuntu/local2b-training/step3b-continuation-smoke
+          STAGE3B=/home/ubuntu/local2b-training/step3b
           ADAPTER="$ROOT/local2b-mcp-step3a-r4-qv.gguf"
           INSTALLED=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
           date -Is
           echo '=== TRAINERS ==='
-          ps -eo pid,ppid,lstart,etime,%cpu,%mem,args | grep -E 'llama-finetune-lora|timeout 900|timeout 14400' | grep -v grep || true
-          echo '=== STAGE3A ADAPTER ==='
-          if [ -s "$ADAPTER" ]; then
-            ls -lh "$ADAPTER"
-            sha256sum "$ADAPTER"
-          else
-            echo 'STAGE3A_ADAPTER_MISSING'
-          fi
-          echo '=== INSTALLED ADAPTER ==='
+          ps -eo pid,ppid,lstart,etime,%cpu,%mem,args | grep -E 'llama-finetune-lora|timeout 14400' | grep -v grep || true
+          echo '=== STAGE3A INSTALLED ==='
           if [ -s "$INSTALLED" ]; then
             ls -lh "$INSTALLED"
             sha256sum "$INSTALLED"
           else
             echo 'INSTALLED_ADAPTER_MISSING'
           fi
-          echo '=== CONTINUATION SMOKE ==='
-          ls -lah "$SMOKE" 2>/dev/null || true
-          tail -100 "$SMOKE/train.log" 2>/dev/null || true
-          echo '=== STAGE3B ==='
-          ls -lah /home/ubuntu/local2b-training/step3b 2>/dev/null || echo 'STAGE3B_NOT_STARTED'
+          echo '=== STAGE3B FILES ==='
+          ls -lah "$STAGE3B" 2>/dev/null || echo 'STAGE3B_NOT_STARTED'
+          echo '=== STAGE3B MANIFEST ==='
+          cat "$STAGE3B/manifest.json" 2>/dev/null || true
+          echo '=== STAGE3B LOG ==='
+          tail -120 "$STAGE3B/train.log" 2>/dev/null || true
+          echo '=== STAGE3B CHECKPOINTS ==='
+          find "$STAGE3B/checkpoints" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p %s bytes\n' 2>/dev/null | sort | tail -20 || true
           echo '=== MEMORY ==='
           free -h
           echo '=== SERVICE ==='
@@ -59,4 +55,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-# continuation-smoke verification
+# formal-stage3b verification
