@@ -4,11 +4,8 @@ from pathlib import Path
 def apply(path, pairs):
     p = Path(path)
     text = p.read_text(encoding="utf-8")
-    original = text
     for old, new in pairs:
         text = text.replace(old, new)
-    if text == original:
-        raise RuntimeError(f"no changes applied: {path}")
     p.write_text(text, encoding="utf-8")
 
 
