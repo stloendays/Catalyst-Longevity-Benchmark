@@ -528,25 +528,25 @@ void polishChineseCopy(catalyst::MainWindow& window) {
     for (auto* button : buttons) {
         const QString text = button->text();
         if (text == QStringLiteral("资料分析")) {
-            button->setText(QStringLiteral("资料证据"));
+            button->setText(QStringLiteral("资料"));
         } else if (text == QStringLiteral("寿命分析")) {
-            button->setText(QStringLiteral("寿命与条件"));
+            button->setText(QStringLiteral("分析"));
         } else if (text == QStringLiteral("AI 工作区")) {
-            button->setText(QStringLiteral("AI 智能研判"));
+            button->setText(QStringLiteral("AI 助手"));
         } else if (text == QStringLiteral("载入示例")) {
-            button->setText(QStringLiteral("载入示例数据"));
+            button->setText(QStringLiteral("示例数据"));
         } else if (text == QStringLiteral("选择 CSV / Excel")) {
             button->setText(QStringLiteral("选择数据文件"));
         } else if (text == QStringLiteral("选择 PDF / 资料文件")) {
             button->setText(QStringLiteral("选择资料文件"));
         } else if (text == QStringLiteral("绑定")) {
-            button->setText(QStringLiteral("绑定证据"));
+            button->setText(QStringLiteral("关联"));
         } else if (text == QStringLiteral("解除")) {
-            button->setText(QStringLiteral("解除绑定"));
+            button->setText(QStringLiteral("取消关联"));
         } else if (text == QStringLiteral("条件已复核（仅上下文）")) {
-            button->setText(QStringLiteral("完成条件复核"));
+            button->setText(QStringLiteral("确认"));
         } else if (text == QStringLiteral("退回待复核")) {
-            button->setText(QStringLiteral("退回复核"));
+            button->setText(QStringLiteral("取消确认"));
         }
     }
 }
@@ -555,21 +555,21 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
     if (text == QStringLiteral("项目")) {
         *icon = UiIcon::Project;
         *tooltip = QStringLiteral("项目文件与保存管理");
-    } else if (text == QStringLiteral("总览")) {
+    } else if (text == QStringLiteral("总览") || text == QStringLiteral("首页")) {
         *icon = UiIcon::Dashboard;
-        *tooltip = QStringLiteral("查看长期表现总览");
-    } else if (text == QStringLiteral("数据导入")) {
+        *tooltip = QStringLiteral("查看首页概况");
+    } else if (text == QStringLiteral("数据导入") || text == QStringLiteral("数据")) {
         *icon = UiIcon::Import;
         *tooltip = QStringLiteral("导入 CSV 或 Excel 实验数据");
-    } else if (text == QStringLiteral("资料证据")) {
+    } else if (text == QStringLiteral("资料证据") || text == QStringLiteral("资料")) {
         *icon = UiIcon::Document;
-        *tooltip = QStringLiteral("解析论文与资料证据");
-    } else if (text == QStringLiteral("寿命与条件")) {
+        *tooltip = QStringLiteral("导入并整理论文资料");
+    } else if (text == QStringLiteral("寿命与条件") || text == QStringLiteral("分析")) {
         *icon = UiIcon::Analysis;
-        *tooltip = QStringLiteral("查看寿命阈值与条件可比性");
-    } else if (text == QStringLiteral("AI 智能研判")) {
+        *tooltip = QStringLiteral("查看寿命指标和条件检查");
+    } else if (text == QStringLiteral("AI 智能研判") || text == QStringLiteral("AI 助手")) {
         *icon = UiIcon::Ai;
-        *tooltip = QStringLiteral("进入 AI 综合研判工作区");
+        *tooltip = QStringLiteral("使用 AI 助手分析已确认资料");
     } else if (text == QStringLiteral("设置")) {
         *icon = UiIcon::Settings;
         *tooltip = QStringLiteral("软件信息与运行设置");
@@ -585,7 +585,7 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
     } else if (text == QStringLiteral("另存为")) {
         *icon = UiIcon::SaveAs;
         *tooltip = QStringLiteral("将当前项目保存为新文件");
-    } else if (text == QStringLiteral("载入示例数据")) {
+    } else if (text == QStringLiteral("载入示例数据") || text == QStringLiteral("示例数据")) {
         *icon = UiIcon::Demo;
         *tooltip = QStringLiteral("载入内置示例数据快速体验");
     } else if (text == QStringLiteral("导入数据") || text == QStringLiteral("选择数据文件")) {
@@ -600,18 +600,18 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
     } else if (text == QStringLiteral("选择资料文件")) {
         *icon = UiIcon::Document;
         *tooltip = QStringLiteral("选择 PDF、TXT、Markdown、CSV 或 TSV 资料");
-    } else if (text == QStringLiteral("绑定证据")) {
+    } else if (text == QStringLiteral("绑定证据") || text == QStringLiteral("关联")) {
         *icon = UiIcon::Link;
-        *tooltip = QStringLiteral("将选中候选绑定到催化剂与时间点");
-    } else if (text == QStringLiteral("解除绑定")) {
+        *tooltip = QStringLiteral("将选中内容关联到催化剂和时间");
+    } else if (text == QStringLiteral("解除绑定") || text == QStringLiteral("取消关联")) {
         *icon = UiIcon::Unlink;
-        *tooltip = QStringLiteral("解除当前证据绑定");
-    } else if (text == QStringLiteral("完成条件复核")) {
+        *tooltip = QStringLiteral("取消当前资料关联");
+    } else if (text == QStringLiteral("完成条件复核") || text == QStringLiteral("确认")) {
         *icon = UiIcon::Check;
-        *tooltip = QStringLiteral("确认已人工核对关键实验条件，仅作为上下文证据");
-    } else if (text == QStringLiteral("退回复核")) {
+        *tooltip = QStringLiteral("确认已核对这条资料的关键实验条件");
+    } else if (text == QStringLiteral("退回复核") || text == QStringLiteral("取消确认")) {
         *icon = UiIcon::Undo;
-        *tooltip = QStringLiteral("将该证据退回待复核状态");
+        *tooltip = QStringLiteral("取消确认，重新检查这条资料");
     } else {
         return false;
     }

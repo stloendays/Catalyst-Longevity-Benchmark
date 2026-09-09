@@ -143,9 +143,9 @@ QFrame* decisionCard(const QString& title, QLabel** statusLabel, QLabel** detail
 
     auto* titleLabel = new QLabel(title);
     titleLabel->setObjectName(QStringLiteral("decisionTitle"));
-    auto* state = new QLabel(QStringLiteral("等待数据"));
+    auto* state = new QLabel(QStringLiteral("暂无数据"));
     state->setObjectName(QStringLiteral("statusNeutral"));
-    auto* detail = new QLabel(QStringLiteral("尚未形成可审计判断。"));
+    auto* detail = new QLabel(QStringLiteral("暂无结果。"));
     detail->setWordWrap(true);
     detail->setObjectName(QStringLiteral("decisionDetail"));
 
@@ -282,7 +282,7 @@ QWidget* MainWindow::buildSidebar() {
     const QStringList labels = {
         QStringLiteral("项目"),
         QStringLiteral("总览"),
-        QStringLiteral("数据导入"),
+        QStringLiteral("数据"),
         QStringLiteral("资料分析"),
         QStringLiteral("寿命分析"),
         QStringLiteral("AI 工作区"),
@@ -314,7 +314,7 @@ QWidget* MainWindow::buildProjectPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(18);
-    layout->addWidget(heading(QStringLiteral("项目工作区")));
+    layout->addWidget(heading(QStringLiteral("项目")));
     layout->addWidget(muted(QStringLiteral(
         "项目文件使用本地 SQLite 保存实验记录、实验条件和资料证据候选。关闭软件后可以直接重新打开 .clrproj 继续分析。")));
 
@@ -363,7 +363,7 @@ QWidget* MainWindow::buildOverviewPage() {
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
-    titleBox->addWidget(heading(QStringLiteral("总览  Dashboard")));
+    titleBox->addWidget(heading(QStringLiteral("首页")));
     titleBox->addWidget(muted(QStringLiteral(
         "导入 CSV 或 Excel 后，直接计算保持率、删失感知寿命阈值与实验条件守门结果。")));
     top->addLayout(titleBox, 1);
@@ -387,20 +387,20 @@ QWidget* MainWindow::buildOverviewPage() {
     layout->addLayout(top);
 
     auto* decisionTop = new QHBoxLayout;
-    auto* decisionHeading = new QLabel(QStringLiteral("决策状态  ·  Decision readiness"));
+    auto* decisionHeading = new QLabel(QStringLiteral("分析概况"));
     decisionHeading->setObjectName(QStringLiteral("sectionTitle"));
     decisionTop->addWidget(decisionHeading);
     decisionTop->addStretch();
-    decisionTop->addWidget(muted(QStringLiteral("先判断能不能比，再看谁领先。状态色只表达证据就绪度，不表达催化剂优劣。")));
+    decisionTop->addWidget(muted(QStringLiteral("先检查数据和实验条件，再查看比较结果。状态颜色只表示当前资料是否完整。")));
     layout->addLayout(decisionTop);
 
     auto* decisions = new QGridLayout;
     decisions->setHorizontalSpacing(12);
     decisions->setVerticalSpacing(12);
-    decisions->addWidget(decisionCard(QStringLiteral("实验条件可比性"), &decisionComparability_, &decisionComparabilityDetail_), 0, 0);
-    decisions->addWidget(decisionCard(QStringLiteral("共同时间领先者"), &decisionLeader_, &decisionLeaderDetail_), 0, 1);
-    decisions->addWidget(decisionCard(QStringLiteral("T90 是否测到"), &decisionT90_, &decisionT90Detail_), 0, 2);
-    decisions->addWidget(decisionCard(QStringLiteral("证据包就绪度"), &decisionEvidence_, &decisionEvidenceDetail_), 0, 3);
+    decisions->addWidget(decisionCard(QStringLiteral("条件检查"), &decisionComparability_, &decisionComparabilityDetail_), 0, 0);
+    decisions->addWidget(decisionCard(QStringLiteral("当前领先"), &decisionLeader_, &decisionLeaderDetail_), 0, 1);
+    decisions->addWidget(decisionCard(QStringLiteral("T90 状态"), &decisionT90_, &decisionT90Detail_), 0, 2);
+    decisions->addWidget(decisionCard(QStringLiteral("资料状态"), &decisionEvidence_, &decisionEvidenceDetail_), 0, 3);
     layout->addLayout(decisions);
 
     auto* metrics = new QGridLayout;
@@ -417,9 +417,9 @@ QWidget* MainWindow::buildOverviewPage() {
     auto* chartLayout = new QVBoxLayout(chartFrame);
     chartLayout->setContentsMargins(18, 16, 18, 16);
     auto* chartHead = new QHBoxLayout;
-    auto* chartTitle = new QLabel(QStringLiteral("长期性能轨迹  ·  Long-term performance"));
+    auto* chartTitle = new QLabel(QStringLiteral("长期性能曲线"));
     chartTitle->setObjectName(QStringLiteral("sectionTitle"));
-    auto* chartHint = muted(QStringLiteral("悬浮查看精确点 · 单击数据点聚焦曲线 · 再次单击取消"));
+    auto* chartHint = muted(QStringLiteral("悬停查看数据 · 单击曲线可聚焦，再次单击取消"));
     chartHead->addWidget(chartTitle);
     chartHead->addStretch();
     chartHead->addWidget(chartHint);
@@ -432,7 +432,7 @@ QWidget* MainWindow::buildOverviewPage() {
     tableFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* tableLayout = new QVBoxLayout(tableFrame);
     tableLayout->setContentsMargins(18, 16, 18, 16);
-    auto* tableTitle = new QLabel(QStringLiteral("催化剂概览  ·  Decision summary"));
+    auto* tableTitle = new QLabel(QStringLiteral("催化剂概览"));
     tableTitle->setObjectName(QStringLiteral("sectionTitle"));
     tableLayout->addWidget(tableTitle);
     summaryTable_ = new QTableWidget(0, 7);
@@ -454,7 +454,7 @@ QWidget* MainWindow::buildDataPage() {
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
-    titleBox->addWidget(heading(QStringLiteral("数据导入")));
+    titleBox->addWidget(heading(QStringLiteral("数据")));
     titleBox->addWidget(muted(QStringLiteral(
         "支持 CSV 与 Excel .xlsx。至少包含：催化剂、时间、性能；Excel 会自动扫描工作表并选择含必需列的工作表。")));
     top->addLayout(titleBox, 1);
@@ -491,7 +491,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
-    layout->addWidget(heading(QStringLiteral("寿命与条件可比性分析")));
+    layout->addWidget(heading(QStringLiteral("分析")));
     layout->addWidget(muted(QStringLiteral(
         "T95 / T90 / T80 保留离散观测的删失语义；直接跨催化剂结论同时受实验条件守门约束。")));
 
@@ -499,7 +499,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     guardFrame->setObjectName(QStringLiteral("panel"));
     auto* guardLayout = new QVBoxLayout(guardFrame);
     guardLayout->setContentsMargins(18, 16, 18, 16);
-    auto* guardTitle = new QLabel(QStringLiteral("实验条件守门"));
+    auto* guardTitle = new QLabel(QStringLiteral("条件检查"));
     guardTitle->setObjectName(QStringLiteral("sectionTitle"));
     conditionStatusLabel_ = new QLabel(QStringLiteral("—"));
     conditionStatusLabel_->setObjectName(QStringLiteral("statusNeutral"));
@@ -526,7 +526,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* note = new QFrame;
     note->setObjectName(QStringLiteral("infoPanel"));
     auto* noteLayout = new QVBoxLayout(note);
-    noteLayout->addWidget(new QLabel(QStringLiteral("证据语义")));
+    noteLayout->addWidget(new QLabel(QStringLiteral("结果说明")));
     noteLayout->addWidget(muted(QStringLiteral(
         "例如 T90 = 20–50 h 表示首次通过阈值只被观测数据约束在该区间；不会线性插值成伪精确寿命。若温度、空速、压力或进料比明确不一致，也不会输出直接领先者。")));
     layout->addWidget(note);
@@ -538,7 +538,7 @@ QWidget* MainWindow::buildAiPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
-    layout->addWidget(heading(QStringLiteral("AI 智能研判")));
+    layout->addWidget(heading(QStringLiteral("AI 助手")));
     layout->addWidget(muted(QStringLiteral(
         "AI 只在受控证据边界内工作。先构建证据包，再完成分析、证据审查与可追溯输出；任何阶段都不会自动改写原始实验观测。")));
 
@@ -547,10 +547,10 @@ QWidget* MainWindow::buildAiPage() {
     auto* readinessLayout = new QHBoxLayout(readiness);
     readinessLayout->setContentsMargins(20, 16, 20, 16);
     readinessLayout->setSpacing(14);
-    auto* readinessTitle = new QLabel(QStringLiteral("证据就绪度"));
+    auto* readinessTitle = new QLabel(QStringLiteral("资料准备"));
     readinessTitle->setObjectName(QStringLiteral("sectionTitle"));
-    aiEvidenceDetail_ = muted(QStringLiteral("实验数据、资料候选与人工复核状态保持分层。"));
-    aiEvidenceStatus_ = new QLabel(QStringLiteral("等待证据"));
+    aiEvidenceDetail_ = muted(QStringLiteral("确认后的资料可以提供给 AI，未确认内容不会自动使用。"));
+    aiEvidenceStatus_ = new QLabel(QStringLiteral("暂无资料"));
     aiEvidenceStatus_->setObjectName(QStringLiteral("statusNeutral"));
     readinessLayout->addWidget(readinessTitle);
     readinessLayout->addWidget(aiEvidenceDetail_, 1);
@@ -561,18 +561,18 @@ QWidget* MainWindow::buildAiPage() {
     stages->setHorizontalSpacing(12);
     stages->setVerticalSpacing(12);
     const QStringList titles = {
-        QStringLiteral("01  证据包"), QStringLiteral("02  AI 分析器"),
-        QStringLiteral("03  证据审查器"), QStringLiteral("04  审计输出")
+        QStringLiteral("01  已确认资料"), QStringLiteral("02  智能分析"),
+        QStringLiteral("03  结果核对"), QStringLiteral("04  分析记录")
     };
     const QStringList descriptions = {
-        QStringLiteral("只纳入已绑定并完成人工条件复核的上下文证据。"),
-        QStringLiteral("基于证据包生成候选解释、比较与下一步建议。"),
-        QStringLiteral("检查引用、条件错配、删失语义与过度外推。"),
-        QStringLiteral("保留输入边界、证据 ID、审查状态与最终结论。")
+        QStringLiteral("只使用已关联催化剂、时间并由你确认的资料。"),
+        QStringLiteral("结合实验数据和已确认资料生成分析与建议。"),
+        QStringLiteral("检查资料来源、实验条件和结论是否对应。"),
+        QStringLiteral("保存本次使用的资料、确认状态和分析结果。")
     };
     const QStringList states = {
-        QStringLiteral("可审计"), QStringLiteral("待接入 API"),
-        QStringLiteral("待接入 API"), QStringLiteral("本地基础已就绪")
+        QStringLiteral("可使用"), QStringLiteral("未配置"),
+        QStringLiteral("未配置"), QStringLiteral("已开启")
     };
     for (int i = 0; i < titles.size(); ++i) {
         auto* card = new QFrame;
@@ -597,7 +597,7 @@ QWidget* MainWindow::buildAiPage() {
     boundary->setObjectName(QStringLiteral("infoPanel"));
     auto* boundaryLayout = new QVBoxLayout(boundary);
     boundaryLayout->setContentsMargins(18, 14, 18, 14);
-    auto* boundaryTitle = new QLabel(QStringLiteral("AI 输入边界"));
+    auto* boundaryTitle = new QLabel(QStringLiteral("AI 使用范围"));
     boundaryTitle->setObjectName(QStringLiteral("sectionTitle"));
     boundaryLayout->addWidget(boundaryTitle);
     boundaryLayout->addWidget(muted(QStringLiteral(
@@ -611,7 +611,7 @@ QWidget* MainWindow::buildSettingsPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(34, 28, 34, 28);
     layout->setSpacing(16);
-    layout->addWidget(heading(QStringLiteral("设置与软件信息")));
+    layout->addWidget(heading(QStringLiteral("设置")));
 
     auto* card = new QFrame;
     card->setObjectName(QStringLiteral("panel"));
@@ -887,7 +887,7 @@ void MainWindow::refreshAnalysisViews() {
 }
     if (conditionMessageLabel_) {
         conditionMessageLabel_->setText(analysis_.conditionAudit.message.isEmpty()
-            ? QStringLiteral("尚未提供可审计数据。")
+            ? QStringLiteral("暂无可用数据。")
             : analysis_.conditionAudit.message);
     }
     if (conditionMismatchTable_) {
@@ -927,32 +927,32 @@ void MainWindow::refreshDecisionOverview() {
     if (!decisionComparability_) return;
 
     if (analysis_.totalObservations <= 0) {
-        setStatusChip(decisionComparability_, QStringLiteral("等待数据"), QStringLiteral("statusNeutral"));
+        setStatusChip(decisionComparability_, QStringLiteral("暂无数据"), QStringLiteral("statusNeutral"));
         decisionComparabilityDetail_->setText(QStringLiteral("导入实验数据后检查温度、空速、压力和进料条件。"));
     } else if (analysis_.conditionAudit.blocksDirectRanking()) {
-        setStatusChip(decisionComparability_, QStringLiteral("禁止直接排名"), QStringLiteral("statusBad"));
-        decisionComparabilityDetail_->setText(QStringLiteral("检测到明确条件错配；需要先处理条件差异。"));
+        setStatusChip(decisionComparability_, QStringLiteral("条件不一致"), QStringLiteral("statusBad"));
+        decisionComparabilityDetail_->setText(QStringLiteral("不同催化剂的实验条件不一致，暂不进行直接比较。"));
     } else if (analysis_.conditionAudit.status == ConditionAuditStatus::MatchedOnProvidedConditions) {
-        setStatusChip(decisionComparability_, QStringLiteral("允许直接比较"), QStringLiteral("statusGood"));
-        decisionComparabilityDetail_->setText(QStringLiteral("已提供的实验条件一致，可继续查看共同时间表现。"));
+        setStatusChip(decisionComparability_, QStringLiteral("条件一致"), QStringLiteral("statusGood"));
+        decisionComparabilityDetail_->setText(QStringLiteral("已填写的实验条件一致，可以继续比较。"));
     } else {
-        setStatusChip(decisionComparability_, QStringLiteral("条件信息不足"), QStringLiteral("statusWarn"));
-        decisionComparabilityDetail_->setText(QStringLiteral("未发现明确冲突，但条件字段不足以形成强可比性结论。"));
+        setStatusChip(decisionComparability_, QStringLiteral("信息不完整"), QStringLiteral("statusWarn"));
+        decisionComparabilityDetail_->setText(QStringLiteral("暂未发现冲突，但实验条件填写不完整。"));
     }
 
     if (analysis_.totalObservations <= 0) {
-        setStatusChip(decisionLeader_, QStringLiteral("等待分析"), QStringLiteral("statusNeutral"));
-        decisionLeaderDetail_->setText(QStringLiteral("领先者只在共同可比时间点上计算。"));
+        setStatusChip(decisionLeader_, QStringLiteral("暂无结果"), QStringLiteral("statusNeutral"));
+        decisionLeaderDetail_->setText(QStringLiteral("有共同观测时间后才会显示比较结果。"));
     } else if (analysis_.conditionAudit.blocksDirectRanking()) {
-        setStatusChip(decisionLeader_, QStringLiteral("排名已阻止"), QStringLiteral("statusBad"));
-        decisionLeaderDetail_->setText(QStringLiteral("条件守门优先于性能排序。"));
+        setStatusChip(decisionLeader_, QStringLiteral("暂不比较"), QStringLiteral("statusBad"));
+        decisionLeaderDetail_->setText(QStringLiteral("请先处理实验条件差异。"));
     } else if (analysis_.latestSharedTimeHours.has_value() && !analysis_.latestSharedLeader.isEmpty()) {
         setStatusChip(decisionLeader_, analysis_.latestSharedLeader, QStringLiteral("statusGood"));
-        decisionLeaderDetail_->setText(QStringLiteral("共同时间 %1 h；此状态不外推到未观测时间。")
+        decisionLeaderDetail_->setText(QStringLiteral("共同观测时间：%1 h。")
             .arg(QString::number(*analysis_.latestSharedTimeHours, 'g', 8)));
     } else {
-        setStatusChip(decisionLeader_, QStringLiteral("暂无共同时间点"), QStringLiteral("statusWarn"));
-        decisionLeaderDetail_->setText(QStringLiteral("当前轨迹无法在同一观测时间形成直接领先判断。"));
+        setStatusChip(decisionLeader_, QStringLiteral("无共同时间点"), QStringLiteral("statusWarn"));
+        decisionLeaderDetail_->setText(QStringLiteral("各催化剂暂时没有相同的观测时间。"));
     }
 
     const int totalCatalysts = analysis_.catalysts.size();
@@ -961,39 +961,39 @@ void MainWindow::refreshDecisionOverview() {
         if (summary.t90.status != ThresholdStatus::RightCensored) ++t90Touched;
     }
     if (totalCatalysts == 0) {
-        setStatusChip(decisionT90_, QStringLiteral("等待数据"), QStringLiteral("statusNeutral"));
+        setStatusChip(decisionT90_, QStringLiteral("暂无数据"), QStringLiteral("statusNeutral"));
         decisionT90Detail_->setText(QStringLiteral("T90 保留左删失、区间删失与右删失语义。"));
     } else if (t90Touched == totalCatalysts) {
-        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已触及").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusGood"));
-        decisionT90Detail_->setText(QStringLiteral("所有催化剂均已观测到 T90 阈值通过区间。"));
+        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已达到").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusGood"));
+        decisionT90Detail_->setText(QStringLiteral("所有催化剂都已观测到 T90。"));
     } else if (t90Touched > 0) {
-        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已触及").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusWarn"));
-        decisionT90Detail_->setText(QStringLiteral("%1 个仍为右删失：测试结束时尚未跌破 90%。").arg(totalCatalysts - t90Touched));
+        setStatusChip(decisionT90_, QStringLiteral("%1/%2 已达到").arg(t90Touched).arg(totalCatalysts), QStringLiteral("statusWarn"));
+        decisionT90Detail_->setText(QStringLiteral("还有 %1 个在测试结束时仍未达到 T90。").arg(totalCatalysts - t90Touched));
     } else {
-        setStatusChip(decisionT90_, QStringLiteral("尚未触及 T90"), QStringLiteral("statusWarn"));
-        decisionT90Detail_->setText(QStringLiteral("全部轨迹仍为右删失；这表示当前测试只给出寿命下界。"));
+        setStatusChip(decisionT90_, QStringLiteral("暂未达到 T90"), QStringLiteral("statusWarn"));
+        decisionT90Detail_->setText(QStringLiteral("测试结束时都未达到 T90，目前只能得到寿命下限。"));
     }
 
     if (!evidencePage_) return;
     const EvidencePacket packet = evidencePage_->evidencePacket();
     if (packet.readyForAi) {
-        setStatusChip(decisionEvidence_, QStringLiteral("可进入 AI · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
-        decisionEvidenceDetail_->setText(QStringLiteral("另有 %1 条尚未满足证据门槛。").arg(packet.pendingItems));
-        setStatusChip(aiEvidenceStatus_, QStringLiteral("证据包可用 · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
-        setStatusChip(aiPacketStageStatus_, QStringLiteral("可审计 · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
-        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("已形成受控 Evidence Packet；AI 只能读取通过人工条件复核的上下文。"));
+        setStatusChip(decisionEvidence_, QStringLiteral("已确认 %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        decisionEvidenceDetail_->setText(QStringLiteral("另有 %1 条待确认。").arg(packet.pendingItems));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("可用资料 %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("可使用 · %1 条").arg(packet.reviewedContextItems), QStringLiteral("statusGood"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("已准备好可供 AI 使用的资料；未确认内容不会被读取。"));
     } else if (packet.pendingItems > 0) {
-        setStatusChip(decisionEvidence_, QStringLiteral("待复核 · %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
-        decisionEvidenceDetail_->setText(QStringLiteral("完成催化剂、时间点与条件复核后才能进入 AI。"));
-        setStatusChip(aiEvidenceStatus_, QStringLiteral("待复核 · %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
-        setStatusChip(aiPacketStageStatus_, QStringLiteral("尚未就绪"), QStringLiteral("statusWarn"));
-        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("候选证据已存在，但 Evidence Packet 尚未满足受控输入门槛。"));
+        setStatusChip(decisionEvidence_, QStringLiteral("待确认 %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
+        decisionEvidenceDetail_->setText(QStringLiteral("关联催化剂和时间并确认后，资料才会提供给 AI。"));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("待确认 %1 条").arg(packet.pendingItems), QStringLiteral("statusWarn"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("暂不可用"), QStringLiteral("statusWarn"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("已有资料，但还需要完成关联和确认。"));
     } else {
-        setStatusChip(decisionEvidence_, QStringLiteral("尚无证据"), QStringLiteral("statusNeutral"));
-        decisionEvidenceDetail_->setText(QStringLiteral("在“资料证据”页导入论文并完成绑定与人工条件复核。"));
-        setStatusChip(aiEvidenceStatus_, QStringLiteral("等待证据"), QStringLiteral("statusNeutral"));
-        setStatusChip(aiPacketStageStatus_, QStringLiteral("等待证据"), QStringLiteral("statusNeutral"));
-        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("尚未形成可供 AI 使用的 Evidence Packet。"));
+        setStatusChip(decisionEvidence_, QStringLiteral("暂无资料"), QStringLiteral("statusNeutral"));
+        decisionEvidenceDetail_->setText(QStringLiteral("请在“资料”中导入论文，并完成关联和确认。"));
+        setStatusChip(aiEvidenceStatus_, QStringLiteral("暂无资料"), QStringLiteral("statusNeutral"));
+        setStatusChip(aiPacketStageStatus_, QStringLiteral("暂无资料"), QStringLiteral("statusNeutral"));
+        if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("目前还没有可供 AI 使用的已确认资料。"));
     }
 }
 

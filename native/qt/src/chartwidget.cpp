@@ -200,8 +200,8 @@ void ChartWidget::paintEvent(QPaintEvent*) {
     }
 
     const QString focusText = selectedCatalyst_.isEmpty()
-        ? QStringLiteral("单击数据点聚焦")
-        : QStringLiteral("已聚焦：%1 · 单击同一曲线取消").arg(selectedCatalyst_);
+        ? QStringLiteral("单击曲线可聚焦")
+        : QStringLiteral("当前：%1 · 再次单击取消").arg(selectedCatalyst_);
     painter.setPen(QColor(QStringLiteral("#71717A")));
     painter.drawText(QRectF(plotRect.right() - 320, 10, 320, 20), Qt::AlignRight | Qt::AlignVCenter, focusText);
 

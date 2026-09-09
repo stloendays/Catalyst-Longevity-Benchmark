@@ -85,16 +85,16 @@ QString categoryLabel(const QString& category) {
 
 QString statusLabel(const QString& status) {
     if (status == QStringLiteral("candidate_requires_condition_binding")) {
-        return QStringLiteral("候选：待绑定");
+        return QStringLiteral("待关联");
     }
     if (status == QStringLiteral("bound_to_catalyst_requires_time_condition_review")) {
-        return QStringLiteral("已绑定催化剂：待时间/条件复核");
+        return QStringLiteral("待补时间并确认");
     }
     if (status == QStringLiteral("bound_to_catalyst_time_requires_condition_review")) {
-        return QStringLiteral("已绑定催化剂+时间：待条件复核");
+        return QStringLiteral("待确认");
     }
     if (status == QStringLiteral("condition_reviewed_context_only")) {
-        return QStringLiteral("条件已人工复核：仅作上下文");
+        return QStringLiteral("已确认");
     }
     return status;
 }
@@ -134,7 +134,7 @@ EvidencePage::EvidencePage(QWidget* parent)
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
-    titleBox->addWidget(headingLabel(QStringLiteral("资料分析与 Evidence Packet")));
+    titleBox->addWidget(headingLabel(QStringLiteral("资料")));
     titleBox->addWidget(mutedLabel(QStringLiteral(
         "原生读取带文本层的 PDF 论文，以及 TXT / Markdown / CSV / TSV。保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据，并保留 PDF 页码。只有完成催化剂、时间和人工条件复核的条目才进入 Evidence Packet；候选值不会自动改写实验数据或排名。")));
     top->addLayout(titleBox, 1);
@@ -171,18 +171,18 @@ EvidencePage::EvidencePage(QWidget* parent)
     metrics->addWidget(metricCard(QStringLiteral("DOI"), &doiCountLabel_), 0, 2);
     metrics->addWidget(metricCard(QStringLiteral("温度候选"), &temperatureCountLabel_), 0, 3);
     metrics->addWidget(metricCard(QStringLiteral("时长候选"), &durationCountLabel_), 0, 4);
-    metrics->addWidget(metricCard(QStringLiteral("项目证据"), &evidenceCountLabel_), 0, 5);
+    metrics->addWidget(metricCard(QStringLiteral("资料条目"), &evidenceCountLabel_), 0, 5);
     layout->addLayout(metrics);
 
     auto* signalFrame = new QFrame;
     signalFrame->setObjectName(QStringLiteral("gptSurface"));
     auto* signalLayout = new QVBoxLayout(signalFrame);
     signalLayout->setContentsMargins(18, 14, 18, 14);
-    auto* signalTitle = new QLabel(QStringLiteral("当前资料提取摘要"));
+    auto* signalTitle = new QLabel(QStringLiteral("识别结果"));
     signalTitle->setObjectName(QStringLiteral("sectionTitle"));
     signalLayout->addWidget(signalTitle);
     signalsTable_ = new QTableWidget(0, 2);
-    signalsTable_->setHorizontalHeaderLabels({QStringLiteral("类别"), QStringLiteral("候选信息")});
+    signalsTable_->setHorizontalHeaderLabels({QStringLiteral("类型"), QStringLiteral("识别内容")});
     signalsTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     signalsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     signalsTable_->verticalHeader()->setVisible(false);
@@ -196,15 +196,15 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* evidenceLayout = new QVBoxLayout(evidenceFrame);
     evidenceLayout->setContentsMargins(18, 14, 18, 14);
-    auto* evidenceTitle = new QLabel(QStringLiteral("项目证据候选、绑定与复核"));
+    auto* evidenceTitle = new QLabel(QStringLiteral("资料整理"));
     evidenceTitle->setObjectName(QStringLiteral("sectionTitle"));
     evidenceLayout->addWidget(evidenceTitle);
 
     evidenceTable_ = new QTableWidget(0, 8);
     evidenceTable_->setHorizontalHeaderLabels({
-        QStringLiteral("来源"), QStringLiteral("页"), QStringLiteral("类别"), QStringLiteral("候选"),
-        QStringLiteral("状态"), QStringLiteral("催化剂"), QStringLiteral("时间(h)"),
-        QStringLiteral("原文片段 / 备注")});
+        QStringLiteral("来源"), QStringLiteral("页"), QStringLiteral("类型"), QStringLiteral("识别内容"),
+        QStringLiteral("状态"), QStringLiteral("关联催化剂"), QStringLiteral("时间(h)"),
+        QStringLiteral("原文 / 备注")});
     evidenceTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     evidenceTable_->horizontalHeader()->setSectionResizeMode(7, QHeaderView::Stretch);
     evidenceTable_->verticalHeader()->setVisible(false);
@@ -217,31 +217,31 @@ EvidencePage::EvidencePage(QWidget* parent)
 
     auto* bindRow = new QHBoxLayout;
     catalystCombo_ = new QComboBox;
-    catalystCombo_->addItem(QStringLiteral("未绑定催化剂"), QString());
+    catalystCombo_->addItem(QStringLiteral("未关联催化剂"), QString());
     catalystCombo_->setMinimumWidth(175);
     timeSpin_ = new QDoubleSpinBox;
     timeSpin_->setRange(-1.0, 1000000000.0);
     timeSpin_->setDecimals(3);
     timeSpin_->setValue(-1.0);
-    timeSpin_->setSpecialValueText(QStringLiteral("未绑定时间"));
+    timeSpin_->setSpecialValueText(QStringLiteral("未关联时间"));
     timeSpin_->setSuffix(QStringLiteral(" h"));
     noteEdit_ = new QLineEdit;
-    noteEdit_->setPlaceholderText(QStringLiteral("复核/绑定备注；条件复核时必填"));
+    noteEdit_->setPlaceholderText(QStringLiteral("备注（确认前请填写关键实验条件）"));
 
-    auto* bindButton = new QPushButton(QStringLiteral("绑定"));
+    auto* bindButton = new QPushButton(QStringLiteral("关联"));
     bindButton->setObjectName(QStringLiteral("primaryButton"));
-    auto* unbindButton = new QPushButton(QStringLiteral("解除"));
+    auto* unbindButton = new QPushButton(QStringLiteral("取消关联"));
     unbindButton->setObjectName(QStringLiteral("secondaryButton"));
-    auto* reviewButton = new QPushButton(QStringLiteral("条件已复核（仅上下文）"));
+    auto* reviewButton = new QPushButton(QStringLiteral("确认"));
     reviewButton->setObjectName(QStringLiteral("primaryButton"));
-    auto* returnButton = new QPushButton(QStringLiteral("退回待复核"));
+    auto* returnButton = new QPushButton(QStringLiteral("取消确认"));
     returnButton->setObjectName(QStringLiteral("secondaryButton"));
     connect(bindButton, &QPushButton::clicked, this, &EvidencePage::bindSelectedEvidence);
     connect(unbindButton, &QPushButton::clicked, this, &EvidencePage::unbindSelectedEvidence);
     connect(reviewButton, &QPushButton::clicked, this, &EvidencePage::markConditionReviewed);
     connect(returnButton, &QPushButton::clicked, this, &EvidencePage::returnSelectedToReview);
 
-    bindRow->addWidget(new QLabel(QStringLiteral("催化剂")));
+    bindRow->addWidget(new QLabel(QStringLiteral("关联催化剂")));
     bindRow->addWidget(catalystCombo_);
     bindRow->addWidget(new QLabel(QStringLiteral("时间")));
     bindRow->addWidget(timeSpin_);
@@ -258,9 +258,9 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* packetLayout = new QVBoxLayout(packetFrame);
     packetLayout->setContentsMargins(18, 14, 18, 14);
     auto* packetTop = new QHBoxLayout;
-    auto* packetTitle = new QLabel(QStringLiteral("Evidence Packet · AI 输入边界"));
+    auto* packetTitle = new QLabel(QStringLiteral("AI 可用资料"));
     packetTitle->setObjectName(QStringLiteral("sectionTitle"));
-    packetStatusLabel_ = new QLabel(QStringLiteral("尚无可进入 AI 的证据"));
+    packetStatusLabel_ = new QLabel(QStringLiteral("暂无可用资料"));
     packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));
     packetTop->addWidget(packetTitle);
     packetTop->addStretch();
@@ -271,14 +271,14 @@ EvidencePage::EvidencePage(QWidget* parent)
     packetPreview_ = new QTextEdit;
     packetPreview_->setReadOnly(true);
     packetPreview_->setMaximumHeight(210);
-    packetPreview_->setPlaceholderText(QStringLiteral("完成至少一条证据的条件复核后，将在此生成 Evidence Packet。"));
+    packetPreview_->setPlaceholderText(QStringLiteral("确认至少一条资料后，这里会显示供 AI 使用的内容。"));
     packetLayout->addWidget(packetPreview_);
     layout->addWidget(packetFrame);
 
     auto* note = new QFrame;
     note->setObjectName(QStringLiteral("infoPanel"));
     auto* noteLayout = new QVBoxLayout(note);
-    noteLayout->addWidget(new QLabel(QStringLiteral("PDF 与证据门槛")));
+    noteLayout->addWidget(new QLabel(QStringLiteral("资料说明")));
     noteLayout->addWidget(mutedLabel(QStringLiteral(
         "原生 PDF 读取只使用 PDF 自带文本层，不自动 OCR 扫描页；这避免 OCR 错误直接进入实验事实链。“条件已复核”仍只是人工上下文核对状态，不是实验真值认证，也不会自动进入性能轨迹、T90 或直接排名。")));
     layout->addWidget(note);
@@ -313,7 +313,7 @@ void EvidencePage::clearEvidence() {
 void EvidencePage::setCatalystNames(const QStringList& catalystNames) {
     const QString previous = catalystCombo_->currentData().toString();
     catalystCombo_->clear();
-    catalystCombo_->addItem(QStringLiteral("未绑定催化剂"), QString());
+    catalystCombo_->addItem(QStringLiteral("未关联催化剂"), QString());
     QStringList names = catalystNames;
     names.removeDuplicates();
     names.sort(Qt::CaseInsensitive);
@@ -539,7 +539,7 @@ void EvidencePage::refreshEvidenceTable() {
 void EvidencePage::refreshEvidencePacket() {
     const EvidencePacket packet = EvidencePacketBuilder::build(evidenceItems_);
     if (packet.readyForAi) {
-        packetStatusLabel_->setText(QStringLiteral("可进入 AI：%1 条 · 排除 %2 条")
+        packetStatusLabel_->setText(QStringLiteral("可用 %1 条 · 待确认 %2 条")
             .arg(packet.reviewedContextItems)
             .arg(packet.pendingItems));
         packetStatusLabel_->setStyleSheet(QString());
@@ -547,7 +547,7 @@ void EvidencePage::refreshEvidencePacket() {
         packetStatusLabel_->style()->unpolish(packetStatusLabel_);
         packetStatusLabel_->style()->polish(packetStatusLabel_);
     } else {
-        packetStatusLabel_->setText(QStringLiteral("暂不可进入 AI · 待复核 %1 条").arg(packet.pendingItems));
+        packetStatusLabel_->setText(QStringLiteral("待确认 %1 条").arg(packet.pendingItems));
         packetStatusLabel_->setStyleSheet(QString());
         packetStatusLabel_->setObjectName(QStringLiteral("statusWarn"));
         packetStatusLabel_->style()->unpolish(packetStatusLabel_);

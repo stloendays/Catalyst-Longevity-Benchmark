@@ -46,7 +46,7 @@ ConditionAudit ConditionGuard::audit(const QVector<Record>& records) {
     ConditionAudit audit;
     if (records.isEmpty()) {
         audit.status = ConditionAuditStatus::NoData;
-        audit.message = QStringLiteral("没有可用于实验条件审计的数据。");
+        audit.message = QStringLiteral("暂无可检查的数据。");
         return audit;
     }
 
@@ -126,10 +126,10 @@ ConditionAudit ConditionGuard::audit(const QVector<Record>& records) {
 
     if (audit.pairMismatches.isEmpty()) {
         audit.status = ConditionAuditStatus::MatchedOnProvidedConditions;
-        audit.message = QStringLiteral("在用户提供的实验条件字段上未发现催化剂之间的不匹配。");
+        audit.message = QStringLiteral("已填写的实验条件一致。");
     } else {
         audit.status = ConditionAuditStatus::MismatchDetected;
-        audit.message = QStringLiteral("发现显式实验条件不匹配，相关直接排名结论已禁用。");
+        audit.message = QStringLiteral("发现实验条件不一致，暂不显示直接排名。");
     }
 
     return audit;
@@ -138,13 +138,13 @@ ConditionAudit ConditionGuard::audit(const QVector<Record>& records) {
 QString ConditionGuard::statusText(ConditionAuditStatus status) {
     switch (status) {
     case ConditionAuditStatus::NoData:
-        return QStringLiteral("无数据");
+        return QStringLiteral("暂无数据");
     case ConditionAuditStatus::ConditionsNotProvided:
-        return QStringLiteral("未提供实验条件");
+        return QStringLiteral("条件未填写");
     case ConditionAuditStatus::MatchedOnProvidedConditions:
-        return QStringLiteral("条件可比");
+        return QStringLiteral("条件一致");
     case ConditionAuditStatus::MismatchDetected:
-        return QStringLiteral("条件不匹配");
+        return QStringLiteral("条件不一致");
     }
     return QStringLiteral("未知");
 }
