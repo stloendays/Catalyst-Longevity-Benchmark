@@ -17,9 +17,9 @@ jobs:
         with:
           ref: real-reference-kb-feasible-advice
           fetch-depth: 0
-      - name: Enforce planning caps
-        run: python tools/fix_planning_constraint_caps.py
-      - name: Commit planning cap fix
+      - name: Apply per-catalyst reference matching
+        run: python tools/fix_per_catalyst_reference_matching.py
+      - name: Commit matching fix
         shell: bash
         run: |
           git config user.name "stloendays"
@@ -28,6 +28,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "Enforce experiment planning stage caps"
+            git commit -m "Match public experiment references per catalyst"
             git push origin HEAD:real-reference-kb-feasible-advice
           fi
