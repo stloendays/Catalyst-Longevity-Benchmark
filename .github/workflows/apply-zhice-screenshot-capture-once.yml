@@ -19,7 +19,7 @@ jobs:
         with:
           ref: zhice-copyright-screenshots
 
-      - name: Polish materials workspace and advice rows
+      - name: Finalize materials page spacing and Chinese preview
         shell: pwsh
         run: |
           @'
@@ -33,43 +33,111 @@ jobs:
           p = Path("native/qt/src/evidencepage.cpp")
           text = p.read_text(encoding="utf-8")
           text = replace_once(text,
-              '    label->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 20, QFont::DemiBold));\n',
-              '    QFont font = label->font();\n    font.setPointSize(20);\n    font.setWeight(QFont::DemiBold);\n    label->setFont(font);\n',
-              'evidence heading font')
+              '    layout->setContentsMargins(34, 28, 34, 28);\n    layout->setSpacing(14);\n',
+              '    layout->setContentsMargins(34, 20, 34, 16);\n    layout->setSpacing(10);\n',
+              'page spacing')
           text = replace_once(text,
-              '        "原生读取带文本层的 PDF 论文，以及 TXT / Markdown / CSV / TSV。保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据，并保留 PDF 页码。只有完成催化剂、时间和人工条件复核的条目才进入 Evidence Packet；候选值不会自动改写实验数据或排名。"',
-              '        "导入 PDF 或文本资料，识别 DOI、温度、测试时长等信息；关联到催化剂和时间并确认后，可作为 AI 分析上下文。资料不会自动改写实验数据。"',
-              'evidence intro')
-          old_source = '''    auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));\n    sourceTitle->setObjectName(QStringLiteral("sectionTitle"));\n    sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));\n    sourceLabel_->setObjectName(QStringLiteral("sourcePath"));\n    sourceLabel_->setWordWrap(true);\n    sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);\n    documentInfoLabel_ = mutedLabel(QStringLiteral("—"));\n    warningLabel_ = mutedLabel(QString());\n    warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));\n    sourceLayout->addWidget(sourceTitle);\n    sourceLayout->addWidget(sourceLabel_);\n    sourceLayout->addWidget(documentInfoLabel_);\n    sourceLayout->addWidget(warningLabel_);\n    layout->addWidget(sourceFrame);\n'''
-          new_source = '''    sourceFrame->setMaximumHeight(96);\n    auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));\n    sourceTitle->setObjectName(QStringLiteral("sectionTitle"));\n    sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));\n    sourceLabel_->setObjectName(QStringLiteral("sourcePath"));\n    sourceLabel_->setWordWrap(false);\n    sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);\n    documentInfoLabel_ = mutedLabel(QStringLiteral("—"));\n    warningLabel_ = mutedLabel(QString());\n    warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));\n    auto* sourceTop = new QHBoxLayout;\n    sourceTop->addWidget(sourceTitle);\n    sourceTop->addSpacing(10);\n    sourceTop->addWidget(sourceLabel_, 1);\n    sourceLayout->addLayout(sourceTop);\n    sourceLayout->addWidget(documentInfoLabel_);\n    sourceLayout->addWidget(warningLabel_);\n    layout->addWidget(sourceFrame);\n'''
-          text = replace_once(text, old_source, new_source, 'source summary layout')
+              '    sourceFrame->setMaximumHeight(96);\n',
+              '    sourceFrame->setMaximumHeight(82);\n',
+              'source height')
           text = replace_once(text,
-              '    signalsTable_->setMaximumHeight(165);\n',
               '    signalsTable_->setMaximumHeight(82);\n    signalFrame->setMaximumHeight(135);\n',
-              'signals height')
+              '    signalsTable_->setMaximumHeight(50);\n    signalFrame->setMaximumHeight(102);\n',
+              'signals compact')
           text = replace_once(text,
-              '    evidenceTable_->setWordWrap(true);\n    evidenceTable_->setMouseTracking(true);\n    evidenceLayout->addWidget(evidenceTable_, 1);\n',
-              '    evidenceTable_->setWordWrap(false);\n    evidenceTable_->setMouseTracking(true);\n    evidenceTable_->setMinimumHeight(105);\n    evidenceTable_->setMaximumHeight(135);\n    evidenceLayout->addWidget(evidenceTable_);\n',
-              'evidence table height')
-          old_actions = '''    bindRow->addWidget(new QLabel(QStringLiteral("关联催化剂")));\n    bindRow->addWidget(catalystCombo_);\n    bindRow->addWidget(new QLabel(QStringLiteral("时间")));\n    bindRow->addWidget(timeSpin_);\n    bindRow->addWidget(noteEdit_, 1);\n    bindRow->addWidget(bindButton);\n    bindRow->addWidget(reviewButton);\n    bindRow->addWidget(returnButton);\n    bindRow->addWidget(unbindButton);\n    evidenceLayout->addLayout(bindRow);\n    layout->addWidget(evidenceFrame, 1);\n'''
-          new_actions = '''    bindRow->addWidget(new QLabel(QStringLiteral("关联催化剂")));\n    bindRow->addWidget(catalystCombo_);\n    bindRow->addWidget(new QLabel(QStringLiteral("时间")));\n    bindRow->addWidget(timeSpin_);\n    bindRow->addWidget(noteEdit_, 1);\n    evidenceLayout->addLayout(bindRow);\n    auto* actionRow = new QHBoxLayout;\n    actionRow->addStretch();\n    actionRow->addWidget(bindButton);\n    actionRow->addWidget(reviewButton);\n    actionRow->addWidget(returnButton);\n    actionRow->addWidget(unbindButton);\n    evidenceLayout->addLayout(actionRow);\n    evidenceFrame->setMaximumHeight(260);\n    layout->addWidget(evidenceFrame);\n'''
-          text = replace_once(text, old_actions, new_actions, 'evidence action rows')
+              '    evidenceTable_->setMinimumHeight(105);\n    evidenceTable_->setMaximumHeight(135);\n',
+              '    evidenceTable_->setMinimumHeight(78);\n    evidenceTable_->setMaximumHeight(90);\n',
+              'evidence compact table')
           text = replace_once(text,
-              '    packetPreview_->setMaximumHeight(210);\n',
+              '    evidenceFrame->setMaximumHeight(260);\n',
+              '    evidenceFrame->setMinimumHeight(225);\n    evidenceFrame->setMaximumHeight(238);\n',
+              'evidence frame stable height')
+          text = replace_once(text,
               '    packetPreview_->setMinimumHeight(50);\n    packetPreview_->setMaximumHeight(68);\n    packetFrame->setMaximumHeight(155);\n',
-              'packet preview height')
+              '    packetPreview_->setMinimumHeight(36);\n    packetPreview_->setMaximumHeight(48);\n    packetFrame->setMaximumHeight(135);\n',
+              'packet compact')
+          text = replace_once(text,
+              '    documentInfoLabel_->setText(QStringLiteral("—"));\n',
+              '    documentInfoLabel_->clear();\n',
+              'empty document info')
+          text = replace_once(text,
+              '        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条证据候选").arg(evidenceItems_.size()));\n',
+              '        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条资料").arg(evidenceItems_.size()));\n',
+              'restored materials copy')
+          text = replace_once(text,
+              '    evidenceTable_->resizeRowsToContents();\n    refreshEvidencePacket();\n',
+              '    evidenceTable_->verticalHeader()->setDefaultSectionSize(32);\n    refreshEvidencePacket();\n',
+              'evidence row sizing')
           p.write_text(text, encoding="utf-8")
 
-          p = Path("native/qt/src/mainwindow.cpp")
+          p = Path("native/qt/src/evidencepacket.cpp")
           text = p.read_text(encoding="utf-8")
-          text = replace_once(text,
-              '    configureTable(adviceTable_);\n    adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);\n',
-              '    configureTable(adviceTable_);\n    adviceTable_->setWordWrap(false);\n    adviceTable_->verticalHeader()->setDefaultSectionSize(36);\n    adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);\n',
-              'advice compact table')
-          text = replace_once(text,
-              '        adviceTable_->resizeRowsToContents();\n',
-              '',
-              'advice row resize')
+          text = text.replace('"当前没有完成‘催化剂 + 时间 + 条件复核备注’的证据，因此 Evidence Packet 暂不进入 AI 上下文。"',
+                              '"当前没有完成‘催化剂 + 时间 + 确认备注’的资料，因此暂不提供给 AI。"')
+          text = text.replace('"%1 条证据仍处于候选/待复核状态，已从 AI 上下文中排除。"',
+                              '"%1 条资料仍待关联或确认，当前不会提供给 AI。"')
+          text = text.replace('"%1 条证据虽然带有复核状态，但绑定信息不完整，已按安全策略降级为待复核。"',
+                              '"%1 条资料虽然标记为已确认，但关联信息不完整，已自动退回待确认状态。"')
+          text = text.replace('QStringLiteral("部分证据缺少可追溯来源标识。")',
+                              'QStringLiteral("部分资料缺少可追溯来源标识。")')
+          start = text.index('QString EvidencePacketBuilder::toMarkdown')
+          end = text.index('\n}\n\n} // namespace catalyst', start) + 2
+          new_func = r'''QString EvidencePacketBuilder::toMarkdown(const EvidencePacket& packet) {
+    QString text;
+    text += QStringLiteral("# AI 可用资料\n\n");
+    text += QStringLiteral("- 生成时间：%1\n").arg(packet.generatedUtc);
+    text += QStringLiteral("- AI 可用：%1\n").arg(packet.readyForAi ? QStringLiteral("是") : QStringLiteral("否"));
+    text += QStringLiteral("- 已确认资料：%1 条\n").arg(packet.reviewedContextItems);
+    text += QStringLiteral("- 待确认资料：%1 条\n").arg(packet.pendingItems);
+    text += QStringLiteral("- 来源数量：%1\n").arg(packet.sourceCount);
+    text += QStringLiteral("- 关联催化剂：%1 个\n\n").arg(packet.catalystCount);
+
+    if (!packet.warnings.isEmpty()) {
+        text += QStringLiteral("## 使用提示\n\n");
+        for (const auto& warning : packet.warnings) {
+            text += QStringLiteral("- %1\n").arg(warning);
+        }
+        text += QLatin1Char('\n');
+    }
+
+    text += QStringLiteral("## 已确认资料\n\n");
+    if (packet.contextItems.isEmpty()) {
+        text += QStringLiteral("当前没有可供 AI 使用的已确认资料。\n");
+        return text;
+    }
+
+    int index = 1;
+    for (const auto& item : packet.contextItems) {
+        const QString source = item.sourcePath.isEmpty()
+            ? QStringLiteral("未知来源")
+            : QFileInfo(item.sourcePath).fileName();
+        const QString page = item.sourcePage > 0
+            ? QStringLiteral("第 %1 页").arg(item.sourcePage)
+            : QStringLiteral("页码未知");
+        const QString candidate = item.valueText.isEmpty() ? item.term : item.valueText;
+        const QString hash = item.sourceSha256.isEmpty()
+            ? QStringLiteral("未知")
+            : item.sourceSha256.left(16);
+
+        text += QStringLiteral("### 资料 %1\n\n").arg(index++);
+        text += QStringLiteral("- 来源：%1\n").arg(source);
+        text += QStringLiteral("- 来源校验：%1\n").arg(hash);
+        text += QStringLiteral("- 页码：%1\n").arg(page);
+        text += QStringLiteral("- 催化剂：%1\n").arg(item.boundCatalyst);
+        text += QStringLiteral("- 时间：%1 h\n").arg(QString::number(*item.boundTimeHours, 'g', 10));
+        text += QStringLiteral("- 类型：%1\n").arg(categoryLabel(item.category));
+        text += QStringLiteral("- 识别内容：%1\n").arg(candidate);
+        text += QStringLiteral("- 确认备注：%1\n").arg(compact(item.note));
+        if (!item.snippet.trimmed().isEmpty()) {
+            text += QStringLiteral("- 原文上下文：%1\n").arg(compact(item.snippet));
+        }
+        text += QLatin1Char('\n');
+    }
+
+    text += QStringLiteral("以上资料仅作为分析上下文，不会改写实验观测、寿命阈值或催化剂直接排名。\n");
+    return text;
+}'''
+          text = text[:start] + new_func + text[end:]
           p.write_text(text, encoding="utf-8")
           '@ | python -
 
@@ -113,13 +181,13 @@ jobs:
           path: ui-screenshots/*.png
           if-no-files-found: error
 
-      - name: Commit validated workspace polish
+      - name: Commit validated final materials polish
         shell: pwsh
         run: |
           if (Test-Path "build-qt") { Remove-Item -Recurse -Force "build-qt" }
           if (Test-Path "ui-screenshots") { Remove-Item -Recurse -Force "ui-screenshots" }
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add native/qt/src/mainwindow.cpp native/qt/src/evidencepage.cpp
-          git commit -m "Polish Zhice materials workspace and experiment advice table"
+          git add native/qt/src/evidencepage.cpp native/qt/src/evidencepacket.cpp
+          git commit -m "Finalize Zhice materials workspace and Chinese AI preview"
           git push origin zhice-copyright-screenshots
