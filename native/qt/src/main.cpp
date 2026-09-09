@@ -266,249 +266,13 @@ QIcon makeApplicationIcon() {
     return QIcon(pixmap);
 }
 
-QString polishedStyleSheet() {
-    return QStringLiteral(R"(
-        QMainWindow, QWidget {
-            background: #F7F9FC;
-            color: #182230;
-            font-family: "Microsoft YaHei UI";
-            font-size: 13px;
-        }
-        QMainWindow { background: #F7F9FC; }
-        QStatusBar {
-            background: #FFFFFF;
-            color: #64748B;
-            border-top: 1px solid #E7ECF2;
-            min-height: 30px;
-        }
-        QStatusBar QLabel { color: #64748B; padding: 0 8px; }
-
-        #sidebar {
-            background: #0B1220;
-            border: none;
-        }
-        #brand {
-            color: #F8FAFC;
-            background: #111C30;
-            border: 1px solid #20304A;
-            border-radius: 14px;
-            padding: 14px 15px;
-            font-size: 16px;
-            font-weight: 700;
-            letter-spacing: 0.4px;
-            line-height: 1.45;
-        }
-        #sidebarFoot {
-            color: #8090A6;
-            font-size: 11px;
-            line-height: 1.5;
-            padding: 8px 4px 2px 4px;
-        }
-        #navButton {
-            color: #C9D5E4;
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 10px;
-            padding: 10px 13px;
-            text-align: left;
-            font-weight: 500;
-            min-height: 24px;
-        }
-        #navButton:hover {
-            background: #121E32;
-            border-color: #20304A;
-            color: #FFFFFF;
-        }
-        #navButton:checked {
-            background: #123E3B;
-            border-color: #1B6E67;
-            color: #F1FFFC;
-            font-weight: 650;
-        }
-        #navButton:pressed { background: #0E3431; }
-
-        #pageHeading {
-            color: #0F172A;
-            font-size: 23px;
-            font-weight: 700;
-        }
-        #mutedText {
-            color: #667085;
-            line-height: 1.55;
-        }
-        #metricCard, #panel {
-            background: #FFFFFF;
-            border: 1px solid #E4EAF1;
-            border-radius: 13px;
-        }
-        #metricCard { min-height: 66px; }
-        #infoPanel {
-            background: #F0F9F7;
-            border: 1px solid #C7E9E4;
-            border-radius: 12px;
-        }
-        #metricTitle {
-            color: #758195;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        #metricValue {
-            color: #0F172A;
-            font-size: 20px;
-            font-weight: 700;
-        }
-        #sectionTitle {
-            color: #172033;
-            font-size: 15px;
-            font-weight: 700;
-        }
-        #sourcePath {
-            color: #0F766E;
-            font-weight: 600;
-        }
-        #guardStatus {
-            color: #0F766E;
-            font-size: 14px;
-            font-weight: 700;
-            padding: 4px 0;
-        }
-
-        #primaryButton {
-            background: #0F766E;
-            color: #FFFFFF;
-            border: 1px solid #0F766E;
-            border-radius: 9px;
-            padding: 9px 16px;
-            font-weight: 600;
-            min-height: 22px;
-        }
-        #primaryButton:hover {
-            background: #0B675F;
-            border-color: #0B675F;
-        }
-        #primaryButton:pressed {
-            background: #085A53;
-            border-color: #085A53;
-        }
-        #primaryButton:disabled {
-            background: #A9C9C5;
-            border-color: #A9C9C5;
-            color: #F5FAF9;
-        }
-        #secondaryButton {
-            background: #FFFFFF;
-            color: #344054;
-            border: 1px solid #D7DEE8;
-            border-radius: 9px;
-            padding: 9px 16px;
-            font-weight: 600;
-            min-height: 22px;
-        }
-        #secondaryButton:hover {
-            background: #F8FAFC;
-            border-color: #B8C3D1;
-            color: #0F172A;
-        }
-        #secondaryButton:pressed { background: #F1F5F9; }
-
-        QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit {
-            background: #FFFFFF;
-            color: #172033;
-            border: 1px solid #D8E0EA;
-            border-radius: 8px;
-            padding: 7px 9px;
-            selection-background-color: #CDEBE7;
-            selection-color: #0F172A;
-        }
-        QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QTextEdit:focus {
-            border: 1px solid #2A8C83;
-            background: #FFFFFF;
-        }
-        QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled {
-            background: #F1F4F8;
-            color: #98A2B3;
-        }
-        QComboBox::drop-down, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-            border: none;
-            background: transparent;
-        }
-
-        QTableWidget {
-            background: #FFFFFF;
-            alternate-background-color: #FAFBFD;
-            border: 1px solid #E3E9F0;
-            border-radius: 10px;
-            gridline-color: #EEF2F6;
-            selection-background-color: #DDF2EF;
-            selection-color: #172033;
-        }
-        QHeaderView::section {
-            background: #F5F7FA;
-            color: #475467;
-            border: none;
-            border-right: 1px solid #E9EDF3;
-            border-bottom: 1px solid #E3E9F0;
-            padding: 9px 8px;
-            font-weight: 650;
-        }
-        QTableCornerButton::section {
-            background: #F5F7FA;
-            border: none;
-            border-bottom: 1px solid #E3E9F0;
-        }
-        QTableWidget::item {
-            padding: 7px;
-            border: none;
-        }
-        QTableWidget::item:selected {
-            background: #DDF2EF;
-            color: #172033;
-        }
-
-        QScrollBar:vertical {
-            background: transparent;
-            width: 10px;
-            margin: 3px 2px 3px 2px;
-        }
-        QScrollBar::handle:vertical {
-            background: #CBD5E1;
-            border-radius: 4px;
-            min-height: 28px;
-        }
-        QScrollBar::handle:vertical:hover { background: #AEB9C8; }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        QScrollBar:horizontal {
-            background: transparent;
-            height: 10px;
-            margin: 2px 3px 2px 3px;
-        }
-        QScrollBar::handle:horizontal {
-            background: #CBD5E1;
-            border-radius: 4px;
-            min-width: 28px;
-        }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-
-        QToolTip {
-            background: #172033;
-            color: #FFFFFF;
-            border: 1px solid #29364A;
-            border-radius: 6px;
-            padding: 6px 8px;
-        }
-    )");
-}
-
 void polishChineseCopy(catalyst::MainWindow& window) {
     const auto labels = window.findChildren<QLabel*>();
     for (auto* label : labels) {
         const QString text = label->text();
         if (text == QStringLiteral("Ready")) {
             label->setText(QStringLiteral("就绪"));
-        } else if (text == QStringLiteral("CATALYST\nLONGEVITY")) {
-            label->setText(QStringLiteral("催化剂寿命研究\nCATALYST LONGEVITY"));
-        } else if (text == QStringLiteral("Native Desktop\nC++ / Qt 6")) {
-            label->setText(QStringLiteral("原生桌面版\nC++20 · Qt 6"));
+
         } else if (text == QStringLiteral("Native AI integration roadmap")) {
             label->setText(QStringLiteral("AI 能力接入路线"));
         } else if (text == QStringLiteral("Evidence Packet  ·  HTTP/API 客户端  ·  AI Analyst  ·  Evidence Critic  ·  审计日志")) {
@@ -623,11 +387,11 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
 }
 
 void applyWindowPolish(catalyst::MainWindow& window) {
-    window.setWindowTitle(QStringLiteral("催化剂长期稳定性评估与实验决策系统"));
+    window.setWindowTitle(QStringLiteral("智策"));
     window.statusBar()->setSizeGripEnabled(false);
 
     if (auto* sidebar = window.findChild<QFrame*>(QStringLiteral("sidebar"))) {
-        sidebar->setFixedWidth(258);
+        sidebar->setFixedWidth(232);
     }
 
     polishChineseCopy(window);
@@ -669,11 +433,11 @@ void applyWindowPolish(catalyst::MainWindow& window) {
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setOrganizationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationDisplayName(QStringLiteral("催化剂长期稳定性评估与实验决策系统"));
+    app.setOrganizationName(QStringLiteral("ZhiCe"));
+    app.setApplicationName(QStringLiteral("ZhiCe"));
+    app.setApplicationDisplayName(QStringLiteral("智策"));
     app.setStyle(QStringLiteral("Fusion"));
-    app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
+    app.setFont(QFont(QStringLiteral("Microsoft YaHei"), 10));
     app.setWindowIcon(makeApplicationIcon());
 
     if (app.arguments().contains(QStringLiteral("--self-test"))) {

@@ -42,77 +42,222 @@ namespace {
 
 QString gptMonochromeStyle() {
     return QStringLiteral(R"(
-        QMainWindow, QWidget { background:#F7F7F8; color:#111111; font-family:"Microsoft YaHei UI"; font-size:13px; }
-        QMainWindow { background:#F7F7F8; }
-        QStatusBar { background:#FFFFFF; color:#71717A; border-top:1px solid #E7E7E9; min-height:30px; }
-        QStatusBar QLabel { color:#71717A; padding:0 8px; }
-        #sidebar { background:#111111; border-right:1px solid #242424; }
-        #brand { color:#FFFFFF; background:transparent; border:none; padding:8px 8px 14px; font-size:16px; font-weight:700; letter-spacing:.3px; }
-        #sidebarFoot { color:#737373; font-size:11px; padding:8px 4px; }
-        #navButton { color:#D4D4D4; background:transparent; border:1px solid transparent; border-radius:10px; padding:10px 12px; text-align:left; font-weight:500; min-height:24px; }
-        #navButton:hover { background:#242424; border-color:#333333; color:#FFFFFF; }
-        #navButton:checked { background:#2F2F2F; border-color:#3C3C3C; color:#FFFFFF; font-weight:650; }
-        #navButton:pressed { background:#383838; }
-        #pageHeading { color:#111111; font-size:24px; font-weight:700; }
-        #mutedText { color:#71717A; line-height:1.55; }
-        #sectionTitle { color:#18181B; font-size:15px; font-weight:700; }
-        #metricTitle { color:#71717A; font-size:12px; font-weight:500; }
+        QMainWindow, QWidget {
+            background:#F5F5F5;
+            color:#171717;
+            font-family:"Microsoft YaHei";
+            font-size:13px;
+        }
+        QMainWindow { background:#F5F5F5; }
+        QStatusBar {
+            background:#FFFFFF;
+            color:#737373;
+            border-top:1px solid #E5E5E5;
+            min-height:29px;
+        }
+        QStatusBar QLabel { color:#737373; padding:0 8px; }
+
+        #sidebar {
+            background:#0D0D0D;
+            border-right:1px solid #202020;
+        }
+        #brand {
+            color:#FFFFFF;
+            background:transparent;
+            border:none;
+            padding:4px 8px 2px;
+            font-size:23px;
+            font-weight:700;
+            letter-spacing:.6px;
+        }
+        #brandSub {
+            color:#8A8A8A;
+            background:transparent;
+            border:none;
+            padding:0 8px 10px;
+            font-size:11px;
+            font-weight:500;
+        }
+        #navButton {
+            color:#BDBDBD;
+            background:transparent;
+            border:none;
+            border-left:3px solid transparent;
+            border-radius:0;
+            padding:11px 12px 11px 14px;
+            text-align:left;
+            font-weight:500;
+            min-height:25px;
+        }
+        #navButton:hover {
+            background:#171717;
+            color:#FFFFFF;
+        }
+        #navButton:checked {
+            background:transparent;
+            border-left:3px solid #FFFFFF;
+            color:#FFFFFF;
+            font-weight:700;
+        }
+        #navButton:pressed { background:#1F1F1F; }
+
+        #pageHeading {
+            color:#111111;
+            font-size:25px;
+            font-weight:700;
+        }
+        #mutedText { color:#737373; line-height:1.55; }
+        #sectionTitle { color:#171717; font-size:15px; font-weight:700; }
+        #metricTitle { color:#737373; font-size:12px; font-weight:500; }
         #metricValue { color:#111111; font-size:21px; font-weight:700; }
-        #sourcePath { color:#27272A; font-weight:650; }
-        #metricCard { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; min-height:70px; }
-        #metricCard:hover { background:#FCFCFC; border-color:#CFCFD2; }
-        #decisionCard { background:#FFFFFF; border:1px solid #E4E4E7; border-radius:14px; min-height:105px; }
-        #decisionCard:hover { background:#FCFCFC; border-color:#B8B8BE; }
-        #decisionTitle { color:#52525B; font-size:12px; font-weight:650; }
-        #decisionDetail { color:#71717A; font-size:12px; }
-        #panel, #gptSurface, #evidenceSurface, #aiSurface { background:#FFFFFF; border:1px solid #E7E7E9; border-radius:14px; }
-        #panel:hover, #gptSurface:hover, #evidenceSurface:hover, #aiSurface:hover { background:#FEFEFE; border-color:#CFCFD2; }
-        #gptSurface { border-color:#DEDEE1; }
-        #evidenceSurface { border-left:3px solid #18181B; }
-        #aiSurface { background:#FAFAFA; border-color:#DCDCE0; }
-        #infoPanel { background:#FAFAFA; border:1px solid #E4E4E7; border-radius:12px; }
-        #statusNeutral, #statusGood, #statusWarn, #statusBad { border-radius:9px; padding:5px 9px; font-size:12px; font-weight:650; }
-        #statusNeutral { color:#52525B; background:#F4F4F5; border:1px solid #E4E4E7; }
-        #statusGood { color:#166534; background:#F0FDF4; border:1px solid #BBF7D0; }
-        #statusWarn { color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; }
-        #statusBad { color:#991B1B; background:#FEF2F2; border:1px solid #FECACA; }
-        #guardStatus { color:#18181B; font-size:14px; font-weight:700; padding:4px 0; }
-        #primaryButton { background:#111111; color:#FFFFFF; border:1px solid #111111; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
-        #primaryButton:hover { background:#2F2F2F; border-color:#2F2F2F; }
-        #primaryButton:pressed { background:#444444; border-color:#444444; }
-        #primaryButton:disabled { background:#B4B4B4; border-color:#B4B4B4; color:#F5F5F5; }
-        #secondaryButton { background:#FFFFFF; color:#27272A; border:1px solid #D4D4D8; border-radius:10px; padding:9px 16px; font-weight:600; min-height:22px; }
-        #secondaryButton:hover { background:#F4F4F5; border-color:#A1A1AA; color:#111111; }
-        #secondaryButton:pressed { background:#EDEDEF; }
-        QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit { background:#FFFFFF; color:#18181B; border:1px solid #D4D4D8; border-radius:9px; padding:7px 9px; selection-background-color:#27272A; selection-color:#FFFFFF; }
-        QLineEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QTextEdit:hover { border-color:#A1A1AA; }
-        QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QTextEdit:focus { border:1px solid #52525B; background:#FFFFFF; }
-        QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled { background:#F4F4F5; color:#A1A1AA; }
+        #sourcePath { color:#262626; font-weight:650; }
+
+        #metricCard,
+        #decisionCard,
+        #panel,
+        #gptSurface,
+        #evidenceSurface,
+        #aiSurface {
+            background:#FFFFFF;
+            border:1px solid #E2E2E2;
+            border-radius:12px;
+        }
+        #metricCard { min-height:70px; }
+        #decisionCard { min-height:105px; }
+        #metricCard:hover,
+        #decisionCard:hover,
+        #panel:hover,
+        #gptSurface:hover,
+        #evidenceSurface:hover,
+        #aiSurface:hover {
+            background:#FFFFFF;
+            border-color:#BFBFBF;
+        }
+        #evidenceSurface { border-left:3px solid #262626; }
+        #aiSurface { background:#FFFFFF; }
+        #infoPanel {
+            background:#FAFAFA;
+            border:1px solid #E5E5E5;
+            border-radius:10px;
+        }
+        #decisionTitle { color:#525252; font-size:12px; font-weight:650; }
+        #decisionDetail { color:#737373; font-size:12px; }
+
+        #statusNeutral,
+        #statusGood,
+        #statusWarn,
+        #statusBad {
+            background:transparent;
+            border:none;
+            border-radius:0;
+            padding:2px 0;
+            font-size:13px;
+            font-weight:700;
+        }
+        #statusNeutral { color:#525252; }
+        #statusGood { color:#166534; }
+        #statusWarn { color:#8A5A00; }
+        #statusBad { color:#A61B1B; }
+        #guardStatus { color:#171717; font-size:14px; font-weight:700; padding:4px 0; }
+
+        #primaryButton {
+            background:#111111;
+            color:#FFFFFF;
+            border:1px solid #111111;
+            border-radius:8px;
+            padding:9px 16px;
+            font-weight:600;
+            min-height:22px;
+        }
+        #primaryButton:hover { background:#2B2B2B; border-color:#2B2B2B; }
+        #primaryButton:pressed { background:#3D3D3D; border-color:#3D3D3D; }
+        #primaryButton:disabled { background:#B5B5B5; border-color:#B5B5B5; color:#F5F5F5; }
+        #secondaryButton {
+            background:#FFFFFF;
+            color:#262626;
+            border:1px solid #D4D4D4;
+            border-radius:8px;
+            padding:9px 16px;
+            font-weight:600;
+            min-height:22px;
+        }
+        #secondaryButton:hover { background:#FAFAFA; border-color:#9E9E9E; color:#111111; }
+        #secondaryButton:pressed { background:#F0F0F0; }
+
+        QLineEdit, QComboBox, QDoubleSpinBox, QTextEdit {
+            background:#FFFFFF;
+            color:#171717;
+            border:1px solid #D4D4D4;
+            border-radius:8px;
+            padding:7px 9px;
+            selection-background-color:#E5E5E5;
+            selection-color:#111111;
+        }
+        QLineEdit:hover, QComboBox:hover, QDoubleSpinBox:hover, QTextEdit:hover { border-color:#A3A3A3; }
+        QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QTextEdit:focus { border:1px solid #525252; background:#FFFFFF; }
+        QLineEdit:disabled, QComboBox:disabled, QDoubleSpinBox:disabled, QTextEdit:disabled { background:#F5F5F5; color:#A3A3A3; }
         QComboBox::drop-down, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { border:none; background:transparent; }
-        QTableWidget { background:#FFFFFF; alternate-background-color:#FAFAFA; border:1px solid #E4E4E7; border-radius:10px; gridline-color:#F0F0F1; selection-background-color:#F0F0F1; selection-color:#111111; }
-        QHeaderView::section { background:#F7F7F8; color:#52525B; border:none; border-right:1px solid #ECECEF; border-bottom:1px solid #E4E4E7; padding:9px 8px; font-weight:650; }
+
+        QTableWidget {
+            background:#FFFFFF;
+            alternate-background-color:#FCFCFC;
+            border:1px solid #E5E5E5;
+            border-radius:9px;
+            gridline-color:#EFEFEF;
+            selection-background-color:#EEEEEE;
+            selection-color:#111111;
+        }
+        QHeaderView::section {
+            background:#FAFAFA;
+            color:#525252;
+            border:none;
+            border-right:1px solid #EEEEEE;
+            border-bottom:1px solid #E5E5E5;
+            padding:9px 8px;
+            font-weight:650;
+        }
         QTableWidget::item { padding:7px; border:none; }
-        QTableWidget::item:hover { background:#F5F5F6; }
-        QTableWidget::item:selected { background:#EDEDEF; color:#111111; }
-        QTabWidget::pane { background:#FFFFFF; border:1px solid #E4E4E7; border-radius:12px; top:-1px; }
-        QTabBar::tab { background:#F4F4F5; color:#71717A; border:1px solid #E4E4E7; padding:8px 18px; margin-right:4px; border-top-left-radius:8px; border-top-right-radius:8px; }
-        QTabBar::tab:hover { background:#ECECEE; color:#27272A; }
-        QTabBar::tab:selected { background:#FFFFFF; color:#111111; border-bottom-color:#FFFFFF; font-weight:650; }
+        QTableWidget::item:hover { background:#F5F5F5; }
+        QTableWidget::item:selected { background:#ECECEC; color:#111111; }
+
+        QTabWidget::pane {
+            background:#FFFFFF;
+            border:1px solid #E5E5E5;
+            border-radius:10px;
+            top:-1px;
+        }
+        QTabBar::tab {
+            background:transparent;
+            color:#737373;
+            border:none;
+            border-bottom:2px solid transparent;
+            padding:9px 18px;
+            margin-right:6px;
+            font-weight:500;
+        }
+        QTabBar::tab:hover { background:transparent; color:#262626; }
+        QTabBar::tab:selected {
+            background:transparent;
+            color:#111111;
+            border-bottom:2px solid #111111;
+            font-weight:700;
+        }
+
         QScrollBar:vertical { background:transparent; width:10px; margin:3px 2px; }
-        QScrollBar::handle:vertical { background:#D4D4D8; border-radius:4px; min-height:28px; }
-        QScrollBar::handle:vertical:hover { background:#A1A1AA; }
+        QScrollBar::handle:vertical { background:#D4D4D4; border-radius:4px; min-height:28px; }
+        QScrollBar::handle:vertical:hover { background:#A3A3A3; }
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
         QScrollBar:horizontal { background:transparent; height:10px; margin:2px 3px; }
-        QScrollBar::handle:horizontal { background:#D4D4D8; border-radius:4px; min-width:28px; }
-        QScrollBar::handle:horizontal:hover { background:#A1A1AA; }
+        QScrollBar::handle:horizontal { background:#D4D4D4; border-radius:4px; min-width:28px; }
+        QScrollBar::handle:horizontal:hover { background:#A3A3A3; }
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
-        QToolTip { background:#18181B; color:#FFFFFF; border:1px solid #3F3F46; border-radius:7px; padding:6px 8px; }
+        QToolTip { background:#171717; color:#FFFFFF; border:1px solid #333333; border-radius:6px; padding:6px 8px; }
     )");
 }
 
 QLabel* heading(const QString& text, int pointSize = 20) {
     auto* label = new QLabel(text);
-    label->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), pointSize, QFont::DemiBold));
+    label->setFont(QFont(QStringLiteral("Microsoft YaHei"), pointSize, QFont::DemiBold));
     label->setObjectName(QStringLiteral("pageHeading"));
     return label;
 }
@@ -282,40 +427,42 @@ QWidget* MainWindow::buildSidebar() {
     layout->setContentsMargins(18, 24, 18, 18);
     layout->setSpacing(8);
 
-    auto* brand = new QLabel(QStringLiteral("CATALYST\nLONGEVITY"));
+    auto* brand = new QLabel(QStringLiteral("智策"));
     brand->setObjectName(QStringLiteral("brand"));
     layout->addWidget(brand);
-    layout->addSpacing(22);
+    auto* brandSub = new QLabel(QStringLiteral("催化剂研究与实验决策"));
+    brandSub->setObjectName(QStringLiteral("brandSub"));
+    layout->addWidget(brandSub);
+    layout->addSpacing(16);
 
     auto* group = new QButtonGroup(sidebar);
     group->setExclusive(true);
     const QStringList labels = {
-        QStringLiteral("项目"),
         QStringLiteral("首页"),
         QStringLiteral("数据"),
         QStringLiteral("资料"),
         QStringLiteral("分析"),
         QStringLiteral("AI 助手"),
+        QStringLiteral("项目"),
         QStringLiteral("设置")
     };
+    const int pageIndices[] = {1, 2, 3, 4, 5, 0, 6};
 
     for (int i = 0; i < labels.size(); ++i) {
+        const int pageIndex = pageIndices[i];
         auto* button = new QPushButton(labels[i]);
         button->setCheckable(true);
         button->setObjectName(QStringLiteral("navButton"));
         button->setCursor(Qt::PointingHandCursor);
-        group->addButton(button, i);
+        group->addButton(button, pageIndex);
         layout->addWidget(button);
-        connect(button, &QPushButton::clicked, this, [this, i]() {
-            pages_->setCurrentIndex(i);
+        connect(button, &QPushButton::clicked, this, [this, pageIndex]() {
+            pages_->setCurrentIndex(pageIndex);
         });
-        if (i == 0) button->setChecked(true);
+        if (pageIndex == 1) button->setChecked(true);
     }
 
     layout->addStretch();
-    auto* buildLabel = new QLabel(QStringLiteral("Native Desktop\nC++ / Qt 6"));
-    buildLabel->setObjectName(QStringLiteral("sidebarFoot"));
-    layout->addWidget(buildLabel);
     return sidebar;
 }
 
@@ -373,9 +520,9 @@ QWidget* MainWindow::buildOverviewPage() {
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
-    titleBox->addWidget(heading(QStringLiteral("首页")));
+    titleBox->addWidget(heading(QStringLiteral("欢迎使用智策")));
     titleBox->addWidget(muted(QStringLiteral(
-        "查看催化剂长期表现、寿命指标和实验条件检查结果。")));
+        "集中查看长期稳定性、寿命指标、实验条件和下一步实验建议。")));
     top->addLayout(titleBox, 1);
 
     auto* demoButton = new QPushButton(QStringLiteral("内置数据集"));
@@ -401,7 +548,7 @@ QWidget* MainWindow::buildOverviewPage() {
     decisionHeading->setObjectName(QStringLiteral("sectionTitle"));
     decisionTop->addWidget(decisionHeading);
     decisionTop->addStretch();
-    decisionTop->addWidget(muted(QStringLiteral("先检查数据和实验条件，再查看比较结果。状态颜色只表示当前资料是否完整。")));
+    decisionTop->addWidget(muted(QStringLiteral("先检查数据与实验条件，再查看比较结果。状态标记仅用于提示当前信息完整度。")));
     layout->addLayout(decisionTop);
 
     auto* decisions = new QGridLayout;
@@ -763,7 +910,10 @@ QWidget* MainWindow::buildSettingsPage() {
     card->setObjectName(QStringLiteral("panel"));
     auto* cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(22, 20, 22, 20);
-    cardLayout->addWidget(new QLabel(QStringLiteral("催化剂长期稳定性评估与实验决策系统")));
+        auto* productName = new QLabel(QStringLiteral("智策"));
+    productName->setObjectName(QStringLiteral("sectionTitle"));
+    cardLayout->addWidget(productName);
+    cardLayout->addWidget(muted(QStringLiteral("催化剂长期稳定性评估与实验决策系统")));
     cardLayout->addWidget(muted(QStringLiteral("Windows 原生桌面应用 · C++20 + Qt 6 + SQLite")));
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
