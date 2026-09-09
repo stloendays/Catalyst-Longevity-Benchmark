@@ -81,42 +81,78 @@ double medianPositiveStep(const QVector<Record>& inputRows) {
     return deltas[deltas.size() / 2];
 }
 
-double roundPracticalTime(double hours) {
+double roundPracticalTime(double hours, double minimumGridHours = 0.0) {
     if (hours <= 0.0) return 0.0;
     double step = 1.0;
     if (hours >= 1000.0) step = 25.0;
     else if (hours >= 300.0) step = 10.0;
     else if (hours >= 120.0) step = 5.0;
     else if (hours >= 24.0) step = 2.0;
+    if (minimumGridHours > 0.0) step = qMax(step, minimumGridHours);
     return qMax(step, qRound(hours / step) * step);
 }
 
-double suggestedExtension(const QVector<Record>& inputRows) {
+QString planningConstraintText(const ExperimentPlanningConstraints& constraints) {
+    QStringList parts;
+    if (constraints.maxAdditionalHoursPerStage > 0.0) {
+        parts.append(QStringLiteral("单阶段最多追加 %1 h")
+            .arg(QString::number(constraints.maxAdditionalHoursPerStage, 'g', 6)));
+    }
+    if (constraints.minSamplingIntervalHours > 0.0) {
+        parts.append(QStringLiteral("最小采样间隔 %1 h")
+            .arg(QString::number(constraints.minSamplingIntervalHours, 'g', 6)));
+    }
+    return parts.isEmpty()
+        ? QStringLiteral("未设置额外排期约束")
+        : QStringLiteral("已应用排期约束：%1").arg(parts.join(QStringLiteral("、")));
+}
+
+double suggestedExtension(
+    const QVector<Record>& inputRows,
+    const ExperimentPlanningConstraints& constraints) {
     if (inputRows.isEmpty()) return 0.0;
     const auto rows = sortedRows(inputRows);
     const double latest = rows.back().timeHours;
     const double typicalStep = medianPositiveStep(rows);
     double target = qMax(latest * 1.25, latest + 2.0 * typicalStep);
     if (latest > 0.0) target = qMin(target, latest * 2.0);
-    return roundPracticalTime(target);
+    if (constraints.maxAdditionalHoursPerStage > 0.0) {
+        target = qMin(target, latest + constraints.maxAdditionalHoursPerStage);
+    }
+    target = roundPracticalTime(target, constraints.minSamplingIntervalHours);
+    if (target <= latest) {
+        const double fallback = constraints.minSamplingIntervalHours > 0.0
+            ? constraints.minSamplingIntervalHours
+            : qMax(1.0, typicalStep);
+        target = latest + fallback;
+    }
+    return target;
 }
 
-double largestGapMidpoint(const QVector<Record>& inputRows) {
+double largestGapMidpoint(
+    const QVector<Record>& inputRows,
+    const ExperimentPlanningConstraints& constraints) {
     const auto rows = sortedRows(inputRows);
     if (rows.size() < 2) {
         const double base = rows.isEmpty() ? 0.0 : rows.front().timeHours;
-        return roundPracticalTime(base + qMax(1.0, base * 0.25));
+        return roundPracticalTime(
+            base + qMax(1.0, base * 0.25), constraints.minSamplingIntervalHours);
     }
     double bestGap = -1.0;
-    double midpoint = 0.0;
+    double lower = 0.0;
+    double upper = 0.0;
     for (qsizetype i = 1; i < rows.size(); ++i) {
         const double gap = rows[i].timeHours - rows[i - 1].timeHours;
         if (gap > bestGap) {
             bestGap = gap;
-            midpoint = (rows[i].timeHours + rows[i - 1].timeHours) / 2.0;
+            lower = rows[i - 1].timeHours;
+            upper = rows[i].timeHours;
         }
     }
-    return roundPracticalTime(midpoint);
+    const double midpoint = (lower + upper) / 2.0;
+    const double rounded = roundPracticalTime(midpoint, constraints.minSamplingIntervalHours);
+    if (rounded > lower + 1.0e-9 && rounded < upper - 1.0e-9) return rounded;
+    return midpoint;
 }
 
 QString constantConditionText(const QVector<Record>& rows) {
@@ -187,6 +223,7 @@ double referenceAdjustedTarget(
     double latest,
     double dataTarget,
     const QVector<ReferenceMatch>& matches,
+    const ExperimentPlanningConstraints& constraints,
     QString* matchedCitation) {
     double bestTarget = dataTarget;
     double bestRelativeDistance = std::numeric_limits<double>::max();
@@ -204,7 +241,10 @@ double referenceAdjustedTarget(
             }
         }
     }
-    return roundPracticalTime(bestTarget);
+    if (constraints.maxAdditionalHoursPerStage > 0.0) {
+        bestTarget = qMin(bestTarget, latest + constraints.maxAdditionalHoursPerStage);
+    }
+    return roundPracticalTime(bestTarget, constraints.minSamplingIntervalHours);
 }
 
 bool pairHasMismatch(const ConditionAudit& audit, const QString& a, const QString& b) {
@@ -361,7 +401,8 @@ DataCheckResult ResearchAdvisor::checkData(const QVector<Record>& records, const
 
 QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
     const QVector<Record>& records,
-    const AnalysisResult& analysis) {
+    const AnalysisResult& analysis,
+    const ExperimentPlanningConstraints& constraints) {
     QVector<ExperimentAdvice> advice;
     if (records.isEmpty()) {
         advice.append(makeAdvice(
@@ -400,7 +441,7 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
             : QStringLiteral("保持 %1 不变").arg(conditionText);
 
         if (summary.observations < 3) {
-            const double midpoint = largestGapMidpoint(rows);
+            const double midpoint = largestGapMidpoint(rows, constraints);
             const QString target = midpoint > 0.0
                 ? QStringLiteral("先在约 %1 h 补 1 个时间点，使该样品至少达到 3 个观测点；%2。")
                     .arg(QString::number(midpoint, 'g', 6), keepConditions)
@@ -420,10 +461,11 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
         if (summary.t90.status == ThresholdStatus::RightCensored) {
             const auto sorted = sortedRows(rows);
             const double latest = sorted.isEmpty() ? summary.latestTimeHours : sorted.back().timeHours;
-            const double dataTarget = suggestedExtension(rows);
+            const double dataTarget = suggestedExtension(rows, constraints);
             QString matchedCitation;
-            const double target = referenceAdjustedTarget(latest, dataTarget, referenceMatches, &matchedCitation);
-            const double middle = roundPracticalTime(latest + (target - latest) / 2.0);
+            const double target = referenceAdjustedTarget(latest, dataTarget, referenceMatches, constraints, &matchedCitation);
+            const double middle = roundPracticalTime(
+                latest + (target - latest) / 2.0, constraints.minSamplingIntervalHours);
             const double ratio = latest > 0.0 ? target / latest : 1.0;
             int score = baseFeasibilityScore(rows, analysis, hasReferenceSupport, ratio);
             QString targetText = QStringLiteral("%1；下一阶段先做到约 %2 h")
@@ -443,27 +485,48 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
                 targetText,
                 score,
                 hasReferenceSupport
-                    ? QStringLiteral("当前采样间隔 + 公开同类实验参照：%1").arg(referenceBasis)
-                    : QStringLiteral("当前采样间隔与寿命下限规则；%1").arg(referenceBasis)));
+                    ? QStringLiteral("当前采样间隔 + 公开同类实验参照：%1；%2")
+                        .arg(referenceBasis, planningConstraintText(constraints))
+                    : QStringLiteral("当前采样间隔与寿命下限规则；%1；%2")
+                        .arg(referenceBasis, planningConstraintText(constraints))));
         } else if (summary.t90.status == ThresholdStatus::Interval
                    && summary.t90.lowerHours && summary.t90.upperHours) {
             const double lower = *summary.t90.lowerHours;
             const double upper = *summary.t90.upperHours;
-            const double midpoint = roundPracticalTime((lower + upper) / 2.0);
-            const int score = baseFeasibilityScore(rows, analysis, hasReferenceSupport);
+            const double width = upper - lower;
+            const bool spacingBlocksRefinement = constraints.minSamplingIntervalHours > 0.0
+                && constraints.minSamplingIntervalHours >= width - 1.0e-9;
+            const double midpoint = spacingBlocksRefinement
+                ? (lower + upper) / 2.0
+                : roundPracticalTime((lower + upper) / 2.0, constraints.minSamplingIntervalHours);
+            int score = baseFeasibilityScore(rows, analysis, hasReferenceSupport);
+            if (spacingBlocksRefinement) score = qMin(score, 62);
             advice.append(makeAdvice(
                 AdvicePriority::Important,
                 summary.catalyst,
-                QStringLiteral("只补一个 T90 关键点"),
-                QStringLiteral("T90 目前只知道落在 %1–%2 h；与其整套重做，先在区间中部补点能直接缩小不确定范围。")
-                    .arg(QString::number(lower, 'g', 6), QString::number(upper, 'g', 6)),
-                QStringLiteral("%1，在约 %2 h 增加 1 个采样点；补测后重新计算 T90 区间，再决定是否需要第二个点。")
-                    .arg(keepConditions, QString::number(midpoint, 'g', 6)),
+                spacingBlocksRefinement
+                    ? QStringLiteral("先确认采样能力")
+                    : QStringLiteral("只补一个 T90 关键点"),
+                spacingBlocksRefinement
+                    ? QStringLiteral("T90 位于 %1–%2 h，但设置的最小采样间隔 %3 h 已不小于该区间宽度，当前排期约束下无法继续有效二分。")
+                        .arg(QString::number(lower, 'g', 6), QString::number(upper, 'g', 6),
+                             QString::number(constraints.minSamplingIntervalHours, 'g', 6))
+                    : QStringLiteral("T90 目前只知道落在 %1–%2 h；与其整套重做，先在区间中部补点能直接缩小不确定范围。")
+                        .arg(QString::number(lower, 'g', 6), QString::number(upper, 'g', 6)),
+                spacingBlocksRefinement
+                    ? QStringLiteral("保持原 T90 区间；若该区间必须继续缩小，先确认仪器和排期是否允许小于 %1 h 的采样间隔。")
+                        .arg(QString::number(width, 'g', 6))
+                    : QStringLiteral("%1，在约 %2 h 增加 1 个采样点；补测后重新计算 T90 区间，再决定是否需要第二个点。")
+                        .arg(keepConditions, QString::number(midpoint, 'g', 6)),
                 score,
-                QStringLiteral("依据当前 T90 实测区间的二分加密原则；公开参照只用于校验测试量级，不替代本组数据。")));
+                QStringLiteral("依据当前 T90 实测区间的二分加密原则；公开参照只用于校验测试量级；%1。")
+                    .arg(planningConstraintText(constraints))));
         } else if (summary.t90.status == ThresholdStatus::LeftCensored) {
             const double upper = summary.t90.upperHours.value_or(summary.initialTimeHours);
-            const double target = upper > 0.0 ? roundPracticalTime(upper * 0.5) : 0.0;
+            double target = upper > 0.0
+                ? roundPracticalTime(upper * 0.5, constraints.minSamplingIntervalHours)
+                : 0.0;
+            if (upper > 0.0 && target >= upper) target = upper * 0.5;
             const int score = baseFeasibilityScore(rows, analysis, false);
             advice.append(makeAdvice(
                 AdvicePriority::High,
@@ -475,7 +538,8 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
                         .arg(keepConditions, QString::number(target, 'g', 6))
                     : QStringLiteral("保留 0 h 基线，并增加更早的首个采样点。"),
                 score,
-                QStringLiteral("依据当前左侧区间；建议时间取现有上界的一半并按可操作时间刻度取整。")));
+                QStringLiteral("依据当前左侧区间；建议时间取现有上界的一半并按可操作时间刻度取整；%1。")
+                    .arg(planningConstraintText(constraints))));
         }
 
         const QStringList missing = missingConditionFields(rows);

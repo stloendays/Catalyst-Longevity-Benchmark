@@ -66,7 +66,8 @@ QString buildHtml(
     const QVector<Record>& records,
     const AnalysisResult& result,
     const QString& sourceLabel,
-    const QVector<EvidenceItem>& evidenceItems) {
+    const QVector<EvidenceItem>& evidenceItems,
+    const ExperimentPlanningConstraints& planningConstraints) {
     const EvidencePacket packet = EvidencePacketBuilder::build(evidenceItems);
 
     QString html;
@@ -196,8 +197,21 @@ QString buildHtml(
         html += QStringLiteral("</table>");
     }
 
-    const auto experimentAdvice = ResearchAdvisor::experimentAdvice(records, result);
+    const auto experimentAdvice = ResearchAdvisor::experimentAdvice(records, result, planningConstraints);
     html += QStringLiteral("<h2>下一步实验建议</h2>");
+    if (planningConstraints.maxAdditionalHoursPerStage > 0.0 || planningConstraints.minSamplingIntervalHours > 0.0) {
+        QStringList constraints;
+        if (planningConstraints.maxAdditionalHoursPerStage > 0.0) {
+            constraints.append(QStringLiteral("单阶段最多追加 %1 h")
+                .arg(QString::number(planningConstraints.maxAdditionalHoursPerStage, 'g', 6)));
+        }
+        if (planningConstraints.minSamplingIntervalHours > 0.0) {
+            constraints.append(QStringLiteral("最小采样间隔 %1 h")
+                .arg(QString::number(planningConstraints.minSamplingIntervalHours, 'g', 6)));
+        }
+        html += QStringLiteral("<p class='small'>本次实验排期约束：%1。该约束仅用于计划可执行性，不代表设备安全限值。</p>")
+            .arg(escape(constraints.join(QStringLiteral("、"))));
+    }
     if (experimentAdvice.isEmpty()) {
         html += QStringLiteral("<p>当前数据未触发额外实验建议。</p>");
     } else {
@@ -353,7 +367,8 @@ bool writePdf(
     const AnalysisResult& result,
     const QString& sourceLabel,
     const QVector<EvidenceItem>& evidenceItems,
-    QString* errorMessage) {
+    QString* errorMessage,
+    const ExperimentPlanningConstraints& planningConstraints) {
     if (path.trimmed().isEmpty()) {
         if (errorMessage) *errorMessage = QStringLiteral("报告输出路径为空。");
         return false;
@@ -372,7 +387,7 @@ bool writePdf(
     QTextDocument document;
     document.setDefaultFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
     document.setDocumentMargin(24.0);
-    document.setHtml(buildHtml(records, result, sourceLabel, evidenceItems));
+    document.setHtml(buildHtml(records, result, sourceLabel, evidenceItems, planningConstraints));
     document.print(&writer);
 
     const QFileInfo output(path);
@@ -391,7 +406,7 @@ bool ReportExporter::exportPdf(
     const AnalysisResult& result,
     const QString& sourceLabel,
     QString* errorMessage) {
-    return writePdf(path, {}, result, sourceLabel, {}, errorMessage);
+    return writePdf(path, {}, result, sourceLabel, {}, errorMessage, {});
 }
 
 bool ReportExporter::exportPdf(
@@ -400,7 +415,7 @@ bool ReportExporter::exportPdf(
     const QString& sourceLabel,
     const QVector<EvidenceItem>& evidenceItems,
     QString* errorMessage) {
-    return writePdf(path, {}, result, sourceLabel, evidenceItems, errorMessage);
+    return writePdf(path, {}, result, sourceLabel, evidenceItems, errorMessage, {});
 }
 
 bool ReportExporter::exportPdf(
@@ -409,8 +424,9 @@ bool ReportExporter::exportPdf(
     const AnalysisResult& result,
     const QString& sourceLabel,
     const QVector<EvidenceItem>& evidenceItems,
-    QString* errorMessage) {
-    return writePdf(path, records, result, sourceLabel, evidenceItems, errorMessage);
+    QString* errorMessage,
+    const ExperimentPlanningConstraints& planningConstraints) {
+    return writePdf(path, records, result, sourceLabel, evidenceItems, errorMessage, planningConstraints);
 }
 
 } // namespace catalyst

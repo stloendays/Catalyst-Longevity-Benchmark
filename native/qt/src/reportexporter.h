@@ -2,6 +2,7 @@
 
 #include "documentanalyzer.h"
 #include "models.h"
+#include "researchadvisor.h"
 
 #include <QString>
 #include <QVector>
@@ -29,7 +30,8 @@ public:
         const AnalysisResult& result,
         const QString& sourceLabel,
         const QVector<EvidenceItem>& evidenceItems,
-        QString* errorMessage = nullptr);
+        QString* errorMessage = nullptr,
+        const ExperimentPlanningConstraints& planningConstraints = ExperimentPlanningConstraints{});
 };
 
 } // namespace catalyst

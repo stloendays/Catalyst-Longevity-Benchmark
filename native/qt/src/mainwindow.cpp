@@ -17,6 +17,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QDoubleSpinBox>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
@@ -589,6 +590,43 @@ QWidget* MainWindow::buildAnalysisPage() {
     adviceLayout->setContentsMargins(12, 12, 12, 12);
     adviceLayout->addWidget(muted(QStringLiteral(
         "建议会同时检查当前采样间隔、实验条件完整度、建议跨度和可匹配的公开实验窗口。公开参考只用于校验量级，不会直接替代你的实验条件。")));
+
+    auto* constraintFrame = new QFrame;
+    constraintFrame->setObjectName(QStringLiteral("infoPanel"));
+    auto* constraintLayout = new QHBoxLayout(constraintFrame);
+    constraintLayout->setContentsMargins(14, 10, 14, 10);
+    constraintLayout->setSpacing(10);
+    auto* constraintTitle = new QLabel(QStringLiteral("实验排期约束（可选）"));
+    constraintTitle->setObjectName(QStringLiteral("sectionTitle"));
+    constraintLayout->addWidget(constraintTitle);
+    constraintLayout->addWidget(new QLabel(QStringLiteral("单阶段最多追加")));
+    maxAdditionalHoursSpin_ = new QDoubleSpinBox;
+    maxAdditionalHoursSpin_->setRange(0.0, 100000.0);
+    maxAdditionalHoursSpin_->setDecimals(1);
+    maxAdditionalHoursSpin_->setSingleStep(12.0);
+    maxAdditionalHoursSpin_->setSuffix(QStringLiteral(" h"));
+    maxAdditionalHoursSpin_->setSpecialValueText(QStringLiteral("自动"));
+    maxAdditionalHoursSpin_->setToolTip(QStringLiteral("限制每个建议阶段相对当前最长测试时间最多再增加多少小时；0 表示自动。它不是反应器安全上限。"));
+    constraintLayout->addWidget(maxAdditionalHoursSpin_);
+    constraintLayout->addWidget(new QLabel(QStringLiteral("最小采样间隔")));
+    minSamplingIntervalSpin_ = new QDoubleSpinBox;
+    minSamplingIntervalSpin_->setRange(0.0, 10000.0);
+    minSamplingIntervalSpin_->setDecimals(1);
+    minSamplingIntervalSpin_->setSingleStep(1.0);
+    minSamplingIntervalSpin_->setSuffix(QStringLiteral(" h"));
+    minSamplingIntervalSpin_->setSpecialValueText(QStringLiteral("自动"));
+    minSamplingIntervalSpin_->setToolTip(QStringLiteral("按设备、人员排期或分析频率设置能够执行的最小采样间隔；0 表示自动。"));
+    constraintLayout->addWidget(minSamplingIntervalSpin_);
+    constraintLayout->addStretch();
+    constraintLayout->addWidget(muted(QStringLiteral("0 = 自动；仅用于排期可执行性，不代表设备安全许可")));
+    adviceLayout->addWidget(constraintFrame);
+    connect(maxAdditionalHoursSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        refreshResearchSupportViews();
+    });
+    connect(minSamplingIntervalSpin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double) {
+        refreshResearchSupportViews();
+    });
+
     adviceTable_ = new QTableWidget(0, 7);
     adviceTable_->setHorizontalHeaderLabels({
         QStringLiteral("优先级"), QStringLiteral("催化剂"), QStringLiteral("建议"),
@@ -844,7 +882,11 @@ void MainWindow::exportReport() {
     const QVector<EvidenceItem> evidence = evidencePage_
         ? evidencePage_->evidenceItems()
         : QVector<EvidenceItem>{};
-    if (!ReportExporter::exportPdf(path, records_, analysis_, sourceLabelText_, evidence, &message)) {
+    ExperimentPlanningConstraints planningConstraints;
+    if (maxAdditionalHoursSpin_) planningConstraints.maxAdditionalHoursPerStage = maxAdditionalHoursSpin_->value();
+    if (minSamplingIntervalSpin_) planningConstraints.minSamplingIntervalHours = minSamplingIntervalSpin_->value();
+    if (!ReportExporter::exportPdf(
+            path, records_, analysis_, sourceLabelText_, evidence, &message, planningConstraints)) {
         QMessageBox::warning(this, QStringLiteral("导出失败"), message);
         setStatus(message, true);
         return;
@@ -1210,7 +1252,10 @@ void MainWindow::refreshResearchSupportViews() {
     }
 
     if (adviceTable_) {
-        const auto advice = ResearchAdvisor::experimentAdvice(records_, analysis_);
+        ExperimentPlanningConstraints constraints;
+        if (maxAdditionalHoursSpin_) constraints.maxAdditionalHoursPerStage = maxAdditionalHoursSpin_->value();
+        if (minSamplingIntervalSpin_) constraints.minSamplingIntervalHours = minSamplingIntervalSpin_->value();
+        const auto advice = ResearchAdvisor::experimentAdvice(records_, analysis_, constraints);
         adviceTable_->setRowCount(advice.size());
         for (qsizetype row = 0; row < advice.size(); ++row) {
             const auto& item = advice[row];
