@@ -1,0 +1,60 @@
+name: Validate Reference Knowledge Base Once
+
+on:
+  push:
+    branches: [real-reference-kb-feasible-advice]
+    paths:
+      - ".github/workflows/validate-reference-kb-once.yml"
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: real-reference-kb-feasible-advice
+
+      - name: Check reference snapshot files
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "native/qt/src/referenceknowledge.cpp")) { throw "referenceknowledge.cpp missing" }
+          if (-not (Test-Path "docs/BUILTIN_REFERENCE_KB_CN.md")) { throw "reference knowledge documentation missing" }
+          $hits = Select-String -Path "native/qt/src/referenceknowledge.cpp" -Pattern "CID 297|10.1002/cctc.201500379|10.3390/pr9040706"
+          if ($hits.Count -lt 3) { throw "expected public reference identifiers missing" }
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+
+      - name: Build native desktop app
+        shell: pwsh
+        run: cmake --build build-qt --config Release --parallel
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Smoke-test desktop window
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Desktop window exited unexpectedly with code $($process.ExitCode)" }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
