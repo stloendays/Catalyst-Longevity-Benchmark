@@ -132,8 +132,8 @@ QString formatLabel(const QString& format) {
 EvidencePage::EvidencePage(QWidget* parent)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(34, 28, 34, 28);
-    layout->setSpacing(14);
+    layout->setContentsMargins(34, 20, 34, 16);
+    layout->setSpacing(10);
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
@@ -152,7 +152,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     sourceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* sourceLayout = new QVBoxLayout(sourceFrame);
     sourceLayout->setContentsMargins(18, 14, 18, 14);
-    sourceFrame->setMaximumHeight(96);
+    sourceFrame->setMaximumHeight(82);
     auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));
     sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
     sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));
@@ -194,8 +194,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     signalsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     signalsTable_->verticalHeader()->setVisible(false);
     signalsTable_->setAlternatingRowColors(true);
-    signalsTable_->setMaximumHeight(82);
-    signalFrame->setMaximumHeight(135);
+    signalsTable_->setMaximumHeight(50);
+    signalFrame->setMaximumHeight(102);
     signalsTable_->setMouseTracking(true);
     signalLayout->addWidget(signalsTable_);
     layout->addWidget(signalFrame);
@@ -221,8 +221,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     evidenceTable_->setWordWrap(false);
     evidenceTable_->setMouseTracking(true);
-    evidenceTable_->setMinimumHeight(105);
-    evidenceTable_->setMaximumHeight(135);
+    evidenceTable_->setMinimumHeight(78);
+    evidenceTable_->setMaximumHeight(90);
     evidenceLayout->addWidget(evidenceTable_);
 
     auto* bindRow = new QHBoxLayout;
@@ -264,7 +264,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     actionRow->addWidget(returnButton);
     actionRow->addWidget(unbindButton);
     evidenceLayout->addLayout(actionRow);
-    evidenceFrame->setMaximumHeight(260);
+    evidenceFrame->setMinimumHeight(225);
+    evidenceFrame->setMaximumHeight(238);
     layout->addWidget(evidenceFrame);
 
     auto* packetFrame = new QFrame;
@@ -284,9 +285,9 @@ EvidencePage::EvidencePage(QWidget* parent)
         "只有已关联到明确催化剂和时间点，并经人工确认的资料会进入 AI 可用内容；其余条目保留在资料列表中，不参与自动分析。")));
     packetPreview_ = new QTextEdit;
     packetPreview_->setReadOnly(true);
-    packetPreview_->setMinimumHeight(50);
-    packetPreview_->setMaximumHeight(68);
-    packetFrame->setMaximumHeight(155);
+    packetPreview_->setMinimumHeight(36);
+    packetPreview_->setMaximumHeight(48);
+    packetFrame->setMaximumHeight(135);
     packetPreview_->setPlaceholderText(QStringLiteral("确认至少一条资料后，这里会显示供 AI 使用的内容。"));
     packetLayout->addWidget(packetPreview_);
     layout->addWidget(packetFrame);
@@ -317,7 +318,7 @@ void EvidencePage::setEvidenceItems(const QVector<EvidenceItem>& items) {
     documentSignals_ = DocumentSignals{};
     resetCurrentDocumentSummary();
     if (!evidenceItems_.isEmpty()) {
-        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条证据候选").arg(evidenceItems_.size()));
+        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条资料").arg(evidenceItems_.size()));
     }
     refreshEvidenceTable();
 }
@@ -467,7 +468,7 @@ void EvidencePage::returnSelectedToReview() {
 
 void EvidencePage::resetCurrentDocumentSummary() {
     sourceLabel_->setText(QStringLiteral("尚未加载资料"));
-    documentInfoLabel_->setText(QStringLiteral("—"));
+    documentInfoLabel_->clear();
     warningLabel_->clear();
     pageCountLabel_->setText(QStringLiteral("—"));
     characterLabel_->setText(QStringLiteral("—"));
@@ -547,7 +548,7 @@ void EvidencePage::refreshEvidenceTable() {
             : QStringLiteral("%1\n备注：%2").arg(item.snippet, item.note);
         evidenceTable_->setItem(row, 7, readOnlyItem(context.isEmpty() ? QStringLiteral("—") : context));
     }
-    evidenceTable_->resizeRowsToContents();
+    evidenceTable_->verticalHeader()->setDefaultSectionSize(32);
     refreshEvidencePacket();
 }
 
