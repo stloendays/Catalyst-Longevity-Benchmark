@@ -36,6 +36,13 @@ enum class AdvicePriority {
     High
 };
 
+struct ExperimentPlanningConstraints {
+    // 0 means automatic/no user-specified planning cap. These values are
+    // scheduling constraints, not reactor safety limits.
+    double maxAdditionalHoursPerStage = 0.0;
+    double minSamplingIntervalHours = 0.0;
+};
+
 struct ExperimentAdvice {
     AdvicePriority priority = AdvicePriority::Normal;
     QString catalyst;
@@ -64,7 +71,8 @@ public:
     static DataCheckResult checkData(const QVector<Record>& records, const AnalysisResult& analysis);
     static QVector<ExperimentAdvice> experimentAdvice(
         const QVector<Record>& records,
-        const AnalysisResult& analysis);
+        const AnalysisResult& analysis,
+        const ExperimentPlanningConstraints& constraints = ExperimentPlanningConstraints{});
     static QVector<PairComparison> pairComparisons(
         const QVector<Record>& records,
         const AnalysisResult& analysis);
