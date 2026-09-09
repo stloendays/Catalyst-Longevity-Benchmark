@@ -1,0 +1,32 @@
+name: Apply Decision Support Report Once
+
+on:
+  push:
+    branches: [ui-linked-catalyst-focus]
+    paths:
+      - ".github/workflows/apply-report-decision-support-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui-linked-catalyst-focus
+          fetch-depth: 0
+
+      - name: Apply report decision support sections
+        run: python tools/apply_report_decision_support.py
+
+      - name: Commit source changes and cleanup
+        shell: bash
+        run: |
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          rm -f tools/apply_report_decision_support.py .github/workflows/apply-report-decision-support-once.yml
+          git add native/qt/src/reportexporter.h native/qt/src/reportexporter.cpp native/qt/src/mainwindow.cpp native/qt/src/main.cpp tools/apply_report_decision_support.py .github/workflows/apply-report-decision-support-once.yml
+          git commit -m "Include data checks comparisons and experiment advice in PDF report"
+          git push origin ui-linked-catalyst-focus
