@@ -1,13 +1,17 @@
 name: Local2B MCP Step 3A recover
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - .github/workflows/local2b-mcp-step3a-recover.yml
-      - training/local2b_mcp/run_server_qvac_lora.sh
 
 permissions:
   contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
 
 jobs:
   recover:
@@ -41,7 +45,8 @@ jobs:
           cp /home/ubuntu/local2b-training/step3a/train.jsonl "$ROOT/train.jsonl"
           cp /home/ubuntu/local2b-training/step3a/manifest.json "$ROOT/manifest.json"
           rm -rf "$ROOT/checkpoints"
-          /home/ubuntu/local2b-training/run_server_qvac_lora.sh \
+          flock -n /home/ubuntu/local2b-training/server-lora.lock \
+            /home/ubuntu/local2b-training/run_server_qvac_lora.sh \
             --data "$ROOT/train.jsonl" \
             --output "$ROOT/local2b-mcp-step3a-r4-qv.gguf" \
             --context 512 --batch 32 --ubatch 16 \
