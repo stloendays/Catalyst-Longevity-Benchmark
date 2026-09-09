@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - tools/build_softcopyright_word.py
+      - tools/compact_softcopyright_word.py
       - .github/workflows/build-softcopyright-word.yml
 
 permissions:
@@ -72,6 +73,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "docs\software-copyright\screenshots" | Out-Null
           python tools/build_softcopyright_word.py --screenshots ui-screenshots --output "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx"
+          python tools/compact_softcopyright_word.py "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx"
           Copy-Item "ui-screenshots\*.png" "docs\software-copyright\screenshots\" -Force
           if (-not (Test-Path "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx")) { throw "DOCX was not produced" }
 
