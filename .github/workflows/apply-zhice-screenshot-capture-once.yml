@@ -69,6 +69,7 @@ jobs:
         run: |
           Remove-Item -Force "tools\apply_zhice_screenshot_capture.py"
           Remove-Item -Force ".github\workflows\apply-zhice-screenshot-capture-once.yml"
+          if (Test-Path ".github\workflows\ui-screenshots.yml") { Remove-Item -Force ".github\workflows\ui-screenshots.yml" }
           if (Test-Path "build-qt") { Remove-Item -Recurse -Force "build-qt" }
           if (Test-Path "ui-screenshots") { Remove-Item -Recurse -Force "ui-screenshots" }
           git config user.name "github-actions[bot]"
