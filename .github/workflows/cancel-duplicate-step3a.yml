@@ -1,0 +1,22 @@
+name: Cancel duplicate Step3A run
+
+on:
+  push:
+    paths:
+      - .github/workflows/cancel-duplicate-step3a.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel duplicate recovery run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            repos/${{ github.repository }}/actions/runs/34296317190/cancel
+          echo 'DUPLICATE_RUN_CANCEL_REQUESTED=34296317190'
