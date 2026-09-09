@@ -25,17 +25,19 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           date -Is
-          tail -120 /home/ubuntu/local2b-training/step3a/train.log 2>/dev/null || true
           echo '=== FILES ==='
           ls -lh /home/ubuntu/local2b-training/step3a 2>/dev/null || true
-          echo '=== DEST ==='
-          ls -lh /opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf 2>/dev/null || true
+          echo '=== ADAPTERS ==='
+          ls -lh /opt/rhocodec-llm/adapters 2>/dev/null || true
           echo '=== PROC ==='
           ps -eo pid,%cpu,%mem,etime,args | grep -E 'llama-finetune-lora|llama-server' | grep -v grep || true
+          echo '=== MEMORY ==='
+          free -h
           echo '=== SERVICE ==='
           systemctl is-active rhocodec-llm.service || true
+          curl -fsS http://127.0.0.1:18080/v1/models || true
           REMOTE
       - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-# progress probe 3
+# morning recovery probe
