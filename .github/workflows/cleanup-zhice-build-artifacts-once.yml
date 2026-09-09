@@ -1,0 +1,32 @@
+name: Cleanup Zhice Build Artifacts Once
+
+on:
+  push:
+    branches: [ui-zhice-native-polish]
+    paths:
+      - ".github/workflows/cleanup-zhice-build-artifacts-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ui-zhice-native-polish
+          fetch-depth: 0
+
+      - name: Remove generated build tree and ignore it
+        shell: bash
+        run: |
+          rm -rf build-qt
+          printf '/build-qt/\n' > .gitignore
+          rm -f .github/workflows/cleanup-zhice-build-artifacts-once.yml
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add -A
+          git commit -m "Remove generated native build artifacts"
+          git push origin HEAD:ui-zhice-native-polish
