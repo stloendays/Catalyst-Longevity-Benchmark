@@ -116,15 +116,20 @@ double suggestedExtension(
     const double typicalStep = medianPositiveStep(rows);
     double target = qMax(latest * 1.25, latest + 2.0 * typicalStep);
     if (latest > 0.0) target = qMin(target, latest * 2.0);
-    if (constraints.maxAdditionalHoursPerStage > 0.0) {
-        target = qMin(target, latest + constraints.maxAdditionalHoursPerStage);
-    }
+    const double userCap = constraints.maxAdditionalHoursPerStage > 0.0
+        ? latest + constraints.maxAdditionalHoursPerStage
+        : std::numeric_limits<double>::max();
+    target = qMin(target, userCap);
     target = roundPracticalTime(target, constraints.minSamplingIntervalHours);
+    if (target > userCap) target = userCap;
     if (target <= latest) {
         const double fallback = constraints.minSamplingIntervalHours > 0.0
             ? constraints.minSamplingIntervalHours
             : qMax(1.0, typicalStep);
-        target = latest + fallback;
+        const double allowedFallback = constraints.maxAdditionalHoursPerStage > 0.0
+            ? qMin(fallback, constraints.maxAdditionalHoursPerStage)
+            : fallback;
+        target = latest + qMax(0.1, allowedFallback);
     }
     return target;
 }
@@ -241,10 +246,16 @@ double referenceAdjustedTarget(
             }
         }
     }
-    if (constraints.maxAdditionalHoursPerStage > 0.0) {
-        bestTarget = qMin(bestTarget, latest + constraints.maxAdditionalHoursPerStage);
+    const double userCap = constraints.maxAdditionalHoursPerStage > 0.0
+        ? latest + constraints.maxAdditionalHoursPerStage
+        : std::numeric_limits<double>::max();
+    bestTarget = qMin(bestTarget, userCap);
+    bestTarget = roundPracticalTime(bestTarget, constraints.minSamplingIntervalHours);
+    if (bestTarget > userCap) bestTarget = userCap;
+    if (bestTarget <= latest && constraints.maxAdditionalHoursPerStage > 0.0) {
+        bestTarget = latest + qMax(0.1, constraints.maxAdditionalHoursPerStage);
     }
-    return roundPracticalTime(bestTarget, constraints.minSamplingIntervalHours);
+    return bestTarget;
 }
 
 bool pairHasMismatch(const ConditionAudit& audit, const QString& a, const QString& b) {
