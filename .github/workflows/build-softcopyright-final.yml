@@ -1,0 +1,82 @@
+name: Build Zhice Final Software Copyright Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - tools/build_softcopyright_final_package.py
+      - .github/workflows/build-softcopyright-final.yml
+      - native/qt/src/**
+      - docs/软件操作说明.md
+      - docs/software-copyright/screenshots/**
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zhice-softcopyright-final
+  cancel-in-progress: true
+
+jobs:
+  build-final-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install document dependencies
+        run: python -m pip install python-docx
+
+      - name: Build final software copyright materials
+        run: |
+          rm -rf docs/software-copyright/final
+          python tools/build_softcopyright_final_package.py \
+            --repo-root . \
+            --output-dir docs/software-copyright/final \
+            --source-sha "$GITHUB_SHA"
+
+      - name: Validate generated package
+        run: |
+          test -s "docs/software-copyright/final/智策_V1.0_源程序鉴别材料.docx"
+          test -s "docs/software-copyright/final/智策_V1.0_软件操作说明书.docx"
+          test -s "docs/software-copyright/final/智策_V1.0_软件著作权申请信息核对表.docx"
+          test -s "docs/software-copyright/final/智策_V1.0_软件著作权正式材料包.zip"
+          grep -q "每页源程序行数：50" "docs/software-copyright/final/智策_V1.0_源程序生成记录.txt"
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path('docs/software-copyright/final')
+          for p in root.glob('*.docx'):
+              with ZipFile(p) as z:
+                  assert '[Content_Types].xml' in z.namelist(), p
+          with ZipFile(root / '智策_V1.0_软件著作权正式材料包.zip') as z:
+              names = set(z.namelist())
+              assert '智策_V1.0_源程序鉴别材料.docx' in names
+              assert '智策_V1.0_软件操作说明书.docx' in names
+              assert '智策_V1.0_软件著作权申请信息核对表.docx' in names
+          PY
+
+      - name: Commit generated materials
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- docs/software-copyright/final
+          git diff --cached --quiet && exit 0
+          git commit -m "Generate Zhice V1.0 final software copyright materials [skip ci]"
+          git push origin HEAD:main
+
+      - name: Upload final package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhice-V1.0-Final-Software-Copyright-Package
+          path: docs/software-copyright/final/*
+          if-no-files-found: error
