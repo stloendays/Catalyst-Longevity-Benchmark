@@ -1,4 +1,5 @@
 #include "analysisengine.h"
+#include "builtindatasets.h"
 #include "csvreader.h"
 #include "documentanalyzer.h"
 #include "evidencepacket.h"
@@ -586,9 +587,9 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
     } else if (text == QStringLiteral("另存为")) {
         *icon = UiIcon::SaveAs;
         *tooltip = QStringLiteral("将当前项目保存为新文件");
-    } else if (text == QStringLiteral("载入示例数据") || text == QStringLiteral("示例数据")) {
+    } else if (text == QStringLiteral("载入示例数据") || text == QStringLiteral("示例数据") || text == QStringLiteral("内置数据集")) {
         *icon = UiIcon::Demo;
-        *tooltip = QStringLiteral("载入内置示例数据快速体验");
+        *tooltip = QStringLiteral("选择内置数据集进行分析或功能演示");
     } else if (text == QStringLiteral("导入数据") || text == QStringLiteral("选择数据文件")) {
         *icon = UiIcon::Import;
         *tooltip = QStringLiteral("选择 CSV 或 Excel 数据文件");
@@ -620,7 +621,7 @@ bool iconForButton(const QString& text, UiIcon* icon, QString* tooltip) {
 }
 
 void applyWindowPolish(catalyst::MainWindow& window) {
-    window.setWindowTitle(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0"));
+    window.setWindowTitle(QStringLiteral("催化剂寿命数据分析与实验辅助系统"));
     window.statusBar()->setSizeGripEnabled(false);
 
     if (auto* sidebar = window.findChild<QFrame*>(QStringLiteral("sidebar"))) {
@@ -668,12 +669,18 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setOrganizationName(QStringLiteral("Catalyst Longevity Research"));
     app.setApplicationName(QStringLiteral("Catalyst Longevity Research"));
-    app.setApplicationDisplayName(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0"));
+    app.setApplicationDisplayName(QStringLiteral("催化剂寿命数据分析与实验辅助系统"));
     app.setStyle(QStringLiteral("Fusion"));
     app.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 10));
     app.setWindowIcon(makeApplicationIcon());
 
     if (app.arguments().contains(QStringLiteral("--self-test"))) {
+        const auto builtInDatasets = catalyst::BuiltInDatasets::all();
+        if (builtInDatasets.size() != 5) return 30;
+        for (const auto& dataset : builtInDatasets) {
+            if (dataset.name.trimmed().isEmpty() || dataset.records.isEmpty()) return 31;
+        }
+
         const auto records = catalyst::CsvReader::demoData();
         const auto result = catalyst::AnalysisEngine::analyze(records);
         if (result.totalObservations != 6 || result.catalysts.size() != 2) return 2;

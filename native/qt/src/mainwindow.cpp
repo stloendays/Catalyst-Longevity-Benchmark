@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include "analysisengine.h"
+#include "builtindatasets.h"
 #include "chartwidget.h"
 #include "conditionguard.h"
 #include "csvreader.h"
@@ -18,6 +19,7 @@
 #include <QFrame>
 #include <QGridLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
@@ -374,7 +376,7 @@ QWidget* MainWindow::buildOverviewPage() {
         "查看催化剂长期表现、寿命指标和实验条件检查结果。")));
     top->addLayout(titleBox, 1);
 
-    auto* demoButton = new QPushButton(QStringLiteral("载入示例"));
+    auto* demoButton = new QPushButton(QStringLiteral("内置数据集"));
     auto* importButton = new QPushButton(QStringLiteral("导入数据"));
     auto* analyzeButton = new QPushButton(QStringLiteral("重新分析"));
     auto* exportButton = new QPushButton(QStringLiteral("导出 PDF"));
@@ -464,9 +466,13 @@ QWidget* MainWindow::buildDataPage() {
     titleBox->addWidget(muted(QStringLiteral(
         "支持 CSV 与 Excel .xlsx。至少包含：催化剂、时间、性能；Excel 会自动扫描工作表并选择含必需列的工作表。")));
     top->addLayout(titleBox, 1);
+    auto* builtInButton = new QPushButton(QStringLiteral("内置数据集"));
+    builtInButton->setObjectName(QStringLiteral("secondaryButton"));
+    connect(builtInButton, &QPushButton::clicked, this, &MainWindow::loadDemo);
     auto* importButton = new QPushButton(QStringLiteral("选择 CSV / Excel"));
     importButton->setObjectName(QStringLiteral("primaryButton"));
     connect(importButton, &QPushButton::clicked, this, &MainWindow::importCsv);
+    top->addWidget(builtInButton);
     top->addWidget(importButton);
     layout->addLayout(top);
 
@@ -685,8 +691,8 @@ QWidget* MainWindow::buildSettingsPage() {
     card->setObjectName(QStringLiteral("panel"));
     auto* cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(22, 20, 22, 20);
-    cardLayout->addWidget(new QLabel(QStringLiteral("催化剂寿命分析与实验决策软件 V1.0")));
-    cardLayout->addWidget(muted(QStringLiteral("V1.0 · Windows 原生桌面版 · C++20 + Qt 6 + SQLite")));
+    cardLayout->addWidget(new QLabel(QStringLiteral("催化剂寿命数据分析与实验辅助系统")));
+    cardLayout->addWidget(muted(QStringLiteral("Windows 原生桌面应用 · C++20 + Qt 6 + SQLite")));
     cardLayout->addSpacing(10);
     cardLayout->addWidget(new QLabel(QStringLiteral("运行方式：本地桌面窗口，不启动浏览器，不依赖 Streamlit。")));
     cardLayout->addWidget(new QLabel(QStringLiteral("数据输入：CSV / Excel .xlsx。")));
@@ -862,8 +868,38 @@ void MainWindow::importCsv() {
 }
 
 void MainWindow::loadDemo() {
-    setRecords(CsvReader::demoData(), QStringLiteral("内置示例数据"), true);
-    setStatus(QStringLiteral("已载入示例数据。"));
+    const auto datasets = BuiltInDatasets::all();
+    if (datasets.isEmpty()) {
+        setStatus(QStringLiteral("当前没有可用的内置数据集。"), true);
+        return;
+    }
+
+    QStringList choices;
+    choices.reserve(datasets.size());
+    for (const auto& dataset : datasets) {
+        choices.append(QStringLiteral("%1 · %2").arg(dataset.name, dataset.scenario));
+    }
+
+    bool accepted = false;
+    const QString selected = QInputDialog::getItem(
+        this,
+        QStringLiteral("选择内置数据集"),
+        QStringLiteral("请选择用于分析或功能演示的数据集："),
+        choices,
+        0,
+        false,
+        &accepted);
+    if (!accepted || selected.isEmpty()) return;
+
+    const int index = choices.indexOf(selected);
+    if (index < 0 || index >= datasets.size()) return;
+    const auto& dataset = datasets[index];
+    setRecords(
+        dataset.records,
+        QStringLiteral("内置数据集 · %1").arg(dataset.name),
+        true);
+    setStatus(QStringLiteral("已载入“%1”：%2 内置数据用于功能演示和流程验证，不作为真实实验结论。")
+                  .arg(dataset.name, dataset.description));
 }
 
 void MainWindow::setRecords(const QVector<Record>& records, const QString& sourceLabel, bool markDirty) {
@@ -1187,7 +1223,7 @@ void MainWindow::updateProjectUi() {
         }
     }
 
-    QString title = QStringLiteral("催化剂寿命分析与实验决策软件 V1.0");
+    QString title = QStringLiteral("催化剂寿命数据分析与实验辅助系统");
     title += currentProjectPath_.isEmpty()
         ? QStringLiteral(" — 未命名项目")
         : QStringLiteral(" — %1").arg(QFileInfo(currentProjectPath_).completeBaseName());
