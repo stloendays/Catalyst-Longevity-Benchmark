@@ -6,6 +6,7 @@
 #include "mainwindow.h"
 #include "projectstore.h"
 #include "reportexporter.h"
+#include "referenceknowledge.h"
 #include "researchadvisor.h"
 
 #include "xlsxdocument.h"
@@ -680,6 +681,10 @@ int main(int argc, char* argv[]) {
         for (const auto& dataset : builtInDatasets) {
             if (dataset.name.trimmed().isEmpty() || dataset.records.isEmpty()) return 31;
         }
+        const auto referenceEntries = catalyst::ReferenceKnowledgeBase::entries();
+        if (referenceEntries.size() < 7) return 32;
+        const auto referenceMatches = catalyst::ReferenceKnowledgeBase::matchExperimentContext(builtInDatasets.front().records);
+        if (referenceMatches.isEmpty() || referenceMatches.front().relevanceScore < 45) return 33;
 
         const auto records = catalyst::CsvReader::demoData();
         const auto result = catalyst::AnalysisEngine::analyze(records);
@@ -825,6 +830,14 @@ int main(int argc, char* argv[]) {
         if (dataCheck.score <= 0 || dataCheck.items.isEmpty()) return 26;
         const auto experimentAdvice = catalyst::ResearchAdvisor::experimentAdvice(records, result);
         if (experimentAdvice.isEmpty()) return 27;
+        bool hasExecutableAdvice = false;
+        for (const auto& item : experimentAdvice) {
+            if (item.feasibilityScore > 0 && !item.feasibility.isEmpty() && !item.basis.isEmpty()) {
+                hasExecutableAdvice = true;
+                break;
+            }
+        }
+        if (!hasExecutableAdvice) return 34;
         const auto comparisons = catalyst::ResearchAdvisor::pairComparisons(records, result);
         if (comparisons.size() != 1
             || comparisons.front().catalystA.isEmpty()

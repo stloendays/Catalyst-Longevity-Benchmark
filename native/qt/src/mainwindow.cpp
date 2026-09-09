@@ -8,6 +8,7 @@
 #include "evidencepage.h"
 #include "projectstore.h"
 #include "reportexporter.h"
+#include "referenceknowledge.h"
 #include "researchadvisor.h"
 
 #include <QAbstractItemView>
@@ -586,14 +587,47 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* adviceTab = new QWidget;
     auto* adviceLayout = new QVBoxLayout(adviceTab);
     adviceLayout->setContentsMargins(12, 12, 12, 12);
-    adviceLayout->addWidget(muted(QStringLiteral("根据当前观测点、T90 区间和实验条件自动生成下一轮实验建议。建议为规则计算结果，可直接用于实验计划讨论。")));
-    adviceTable_ = new QTableWidget(0, 5);
+    adviceLayout->addWidget(muted(QStringLiteral(
+        "建议会同时检查当前采样间隔、实验条件完整度、建议跨度和可匹配的公开实验窗口。公开参考只用于校验量级，不会直接替代你的实验条件。")));
+    adviceTable_ = new QTableWidget(0, 7);
     adviceTable_->setHorizontalHeaderLabels({
         QStringLiteral("优先级"), QStringLiteral("催化剂"), QStringLiteral("建议"),
-        QStringLiteral("原因"), QStringLiteral("下一步")});
+        QStringLiteral("可执行性"), QStringLiteral("原因"), QStringLiteral("下一步"),
+        QStringLiteral("依据")});
     configureTable(adviceTable_);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    adviceTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::Stretch);
     adviceLayout->addWidget(adviceTable_);
     analysisTabs->addTab(adviceTab, QStringLiteral("实验建议"));
+
+    auto* referenceTab = new QWidget;
+    auto* referenceLayout = new QVBoxLayout(referenceTab);
+    referenceLayout->setContentsMargins(12, 12, 12, 12);
+    referenceLayout->setSpacing(10);
+    referenceLayout->addWidget(muted(QStringLiteral(
+        "内置参考库保存少量公开数据库事实与公开论文实验条件快照，可离线查看。只保存标识符、基础物性和实验窗口等事实信息，不内置论文全文或图表。")));
+    referenceMatchSummary_ = muted(QStringLiteral("导入数据后，系统会显示哪些公开实验窗口与当前条件更接近。"));
+    referenceLayout->addWidget(referenceMatchSummary_);
+    referenceTable_ = new QTableWidget(0, 7);
+    referenceTable_->setHorizontalHeaderLabels({
+        QStringLiteral("来源"), QStringLiteral("条目"), QStringLiteral("标识符"),
+        QStringLiteral("关键信息"), QStringLiteral("用途"), QStringLiteral("来源地址"),
+        QStringLiteral("快照日期")});
+    configureTable(referenceTable_);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(5, QHeaderView::Stretch);
+    referenceTable_->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    referenceLayout->addWidget(referenceTable_);
+    analysisTabs->addTab(referenceTab, QStringLiteral("参考库"));
 
     layout->addWidget(analysisTabs, 1);
 
@@ -1191,13 +1225,61 @@ void MainWindow::refreshResearchSupportViews() {
                 priority->setForeground(QColor(QStringLiteral("#52525B")));
                 priority->setBackground(QColor(QStringLiteral("#F4F4F5")));
             }
+            auto* feasibility = readOnlyItem(QStringLiteral("%1 · %2/100")
+                .arg(item.feasibility).arg(item.feasibilityScore));
+            if (item.feasibilityScore >= 85) {
+                feasibility->setForeground(QColor(QStringLiteral("#166534")));
+                feasibility->setBackground(QColor(QStringLiteral("#F0FDF4")));
+            } else if (item.feasibilityScore >= 70) {
+                feasibility->setForeground(QColor(QStringLiteral("#92400E")));
+                feasibility->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            } else {
+                feasibility->setForeground(QColor(QStringLiteral("#991B1B")));
+                feasibility->setBackground(QColor(QStringLiteral("#FEF2F2")));
+            }
             adviceTable_->setItem(row, 0, priority);
             adviceTable_->setItem(row, 1, readOnlyItem(item.catalyst));
             adviceTable_->setItem(row, 2, readOnlyItem(item.action));
-            adviceTable_->setItem(row, 3, readOnlyItem(item.reason));
-            adviceTable_->setItem(row, 4, readOnlyItem(item.target));
+            adviceTable_->setItem(row, 3, feasibility);
+            adviceTable_->setItem(row, 4, readOnlyItem(item.reason));
+            adviceTable_->setItem(row, 5, readOnlyItem(item.target));
+            adviceTable_->setItem(row, 6, readOnlyItem(item.basis));
         }
         adviceTable_->resizeRowsToContents();
+    }
+
+    const auto referenceMatches = ReferenceKnowledgeBase::matchExperimentContext(records_);
+    if (referenceMatchSummary_) {
+        if (records_.isEmpty()) {
+            referenceMatchSummary_->setText(QStringLiteral("导入数据后，系统会显示哪些公开实验窗口与当前条件更接近。"));
+        } else if (referenceMatches.isEmpty()) {
+            referenceMatchSummary_->setText(QStringLiteral(
+                "当前数据没有匹配到足够接近的内置公开实验窗口。实验建议将只依据本次数据，不强行套用文献条件。"));
+        } else {
+            referenceMatchSummary_->setText(QStringLiteral("当前匹配到 %1 个公开实验窗口；最高相关度 %2/100。%3")
+                .arg(referenceMatches.size())
+                .arg(referenceMatches.front().relevanceScore)
+                .arg(ReferenceKnowledgeBase::compactMatchText(referenceMatches, 2)));
+        }
+    }
+    if (referenceTable_) {
+        const auto entries = ReferenceKnowledgeBase::entries();
+        referenceTable_->setRowCount(entries.size());
+        for (qsizetype row = 0; row < entries.size(); ++row) {
+            const auto& entry = entries[row];
+            referenceTable_->setItem(row, 0, readOnlyItem(entry.source));
+            referenceTable_->setItem(row, 1, readOnlyItem(entry.title));
+            auto* identifier = readOnlyItem(entry.identifier);
+            identifier->setToolTip(entry.sourceUrl);
+            referenceTable_->setItem(row, 2, identifier);
+            referenceTable_->setItem(row, 3, readOnlyItem(entry.keyFacts));
+            referenceTable_->setItem(row, 4, readOnlyItem(entry.use));
+            auto* url = readOnlyItem(entry.sourceUrl);
+            url->setToolTip(entry.sourceUrl);
+            referenceTable_->setItem(row, 5, url);
+            referenceTable_->setItem(row, 6, readOnlyItem(entry.snapshotDate));
+        }
+        referenceTable_->resizeRowsToContents();
     }
 }
 

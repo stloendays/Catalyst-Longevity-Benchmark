@@ -3,6 +3,7 @@
 #include "analysisengine.h"
 #include "conditionguard.h"
 #include "evidencepacket.h"
+#include "referenceknowledge.h"
 #include "researchadvisor.h"
 
 #include <QDateTime>
@@ -200,17 +201,55 @@ QString buildHtml(
     if (experimentAdvice.isEmpty()) {
         html += QStringLiteral("<p>当前数据未触发额外实验建议。</p>");
     } else {
-        html += QStringLiteral("<table><tr><th>优先级</th><th>催化剂</th><th>建议</th><th>原因</th><th>下一步</th></tr>");
+        html += QStringLiteral(
+            "<table><tr><th>优先级</th><th>催化剂</th><th>建议</th><th>可执行性</th>"
+            "<th>原因</th><th>下一步</th><th>依据</th></tr>");
         for (const auto& advice : experimentAdvice) {
-            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td></tr>")
-                .arg(escape(ResearchAdvisor::advicePriorityText(advice.priority)),
-                     escape(advice.catalyst), escape(advice.action), escape(advice.reason), escape(advice.target));
+            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td><td>%6</td><td>%7</td></tr>")
+                .arg(escape(ResearchAdvisor::advicePriorityText(advice.priority)))
+                .arg(escape(advice.catalyst))
+                .arg(escape(advice.action))
+                .arg(escape(QStringLiteral("%1 · %2/100").arg(advice.feasibility).arg(advice.feasibilityScore)))
+                .arg(escape(advice.reason))
+                .arg(escape(advice.target))
+                .arg(escape(advice.basis));
         }
         html += QStringLiteral("</table>");
     }
     html += QStringLiteral(
-        "<p class='note'><b>实验建议说明：</b>上述建议由当前观测点、T90 状态、采样间隔和实验条件规则自动生成，"
-        "用于辅助下一轮实验设计，不替代研究人员对具体反应体系的专业判断。</p>");
+        "<p class='note'><b>实验建议说明：</b>可执行性评分只评估当前数据完整度、实验条件一致性、建议跨度和公开实验窗口是否接近。"
+        "它不代表设备安全许可，也不会替代反应器温压上限、气体安全、催化剂装填量和实验室 SOP 审核。</p>");
+
+    const auto referenceEntries = ReferenceKnowledgeBase::entries();
+    const auto referenceMatches = ReferenceKnowledgeBase::matchExperimentContext(records);
+    html += QStringLiteral("<h2>内置公开参考库</h2>");
+    html += QStringLiteral(
+        "<p class='small'>参考库为离线事实快照，仅保存 PubChem 标识/基础物性和公开论文的 DOI、实验条件与时长摘要；不内置论文全文或图表。"
+        "快照用于核对组分身份和判断建议时长是否处于公开研究量级，不会覆盖用户实验数据。</p>");
+    html += QStringLiteral("<table><tr><th>来源</th><th>条目</th><th>标识符</th><th>关键信息</th><th>用途</th><th>快照</th></tr>");
+    for (const auto& entry : referenceEntries) {
+        html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3</td><td>%4</td><td>%5</td><td>%6</td></tr>")
+            .arg(escape(entry.source), escape(entry.title), escape(entry.identifier),
+                 escape(entry.keyFacts), escape(entry.use), escape(entry.snapshotDate));
+    }
+    html += QStringLiteral("</table>");
+    if (referenceMatches.isEmpty()) {
+        html += QStringLiteral("<p>当前实验上下文没有匹配到足够接近的内置公开实验窗口，因此实验建议未强行套用文献时长。</p>");
+    } else {
+        html += QStringLiteral("<h3>与当前条件较接近的公开实验窗口</h3>");
+        html += QStringLiteral("<table><tr><th>引用</th><th>DOI</th><th>公开时长</th><th>相关度</th><th>匹配说明</th></tr>");
+        const qsizetype limit = qMin<qsizetype>(referenceMatches.size(), 3);
+        for (qsizetype i = 0; i < limit; ++i) {
+            const auto& match = referenceMatches[i];
+            html += QStringLiteral("<tr><td>%1</td><td>%2</td><td>%3 h</td><td>%4/100</td><td>%5</td></tr>")
+                .arg(escape(match.reference.citation))
+                .arg(escape(match.reference.doi))
+                .arg(QString::number(match.reference.durationHours, 'g', 6))
+                .arg(match.relevanceScore)
+                .arg(escape(match.reason));
+        }
+        html += QStringLiteral("</table>");
+    }
 
     html += QStringLiteral("<h2>AI 可用资料</h2>");
     html += QStringLiteral(
