@@ -67,6 +67,8 @@ jobs:
 
       - name: Build software-copyright Word
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           New-Item -ItemType Directory -Force -Path "docs\software-copyright\screenshots" | Out-Null
           python tools/build_softcopyright_word.py --screenshots ui-screenshots --output "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx"
