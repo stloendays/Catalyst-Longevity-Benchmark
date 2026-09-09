@@ -6,6 +6,7 @@
 #include <QVector>
 
 class QCloseEvent;
+class QDoubleSpinBox;
 class QLabel;
 class QStackedWidget;
 class QTableWidget;
@@ -94,6 +95,10 @@ private:
     QTableWidget* dataCheckTable_ = nullptr;
     QTableWidget* comparisonTable_ = nullptr;
     QTableWidget* adviceTable_ = nullptr;
+    QDoubleSpinBox* maxAdditionalHoursSpin_ = nullptr;
+    QDoubleSpinBox* minSamplingIntervalSpin_ = nullptr;
+    QLabel* referenceMatchSummary_ = nullptr;
+    QTableWidget* referenceTable_ = nullptr;
     ChartWidget* chart_ = nullptr;
 };
 
