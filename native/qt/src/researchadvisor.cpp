@@ -429,9 +429,6 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
 
     QMap<QString, QVector<Record>> grouped;
     for (const auto& record : records) grouped[record.catalyst.trimmed()].append(record);
-    const auto referenceMatches = ReferenceKnowledgeBase::matchExperimentContext(records);
-    const bool hasReferenceSupport = !referenceMatches.isEmpty();
-    const QString referenceBasis = ReferenceKnowledgeBase::compactMatchText(referenceMatches, 2);
 
     if (analysis.conditionAudit.blocksDirectRanking()) {
         advice.append(makeAdvice(
@@ -446,6 +443,9 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
 
     for (const auto& summary : analysis.catalysts) {
         const auto rows = grouped.value(summary.catalyst);
+        const auto referenceMatches = ReferenceKnowledgeBase::matchExperimentContext(rows);
+        const bool hasReferenceSupport = !referenceMatches.isEmpty();
+        const QString referenceBasis = ReferenceKnowledgeBase::compactMatchText(referenceMatches, 2);
         const QString conditionText = constantConditionText(rows);
         const QString keepConditions = conditionText.isEmpty()
             ? QStringLiteral("尽量保持本轮实验条件不变")
