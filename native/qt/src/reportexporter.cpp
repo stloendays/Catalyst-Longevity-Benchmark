@@ -84,7 +84,7 @@ QString buildHtml(
         ".small{font-size:8.5pt;color:#4b5563;}"
         "</style></head><body>");
 
-    html += QStringLiteral("<h1>催化剂寿命数据分析与实验辅助系统</h1>");
+    html += QStringLiteral("<h1>催化剂长期稳定性评估与实验决策系统</h1>");
     html += QStringLiteral("<p class='meta'>催化剂寿命数据分析与实验辅助报告</p>");
     html += QStringLiteral("<p class='meta'>生成时间：%1<br/>数据源：%2</p>")
         .arg(escape(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))),
@@ -381,7 +381,7 @@ bool writePdf(
     QPdfWriter writer(path);
     writer.setPageSize(QPageSize(QPageSize::A4));
     writer.setTitle(QStringLiteral("催化剂寿命数据分析与实验辅助报告"));
-    writer.setCreator(QStringLiteral("催化剂寿命数据分析与实验辅助系统"));
+    writer.setCreator(QStringLiteral("催化剂长期稳定性评估与实验决策系统"));
     writer.setResolution(120);
 
     QTextDocument document;
