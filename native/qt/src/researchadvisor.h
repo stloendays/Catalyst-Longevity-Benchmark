@@ -42,6 +42,9 @@ struct ExperimentAdvice {
     QString action;
     QString reason;
     QString target;
+    int feasibilityScore = 0;
+    QString feasibility;
+    QString basis;
 };
 
 struct PairComparison {
