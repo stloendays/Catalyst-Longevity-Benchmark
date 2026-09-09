@@ -22,6 +22,14 @@ public:
         const QString& sourceLabel,
         const QVector<EvidenceItem>& evidenceItems,
         QString* errorMessage = nullptr);
+
+    static bool exportPdf(
+        const QString& path,
+        const QVector<Record>& records,
+        const AnalysisResult& result,
+        const QString& sourceLabel,
+        const QVector<EvidenceItem>& evidenceItems,
+        QString* errorMessage = nullptr);
 };
 
 } // namespace catalyst

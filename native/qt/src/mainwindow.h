@@ -49,6 +49,7 @@ private:
     void refreshRawTable();
     void refreshAnalysisViews();
     void refreshDecisionOverview();
+    void refreshResearchSupportViews();
     void updateProjectUi();
     void setStatus(const QString& text, bool error = false);
     bool saveProjectTo(const QString& path);
@@ -88,6 +89,11 @@ private:
     QTableWidget* summaryTable_ = nullptr;
     QTableWidget* rawTable_ = nullptr;
     QTableWidget* thresholdTable_ = nullptr;
+    QLabel* dataCheckStatus_ = nullptr;
+    QLabel* dataCheckScore_ = nullptr;
+    QTableWidget* dataCheckTable_ = nullptr;
+    QTableWidget* comparisonTable_ = nullptr;
+    QTableWidget* adviceTable_ = nullptr;
     ChartWidget* chart_ = nullptr;
 };
 
