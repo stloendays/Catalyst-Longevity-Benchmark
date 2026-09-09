@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Sql Pdf)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Sql Pdf Network)
 
 include(FetchContent)
 option(CATALYST_FETCH_QXLSX "Fetch the pinned QXlsx dependency during configure" ON)
@@ -51,6 +51,8 @@ qt_add_executable(CatalystLongevityResearch WIN32
     src/reportexporter.cpp
     src/researchadvisor.h
     src/researchadvisor.cpp
+    src/integrationgateway.h
+    src/integrationgateway.cpp
     src/chartwidget.h
     src/chartwidget.cpp
     src/mainwindow.h
@@ -62,6 +64,7 @@ target_link_libraries(CatalystLongevityResearch PRIVATE
     Qt6::Widgets
     Qt6::Sql
     Qt6::Pdf
+    Qt6::Network
     QXlsx::QXlsx
 )
 
