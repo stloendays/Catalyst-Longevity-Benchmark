@@ -1,7 +1,6 @@
-#define MyAppName "Catalyst Longevity Research"
-#define MyAppExeName "Catalyst Longevity Research.exe"
-#define MyAppPublisher "Catalyst Longevity Research"
-#define MyAppVersion "Native Desktop Preview"
+#define MyAppName "智策"
+#define MyAppExeName "智策.exe"
+#define MyAppPublisher "智策"
 
 #ifndef SourceDir
   #define SourceDir "..\..\..\dist-qt\app"
@@ -13,13 +12,13 @@
 [Setup]
 AppId={{A7C6D98C-8EE8-44C6-A5D8-89D19A6BEA42}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=Catalyst-Longevity-Research-Setup
+OutputBaseFilename=Zhice-Setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

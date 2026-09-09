@@ -16,6 +16,7 @@
 #include <QColor>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFrame>
 #include <QGraphicsDropShadowEffect>
 #include <QIcon>
@@ -266,6 +267,19 @@ QIcon makeApplicationIcon() {
     return QIcon(pixmap);
 }
 
+QString preferredUiFontFamily() {
+    const QStringList installed = QFontDatabase::families();
+    const QStringList preferred = {
+        QStringLiteral("DengXian"),
+        QStringLiteral("Microsoft YaHei UI"),
+        QStringLiteral("Microsoft YaHei")
+    };
+    for (const auto& family : preferred) {
+        if (installed.contains(family, Qt::CaseInsensitive)) return family;
+    }
+    return QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
+}
+
 void polishChineseCopy(catalyst::MainWindow& window) {
     const auto labels = window.findChildren<QLabel*>();
     for (auto* label : labels) {
@@ -437,7 +451,7 @@ int main(int argc, char* argv[]) {
     app.setApplicationName(QStringLiteral("ZhiCe"));
     app.setApplicationDisplayName(QStringLiteral("智策"));
     app.setStyle(QStringLiteral("Fusion"));
-    app.setFont(QFont(QStringLiteral("Microsoft YaHei"), 10));
+    app.setFont(QFont(preferredUiFontFamily(), 10));
     app.setWindowIcon(makeApplicationIcon());
 
     if (app.arguments().contains(QStringLiteral("--self-test"))) {

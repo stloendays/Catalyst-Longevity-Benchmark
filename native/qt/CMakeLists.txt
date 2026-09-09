@@ -76,7 +76,7 @@ target_compile_definitions(CatalystLongevityResearch PRIVATE
 )
 
 set_target_properties(CatalystLongevityResearch PROPERTIES
-    OUTPUT_NAME "Catalyst Longevity Research"
+    OUTPUT_NAME "智策"
     WIN32_EXECUTABLE TRUE
 )
 
