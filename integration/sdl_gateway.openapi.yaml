@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Catalyst Longevity Self-Driving Lab Gateway
+  version: 1.0.0
+  description: >-
+    Local integration surface for laboratory orchestrators and adapters. Hardware
+    actuation is intentionally disabled in this version; job requests are accepted
+    only as integration envelopes.
+servers:
+  - url: http://127.0.0.1:49321
+    description: Default loopback control endpoint
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    JobEnvelope:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        sample:
+          type: string
+        requested_conditions:
+          type: object
+          additionalProperties: true
+    ResultEnvelope:
+      type: object
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        run_id:
+          type: string
+        source:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    EventEnvelope:
+      type: object
+      required: [type]
+      additionalProperties: true
+      properties:
+        type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+paths:
+  /v1/health:
+    get:
+      summary: Check gateway health
+      responses:
+        '200':
+          description: Gateway status
+  /v1/capabilities:
+    get:
+      summary: Inspect ports, protocols and safety boundaries
+      responses:
+        '200':
+          description: Gateway capabilities
+  /v1/pairing:
+    get:
+      summary: Obtain the current session token when bound to loopback
+      description: Disabled when the gateway is bound to a non-loopback address.
+      responses:
+        '200':
+          description: Session pairing token
+        '403':
+          description: Pairing is not exposed on external binds
+  /v1/state:
+    get:
+      summary: Read gateway integration state
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Integration state
+        '401':
+          description: Missing or invalid token
+  /v1/jobs:
+    post:
+      summary: Submit an experiment job envelope for integration
+      description: >-
+        The current version does not actuate hardware. Responses explicitly include
+        execution_enabled=false.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobEnvelope'
+      responses:
+        '202':
+          description: Envelope received; hardware execution remains disabled
+        '401':
+          description: Missing or invalid token
+  /v1/results:
+    post:
+      summary: Submit a result envelope from an external lab adapter
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultEnvelope'
+      responses:
+        '202':
+          description: Result received for integration without mutating project data
+        '401':
+          description: Missing or invalid token
+  /v1/events:
+    post:
+      summary: Publish an integration event to authenticated event-stream clients
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventEnvelope'
+      responses:
+        '202':
+          description: Event published
+        '401':
+          description: Missing or invalid token
