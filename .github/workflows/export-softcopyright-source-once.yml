@@ -1,0 +1,60 @@
+name: Export Software Copyright Source Once
+
+on:
+  push:
+    branches: [softcopyright-source-bundle]
+    paths:
+      - ".github/workflows/export-softcopyright-source-once.yml"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: softcopyright-source-bundle
+      - name: Build clean source bundle
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          files = [
+              'native/qt/src/main.cpp',
+              'native/qt/src/models.h',
+              'native/qt/src/analysisengine.h', 'native/qt/src/analysisengine.cpp',
+              'native/qt/src/conditionguard.h', 'native/qt/src/conditionguard.cpp',
+              'native/qt/src/csvreader.h', 'native/qt/src/csvreader.cpp',
+              'native/qt/src/builtindatasets.h', 'native/qt/src/builtindatasets.cpp',
+              'native/qt/src/referenceknowledge.h', 'native/qt/src/referenceknowledge.cpp',
+              'native/qt/src/documentanalyzer.h', 'native/qt/src/documentanalyzer.cpp',
+              'native/qt/src/evidencepacket.h', 'native/qt/src/evidencepacket.cpp',
+              'native/qt/src/evidencepage.h', 'native/qt/src/evidencepage.cpp',
+              'native/qt/src/projectstore.h', 'native/qt/src/projectstore.cpp',
+              'native/qt/src/reportexporter.h', 'native/qt/src/reportexporter.cpp',
+              'native/qt/src/researchadvisor.h', 'native/qt/src/researchadvisor.cpp',
+              'native/qt/src/integrationgateway.h', 'native/qt/src/integrationgateway.cpp',
+              'native/qt/src/chartwidget.h', 'native/qt/src/chartwidget.cpp',
+              'native/qt/src/mainwindow.h', 'native/qt/src/mainwindow.cpp',
+          ]
+          out = Path('softcopyright-source')
+          out.mkdir(exist_ok=True)
+          bundle = []
+          manifest = []
+          total = 0
+          for name in files:
+              lines = Path(name).read_text(encoding='utf-8').splitlines()
+              bundle.append(f'// ===== FILE: {name} =====')
+              bundle.extend(lines)
+              bundle.append('')
+              manifest.append(f'{name}\t{len(lines)} lines')
+              total += len(lines) + 2
+          (out / 'source_bundle.txt').write_text('\n'.join(bundle) + '\n', encoding='utf-8')
+          (out / 'source_manifest.txt').write_text('\n'.join(manifest) + f'\nTOTAL\t{total} lines\n', encoding='utf-8')
+          print(f'Bundled {len(files)} files, {total} lines')
+          PY
+      - name: Upload clean source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Software-Copyright-Source
+          path: softcopyright-source/**
+          if-no-files-found: error
