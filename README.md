@@ -143,6 +143,20 @@ PDF 报告可包含：
 - 公开参考库和当前匹配结果；
 - 资料来源和确认状态。
 
+## 自驱动实验室接口预留
+
+原生桌面程序启动时会同时准备一组本机集成接口，为后续闭环实验编排和仪器适配预留稳定通信边界：
+
+| 默认端口 | 协议 | 用途 |
+| --- | --- | --- |
+| `49321` | HTTP / JSON | 控制、能力发现、任务与结果包入口 |
+| `49322` | TCP / JSON Lines | 长连接事件流 |
+| `49323` | TCP / JSON Lines | 仪器适配器遥测入口 |
+
+默认只监听 `127.0.0.1`，不会主动暴露到局域网。需要跨电脑接入时可以显式绑定 `0.0.0.0`，但此时强制要求至少 24 字符的访问令牌。当前版本明确保持 `hardware_actuation=false`：可以测试任务、结果、事件和仪器遥测协议，但不会因为收到网络请求而直接操作真实反应器或仪器。
+
+控制端口提供 `/v1/health`、`/v1/capabilities`、本机 `/v1/pairing`、受认证的 `/v1/state`、`/v1/jobs`、`/v1/results` 和 `/v1/events`。接口合同见 `integration/sdl_gateway.openapi.yaml`，完整说明见 `docs/SELF_DRIVING_LAB_GATEWAY_CN.md`。
+
 ## 原生桌面构建
 
 原生桌面源码位于：
@@ -156,6 +170,7 @@ native/qt/
 - Qt 6 Widgets
 - Qt SQL / SQLite
 - Qt PDF
+- Qt Network
 - QXlsx
 
 使用 CMake 构建：
@@ -180,6 +195,8 @@ Windows 构建产物使用工程文件名 `Catalyst Longevity Research.exe`，�
 - 资料与实验观测分开保存；
 - 内置模拟数据与用户真实数据明确区分；
 - 公开参考只用于校验，不覆盖用户实验事实；
+- 网络接口默认仅本机监听，外部绑定必须显式认证；
+- 网络任务不会绕过硬件安全状态机直接执行；
 - 报告保留数据来源、建议依据和分析边界。
 
 ## 文档
@@ -188,5 +205,6 @@ Windows 构建产物使用工程文件名 `Catalyst Longevity Research.exe`，�
 - `docs/软件操作说明.md`
 - `docs/BUILTIN_DATASETS_CN.md`
 - `docs/BUILTIN_REFERENCE_KB_CN.md`
+- `docs/SELF_DRIVING_LAB_GATEWAY_CN.md`
 - `docs/SOFTWARE_COPYRIGHT_CN.md`
 - `docs/知识产权与软著准备说明.md`
