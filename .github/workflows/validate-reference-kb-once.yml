@@ -24,6 +24,8 @@ jobs:
           if ($hits.Count -lt 4) { throw "expected public reference identifiers or conditions missing" }
           $planning = Select-String -Path "native/qt/src/mainwindow.cpp" -Pattern "实验排期约束|单阶段最多追加|最小采样间隔"
           if ($planning.Count -lt 3) { throw "experiment planning controls missing" }
+          $matching = Select-String -Path "native/qt/src/researchadvisor.cpp" -Pattern "matchExperimentContext\(rows\)"
+          if (-not $matching) { throw "per-catalyst public reference matching missing" }
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4
@@ -61,4 +63,4 @@ jobs:
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
 
-# Final branch-only native validation after aligning the public reference metadata.
+# Final branch-only native validation after per-catalyst public reference matching.
