@@ -11,7 +11,6 @@ main = Path('native/qt/src/main.cpp')
 window = Path('native/qt/src/mainwindow.cpp')
 cmake = Path('native/qt/CMakeLists.txt')
 installer = Path('native/qt/installer/CatalystLongevity.iss')
-release = Path('.github/workflows/windows-qt.yml')
 
 # Use an Office-like Chinese UI font when available and let widgets inherit it.
 replace(main, '#include <QFont>\n#include <QFrame>', '#include <QFont>\n#include <QFontDatabase>\n#include <QFrame>', 'QFontDatabase include')
@@ -48,7 +47,7 @@ replace(window, '''QLabel* heading(const QString& text, int pointSize = 20) {
     return label;
 }''', 'heading font inheritance')
 
-# Rename the actual executable and installer-facing product, not only the window caption.
+# Rename the real executable and installer-facing product, not only the window caption.
 replace(cmake, '    OUTPUT_NAME "Catalyst Longevity Research"', '    OUTPUT_NAME "智策"', 'CMake executable name')
 
 replace(installer, '#define MyAppName "Catalyst Longevity Research"', '#define MyAppName "智策"', 'installer app name')
@@ -57,24 +56,5 @@ replace(installer, '#define MyAppPublisher "Catalyst Longevity Research"', '#def
 replace(installer, '#define MyAppVersion "Native Desktop Preview"\n', '', 'remove preview version label')
 replace(installer, 'AppVersion={#MyAppVersion}\n', 'AppVerName={#MyAppName}\n', 'installer display name')
 replace(installer, 'OutputBaseFilename=Catalyst-Longevity-Research-Setup', 'OutputBaseFilename=Zhice-Setup', 'installer output name')
-
-replacements = {
-    'build-qt\\Release\\Catalyst Longevity Research.exe': 'build-qt\\Release\\智策.exe',
-    'dist-qt\\app\\Catalyst Longevity Research.exe': 'dist-qt\\app\\智策.exe',
-    'release\\Catalyst-Longevity-Research-Setup.exe': 'release\\Zhice-Setup.exe',
-    'release\\Catalyst-Longevity-Research-Portable.zip': 'release\\Zhice-Portable.zip',
-    'Catalyst-Longevity-Research-Qt-Desktop': 'Zhice-Desktop',
-    'Catalyst Longevity Research Native Desktop ${{ github.run_number }}': '智策 Windows 桌面版 ${{ github.run_number }}',
-    'Native C++ / Qt 6 Windows desktop preview of Catalyst Longevity Research.': '智策 Windows 桌面应用，由 C++20 与 Qt 6 构建。',
-    '`Catalyst-Longevity-Research-Setup.exe`': '`Zhice-Setup.exe`',
-    'release/Catalyst-Longevity-Research-Setup.exe': 'release/Zhice-Setup.exe',
-    'release/Catalyst-Longevity-Research-Portable.zip': 'release/Zhice-Portable.zip',
-}
-text = release.read_text(encoding='utf-8')
-for old, new in replacements.items():
-    if old not in text:
-        raise SystemExit(f'Missing release workflow token: {old}')
-    text = text.replace(old, new)
-release.write_text(text, encoding='utf-8')
 
 print('Zhice native package and typography aligned.')
