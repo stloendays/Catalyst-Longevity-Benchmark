@@ -101,10 +101,20 @@ jobs:
 
           curl -fsS http://127.0.0.1:18081/v1/chat/completions \
             -H 'Content-Type: application/json' \
-            -d '{"model":"qwen3.5-2b-q4-step3a","messages":[{"role":"user","content":"Reply with exactly STAGE3A_SMOKE_OK"}],"temperature":0,"max_tokens":32}' \
+            -d '{"model":"qwen3.5-2b-q4-step3a","messages":[{"role":"user","content":"Reply with exactly STAGE3A_SMOKE_OK"}],"temperature":0,"max_tokens":256}' \
             > "$SMOKE_JSON"
           cat "$SMOKE_JSON"
-          grep -q 'STAGE3A_SMOKE_OK' "$SMOKE_JSON"
+          python3 - "$SMOKE_JSON" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as f:
+              payload = json.load(f)
+          message = payload["choices"][0]["message"]
+          content = (message.get("content") or "").strip()
+          print("SMOKE_CONTENT=" + repr(content))
+          if content != "STAGE3A_SMOKE_OK":
+              raise SystemExit("strict assistant content smoke failed")
+          PY
 
           kill "$SMOKE_PID" 2>/dev/null || true
           wait "$SMOKE_PID" 2>/dev/null || true
