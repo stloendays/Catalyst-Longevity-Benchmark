@@ -17,17 +17,17 @@ jobs:
         with:
           ref: real-reference-kb-feasible-advice
           fetch-depth: 0
-      - name: Apply planning constraints
-        run: python tools/apply_planning_constraints.py
-      - name: Commit planning constraint integration
+      - name: Enforce planning caps
+        run: python tools/fix_planning_constraint_caps.py
+      - name: Commit planning cap fix
         shell: bash
         run: |
           git config user.name "stloendays"
           git config user.email "157110190+stloendays@users.noreply.github.com"
-          git add native/qt/src/researchadvisor.cpp native/qt/src/mainwindow.cpp native/qt/src/mainwindow.h native/qt/src/reportexporter.cpp native/qt/src/reportexporter.h
+          git add native/qt/src/researchadvisor.cpp
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "Add experiment planning constraints to advice"
+            git commit -m "Enforce experiment planning stage caps"
             git push origin HEAD:real-reference-kb-feasible-advice
           fi
