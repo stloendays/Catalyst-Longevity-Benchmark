@@ -1,0 +1,42 @@
+name: Server Step3A status
+
+on:
+  push:
+    paths:
+      - .github/workflows/server-step3a-status.yml
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Inspect server training state
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ROOT=/home/ubuntu/local2b-training/step3a-recover
+          date -Is
+          echo '=== TRAINERS ==='
+          ps -eo pid,ppid,lstart,etime,%cpu,%mem,args | grep -E 'llama-finetune-lora|timeout 4200' | grep -v grep || true
+          echo '=== CHECKPOINTS ==='
+          find "$ROOT/checkpoints" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p %s bytes\n' 2>/dev/null | sort | tail -40 || true
+          echo '=== LOG ==='
+          tail -80 "$ROOT/train.log" 2>/dev/null || true
+          echo '=== MEMORY ==='
+          free -h
+          echo '=== SERVICE ==='
+          systemctl is-active rhocodec-llm.service || true
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
