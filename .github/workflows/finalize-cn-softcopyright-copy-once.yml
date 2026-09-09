@@ -1,0 +1,32 @@
+name: Finalize Chinese Soft Copyright Copy Once
+
+on:
+  push:
+    branches: [ui-linked-catalyst-focus]
+    paths:
+      - ".github/workflows/finalize-cn-softcopyright-copy-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ui-linked-catalyst-focus
+          fetch-depth: 0
+
+      - name: Finalize Chinese copy
+        run: python tools/finalize_cn_softcopyright_copy.py
+
+      - name: Commit copy changes and cleanup
+        shell: bash
+        run: |
+          git config user.name "stloendays"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          rm -f tools/finalize_cn_softcopyright_copy.py .github/workflows/finalize-cn-softcopyright-copy-once.yml
+          git add native/qt/src/mainwindow.cpp native/qt/src/evidencepage.cpp native/qt/src/reportexporter.cpp tools/finalize_cn_softcopyright_copy.py .github/workflows/finalize-cn-softcopyright-copy-once.yml
+          git commit -m "Finalize Chinese product copy for V1.0"
+          git push origin ui-linked-catalyst-focus
