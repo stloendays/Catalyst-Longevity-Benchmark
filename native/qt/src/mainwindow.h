@@ -22,6 +22,7 @@ class MainWindow final : public QMainWindow {
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    bool captureDocumentationScreenshots(const QString& outputDir, QString* errorMessage = nullptr);
 
 protected:
     void closeEvent(QCloseEvent* event) override;

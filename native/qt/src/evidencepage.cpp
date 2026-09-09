@@ -27,7 +27,10 @@ namespace {
 
 QLabel* headingLabel(const QString& text) {
     auto* label = new QLabel(text);
-    label->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 20, QFont::DemiBold));
+    QFont font = label->font();
+    font.setPointSize(20);
+    font.setWeight(QFont::DemiBold);
+    label->setFont(font);
     label->setObjectName(QStringLiteral("pageHeading"));
     return label;
 }
@@ -129,14 +132,14 @@ QString formatLabel(const QString& format) {
 EvidencePage::EvidencePage(QWidget* parent)
     : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(34, 28, 34, 28);
-    layout->setSpacing(14);
+    layout->setContentsMargins(34, 20, 34, 16);
+    layout->setSpacing(10);
 
     auto* top = new QHBoxLayout;
     auto* titleBox = new QVBoxLayout;
     titleBox->addWidget(headingLabel(QStringLiteral("资料")));
     titleBox->addWidget(mutedLabel(QStringLiteral(
-        "原生读取带文本层的 PDF 论文，以及 TXT / Markdown / CSV / TSV。保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据，并保留 PDF 页码。只有完成催化剂、时间和人工条件复核的条目才进入 Evidence Packet；候选值不会自动改写实验数据或排名。")));
+        "导入 PDF 或文本资料，识别 DOI、温度、测试时长等信息；关联到催化剂和时间并确认后，可作为 AI 分析上下文。资料不会自动改写实验数据。")));
     top->addLayout(titleBox, 1);
 
     auto* chooseButton = new QPushButton(QStringLiteral("选择 PDF / 资料文件"));
@@ -149,17 +152,21 @@ EvidencePage::EvidencePage(QWidget* parent)
     sourceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* sourceLayout = new QVBoxLayout(sourceFrame);
     sourceLayout->setContentsMargins(18, 14, 18, 14);
+    sourceFrame->setMaximumHeight(82);
     auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));
     sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
     sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));
     sourceLabel_->setObjectName(QStringLiteral("sourcePath"));
-    sourceLabel_->setWordWrap(true);
+    sourceLabel_->setWordWrap(false);
     sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     documentInfoLabel_ = mutedLabel(QStringLiteral("—"));
     warningLabel_ = mutedLabel(QString());
     warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));
-    sourceLayout->addWidget(sourceTitle);
-    sourceLayout->addWidget(sourceLabel_);
+    auto* sourceTop = new QHBoxLayout;
+    sourceTop->addWidget(sourceTitle);
+    sourceTop->addSpacing(10);
+    sourceTop->addWidget(sourceLabel_, 1);
+    sourceLayout->addLayout(sourceTop);
     sourceLayout->addWidget(documentInfoLabel_);
     sourceLayout->addWidget(warningLabel_);
     layout->addWidget(sourceFrame);
@@ -187,7 +194,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     signalsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     signalsTable_->verticalHeader()->setVisible(false);
     signalsTable_->setAlternatingRowColors(true);
-    signalsTable_->setMaximumHeight(165);
+    signalsTable_->setMaximumHeight(50);
+    signalFrame->setMaximumHeight(102);
     signalsTable_->setMouseTracking(true);
     signalLayout->addWidget(signalsTable_);
     layout->addWidget(signalFrame);
@@ -211,9 +219,11 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceTable_->setAlternatingRowColors(true);
     evidenceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     evidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    evidenceTable_->setWordWrap(true);
+    evidenceTable_->setWordWrap(false);
     evidenceTable_->setMouseTracking(true);
-    evidenceLayout->addWidget(evidenceTable_, 1);
+    evidenceTable_->setMinimumHeight(78);
+    evidenceTable_->setMaximumHeight(90);
+    evidenceLayout->addWidget(evidenceTable_);
 
     auto* bindRow = new QHBoxLayout;
     catalystCombo_ = new QComboBox;
@@ -246,12 +256,17 @@ EvidencePage::EvidencePage(QWidget* parent)
     bindRow->addWidget(new QLabel(QStringLiteral("时间")));
     bindRow->addWidget(timeSpin_);
     bindRow->addWidget(noteEdit_, 1);
-    bindRow->addWidget(bindButton);
-    bindRow->addWidget(reviewButton);
-    bindRow->addWidget(returnButton);
-    bindRow->addWidget(unbindButton);
     evidenceLayout->addLayout(bindRow);
-    layout->addWidget(evidenceFrame, 1);
+    auto* actionRow = new QHBoxLayout;
+    actionRow->addStretch();
+    actionRow->addWidget(bindButton);
+    actionRow->addWidget(reviewButton);
+    actionRow->addWidget(returnButton);
+    actionRow->addWidget(unbindButton);
+    evidenceLayout->addLayout(actionRow);
+    evidenceFrame->setMinimumHeight(225);
+    evidenceFrame->setMaximumHeight(238);
+    layout->addWidget(evidenceFrame);
 
     auto* packetFrame = new QFrame;
     packetFrame->setObjectName(QStringLiteral("aiSurface"));
@@ -267,10 +282,12 @@ EvidencePage::EvidencePage(QWidget* parent)
     packetTop->addWidget(packetStatusLabel_);
     packetLayout->addLayout(packetTop);
     packetLayout->addWidget(mutedLabel(QStringLiteral(
-        "Packet 只包含已完成人工条件复核且绑定到明确催化剂与时间的证据；其他候选自动排除。这里展示的 Markdown 将作为后续 AI Analyst / Evidence Critic 的可审计上下文基础。")));
+        "只有已关联到明确催化剂和时间点，并经人工确认的资料会进入 AI 可用内容；其余条目保留在资料列表中，不参与自动分析。")));
     packetPreview_ = new QTextEdit;
     packetPreview_->setReadOnly(true);
-    packetPreview_->setMaximumHeight(210);
+    packetPreview_->setMinimumHeight(36);
+    packetPreview_->setMaximumHeight(48);
+    packetFrame->setMaximumHeight(135);
     packetPreview_->setPlaceholderText(QStringLiteral("确认至少一条资料后，这里会显示供 AI 使用的内容。"));
     packetLayout->addWidget(packetPreview_);
     layout->addWidget(packetFrame);
@@ -280,7 +297,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* noteLayout = new QVBoxLayout(note);
     noteLayout->addWidget(new QLabel(QStringLiteral("资料说明")));
     noteLayout->addWidget(mutedLabel(QStringLiteral(
-        "原生 PDF 读取只使用 PDF 自带文本层，不自动 OCR 扫描页；这避免 OCR 错误直接进入实验事实链。“条件已复核”仍只是人工上下文核对状态，不是实验真值认证，也不会自动进入性能轨迹、T90 或直接排名。")));
+        "PDF 读取优先使用文件自带文本层，不自动对扫描页执行 OCR。人工确认只表示关键上下文已经核对，不会修改实验观测，也不会自动进入性能轨迹、T90 或直接排名。")));
     layout->addWidget(note);
 
     resetCurrentDocumentSummary();
@@ -301,7 +318,7 @@ void EvidencePage::setEvidenceItems(const QVector<EvidenceItem>& items) {
     documentSignals_ = DocumentSignals{};
     resetCurrentDocumentSummary();
     if (!evidenceItems_.isEmpty()) {
-        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条证据候选").arg(evidenceItems_.size()));
+        sourceLabel_->setText(QStringLiteral("已从项目恢复 %1 条资料").arg(evidenceItems_.size()));
     }
     refreshEvidenceTable();
 }
@@ -451,7 +468,7 @@ void EvidencePage::returnSelectedToReview() {
 
 void EvidencePage::resetCurrentDocumentSummary() {
     sourceLabel_->setText(QStringLiteral("尚未加载资料"));
-    documentInfoLabel_->setText(QStringLiteral("—"));
+    documentInfoLabel_->clear();
     warningLabel_->clear();
     pageCountLabel_->setText(QStringLiteral("—"));
     characterLabel_->setText(QStringLiteral("—"));
@@ -513,14 +530,13 @@ void EvidencePage::refreshEvidenceTable() {
         evidenceTable_->setItem(row, 3, readOnlyItem(displayCandidate(item)));
         auto* statusItem = readOnlyItem(statusLabel(item.status));
         if (item.status == QStringLiteral("condition_reviewed_context_only")) {
+            statusItem->setText(QStringLiteral("●  %1").arg(statusItem->text()));
             statusItem->setForeground(QColor(QStringLiteral("#166534")));
-            statusItem->setBackground(QColor(QStringLiteral("#F0FDF4")));
         } else if (item.status == QStringLiteral("candidate_requires_condition_binding")) {
             statusItem->setForeground(QColor(QStringLiteral("#71717A")));
-            statusItem->setBackground(QColor(QStringLiteral("#F4F4F5")));
         } else {
-            statusItem->setForeground(QColor(QStringLiteral("#92400E")));
-            statusItem->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            statusItem->setText(QStringLiteral("●  %1").arg(statusItem->text()));
+            statusItem->setForeground(QColor(QStringLiteral("#8A5A00")));
         }
         evidenceTable_->setItem(row, 4, statusItem);
         evidenceTable_->setItem(row, 5, readOnlyItem(item.boundCatalyst.isEmpty()
@@ -532,7 +548,7 @@ void EvidencePage::refreshEvidenceTable() {
             : QStringLiteral("%1\n备注：%2").arg(item.snippet, item.note);
         evidenceTable_->setItem(row, 7, readOnlyItem(context.isEmpty() ? QStringLiteral("—") : context));
     }
-    evidenceTable_->resizeRowsToContents();
+    evidenceTable_->verticalHeader()->setDefaultSectionSize(32);
     refreshEvidencePacket();
 }
 

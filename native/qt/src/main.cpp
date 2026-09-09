@@ -651,6 +651,17 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    const QStringList arguments = app.arguments();
+    const int screenshotArgument = arguments.indexOf(QStringLiteral("--capture-screenshots"));
+    if (screenshotArgument >= 0) {
+        if (screenshotArgument + 1 >= arguments.size()) return 40;
+        catalyst::MainWindow window;
+        applyWindowPolish(window);
+        QString screenshotMessage;
+        const bool captured = window.captureDocumentationScreenshots(arguments[screenshotArgument + 1], &screenshotMessage);
+        return captured ? 0 : 41;
+    }
+
     catalyst::IntegrationGateway integrationGateway;
     const auto integrationConfig = catalyst::IntegrationGateway::configFromArguments(app.arguments());
     QString integrationMessage;

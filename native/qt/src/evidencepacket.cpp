@@ -64,20 +64,20 @@ EvidencePacket EvidencePacketBuilder::build(const QVector<EvidenceItem>& evidenc
 
     if (!packet.readyForAi) {
         packet.warnings.append(QStringLiteral(
-            "当前没有完成‘催化剂 + 时间 + 条件复核备注’的证据，因此 Evidence Packet 暂不进入 AI 上下文。"));
+            "当前没有完成‘催化剂 + 时间 + 确认备注’的资料，因此暂不提供给 AI。"));
     }
     if (packet.pendingItems > 0) {
         packet.warnings.append(QStringLiteral(
-            "%1 条证据仍处于候选/待复核状态，已从 AI 上下文中排除。")
+            "%1 条资料仍待关联或确认，当前不会提供给 AI。")
             .arg(packet.pendingItems));
     }
     if (reviewedButIncomplete > 0) {
         packet.warnings.append(QStringLiteral(
-            "%1 条证据虽然带有复核状态，但绑定信息不完整，已按安全策略降级为待复核。")
+            "%1 条资料虽然标记为已确认，但关联信息不完整，已自动退回待确认状态。")
             .arg(reviewedButIncomplete));
     }
     if (packet.sourceCount == 0 && packet.totalCandidates > 0) {
-        packet.warnings.append(QStringLiteral("部分证据缺少可追溯来源标识。"));
+        packet.warnings.append(QStringLiteral("部分资料缺少可追溯来源标识。"));
     }
 
     return packet;
@@ -85,59 +85,57 @@ EvidencePacket EvidencePacketBuilder::build(const QVector<EvidenceItem>& evidenc
 
 QString EvidencePacketBuilder::toMarkdown(const EvidencePacket& packet) {
     QString text;
-    text += QStringLiteral("# Evidence Packet\n\n");
-    text += QStringLiteral("- generated_utc: %1\n").arg(packet.generatedUtc);
-    text += QStringLiteral("- ready_for_ai: %1\n").arg(packet.readyForAi ? QStringLiteral("true") : QStringLiteral("false"));
-    text += QStringLiteral("- reviewed_context_items: %1\n").arg(packet.reviewedContextItems);
-    text += QStringLiteral("- pending_excluded_items: %1\n").arg(packet.pendingItems);
-    text += QStringLiteral("- sources: %1\n").arg(packet.sourceCount);
-    text += QStringLiteral("- catalysts: %1\n\n").arg(packet.catalystCount);
+    text += QStringLiteral("# AI 可用资料\n\n");
+    text += QStringLiteral("- 生成时间：%1\n").arg(packet.generatedUtc);
+    text += QStringLiteral("- AI 可用：%1\n").arg(packet.readyForAi ? QStringLiteral("是") : QStringLiteral("否"));
+    text += QStringLiteral("- 已确认资料：%1 条\n").arg(packet.reviewedContextItems);
+    text += QStringLiteral("- 待确认资料：%1 条\n").arg(packet.pendingItems);
+    text += QStringLiteral("- 来源数量：%1\n").arg(packet.sourceCount);
+    text += QStringLiteral("- 关联催化剂：%1 个\n\n").arg(packet.catalystCount);
 
     if (!packet.warnings.isEmpty()) {
-        text += QStringLiteral("## Guardrails\n\n");
+        text += QStringLiteral("## 使用提示\n\n");
         for (const auto& warning : packet.warnings) {
             text += QStringLiteral("- %1\n").arg(warning);
         }
         text += QLatin1Char('\n');
     }
 
-    text += QStringLiteral("## Reviewed context\n\n");
+    text += QStringLiteral("## 已确认资料\n\n");
     if (packet.contextItems.isEmpty()) {
-        text += QStringLiteral("No reviewed evidence is currently eligible for AI context.\n");
+        text += QStringLiteral("当前没有可供 AI 使用的已确认资料。\n");
         return text;
     }
 
     int index = 1;
     for (const auto& item : packet.contextItems) {
         const QString source = item.sourcePath.isEmpty()
-            ? QStringLiteral("unknown")
+            ? QStringLiteral("未知来源")
             : QFileInfo(item.sourcePath).fileName();
         const QString page = item.sourcePage > 0
-            ? QStringLiteral("p.%1").arg(item.sourcePage)
-            : QStringLiteral("page unknown");
+            ? QStringLiteral("第 %1 页").arg(item.sourcePage)
+            : QStringLiteral("页码未知");
         const QString candidate = item.valueText.isEmpty() ? item.term : item.valueText;
         const QString hash = item.sourceSha256.isEmpty()
-            ? QStringLiteral("unknown")
+            ? QStringLiteral("未知")
             : item.sourceSha256.left(16);
 
-        text += QStringLiteral("### Evidence %1\n\n").arg(index++);
-        text += QStringLiteral("- source: %1\n").arg(source);
-        text += QStringLiteral("- source_sha256_prefix: %1\n").arg(hash);
-        text += QStringLiteral("- page: %1\n").arg(page);
-        text += QStringLiteral("- catalyst: %1\n").arg(item.boundCatalyst);
-        text += QStringLiteral("- time_h: %1\n").arg(QString::number(*item.boundTimeHours, 'g', 10));
-        text += QStringLiteral("- category: %1\n").arg(categoryLabel(item.category));
-        text += QStringLiteral("- candidate: %1\n").arg(candidate);
-        text += QStringLiteral("- review_note: %1\n").arg(compact(item.note));
+        text += QStringLiteral("### 资料 %1\n\n").arg(index++);
+        text += QStringLiteral("- 来源：%1\n").arg(source);
+        text += QStringLiteral("- 来源校验：%1\n").arg(hash);
+        text += QStringLiteral("- 页码：%1\n").arg(page);
+        text += QStringLiteral("- 催化剂：%1\n").arg(item.boundCatalyst);
+        text += QStringLiteral("- 时间：%1 h\n").arg(QString::number(*item.boundTimeHours, 'g', 10));
+        text += QStringLiteral("- 类型：%1\n").arg(categoryLabel(item.category));
+        text += QStringLiteral("- 识别内容：%1\n").arg(candidate);
+        text += QStringLiteral("- 确认备注：%1\n").arg(compact(item.note));
         if (!item.snippet.trimmed().isEmpty()) {
-            text += QStringLiteral("- source_context: %1\n").arg(compact(item.snippet));
+            text += QStringLiteral("- 原文上下文：%1\n").arg(compact(item.snippet));
         }
         text += QLatin1Char('\n');
     }
 
-    text += QStringLiteral(
-        "Evidence Packet is context-only. It must not overwrite experimental observations, "
-        "lifetime thresholds, or direct catalyst rankings.\n");
+    text += QStringLiteral("以上资料仅作为分析上下文，不会改写实验观测、寿命阈值或催化剂直接排名。\n");
     return text;
 }
 

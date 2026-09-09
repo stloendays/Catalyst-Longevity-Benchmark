@@ -1,0 +1,56 @@
+name: Zhice Real UI Screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+          cmake --build build-qt --config Release --parallel
+          if (-not (Test-Path "build-qt\Release\智策.exe")) { throw "智策.exe was not produced" }
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Capture real Qt screenshots
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "ui-screenshots" | Out-Null
+          $output = (Resolve-Path "ui-screenshots").Path
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $capture = Start-Process -FilePath $exe -ArgumentList @("--capture-screenshots", $output) -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($capture.ExitCode -ne 0) { throw "Screenshot capture failed with exit code $($capture.ExitCode)" }
+          $shots = Get-ChildItem "ui-screenshots" -Filter "*.png"
+          if ($shots.Count -lt 11) { throw "Expected at least 11 screenshots, got $($shots.Count)" }
+          $shots | Select-Object Name, Length
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhice-Real-UI-Screenshots
+          path: ui-screenshots/*.png
+          if-no-files-found: error
