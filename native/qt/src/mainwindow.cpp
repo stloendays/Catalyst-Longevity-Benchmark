@@ -955,6 +955,8 @@ QWidget* MainWindow::buildAnalysisPage() {
         QStringLiteral("可执行性"), QStringLiteral("原因"), QStringLiteral("下一步"),
         QStringLiteral("依据")});
     configureTable(adviceTable_);
+    adviceTable_->setWordWrap(false);
+    adviceTable_->verticalHeader()->setDefaultSectionSize(36);
     adviceTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     adviceTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     adviceTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -1602,7 +1604,6 @@ void MainWindow::refreshResearchSupportViews() {
             adviceTable_->setItem(row, 5, readOnlyItem(item.target));
             adviceTable_->setItem(row, 6, readOnlyItem(item.basis));
         }
-        adviceTable_->resizeRowsToContents();
     }
 
     const auto referenceMatches = ReferenceKnowledgeBase::matchExperimentContext(records_);

@@ -27,7 +27,10 @@ namespace {
 
 QLabel* headingLabel(const QString& text) {
     auto* label = new QLabel(text);
-    label->setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 20, QFont::DemiBold));
+    QFont font = label->font();
+    font.setPointSize(20);
+    font.setWeight(QFont::DemiBold);
+    label->setFont(font);
     label->setObjectName(QStringLiteral("pageHeading"));
     return label;
 }
@@ -136,7 +139,7 @@ EvidencePage::EvidencePage(QWidget* parent)
     auto* titleBox = new QVBoxLayout;
     titleBox->addWidget(headingLabel(QStringLiteral("资料")));
     titleBox->addWidget(mutedLabel(QStringLiteral(
-        "原生读取带文本层的 PDF 论文，以及 TXT / Markdown / CSV / TSV。保守提取 DOI、温度、测试时长、CH4 转化率候选值与失活证据，并保留 PDF 页码。只有完成催化剂、时间和人工条件复核的条目才进入 Evidence Packet；候选值不会自动改写实验数据或排名。")));
+        "导入 PDF 或文本资料，识别 DOI、温度、测试时长等信息；关联到催化剂和时间并确认后，可作为 AI 分析上下文。资料不会自动改写实验数据。")));
     top->addLayout(titleBox, 1);
 
     auto* chooseButton = new QPushButton(QStringLiteral("选择 PDF / 资料文件"));
@@ -149,17 +152,21 @@ EvidencePage::EvidencePage(QWidget* parent)
     sourceFrame->setObjectName(QStringLiteral("evidenceSurface"));
     auto* sourceLayout = new QVBoxLayout(sourceFrame);
     sourceLayout->setContentsMargins(18, 14, 18, 14);
+    sourceFrame->setMaximumHeight(96);
     auto* sourceTitle = new QLabel(QStringLiteral("当前资料"));
     sourceTitle->setObjectName(QStringLiteral("sectionTitle"));
     sourceLabel_ = new QLabel(QStringLiteral("尚未加载资料"));
     sourceLabel_->setObjectName(QStringLiteral("sourcePath"));
-    sourceLabel_->setWordWrap(true);
+    sourceLabel_->setWordWrap(false);
     sourceLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     documentInfoLabel_ = mutedLabel(QStringLiteral("—"));
     warningLabel_ = mutedLabel(QString());
     warningLabel_->setStyleSheet(QStringLiteral("color:#92400E;"));
-    sourceLayout->addWidget(sourceTitle);
-    sourceLayout->addWidget(sourceLabel_);
+    auto* sourceTop = new QHBoxLayout;
+    sourceTop->addWidget(sourceTitle);
+    sourceTop->addSpacing(10);
+    sourceTop->addWidget(sourceLabel_, 1);
+    sourceLayout->addLayout(sourceTop);
     sourceLayout->addWidget(documentInfoLabel_);
     sourceLayout->addWidget(warningLabel_);
     layout->addWidget(sourceFrame);
@@ -187,7 +194,8 @@ EvidencePage::EvidencePage(QWidget* parent)
     signalsTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     signalsTable_->verticalHeader()->setVisible(false);
     signalsTable_->setAlternatingRowColors(true);
-    signalsTable_->setMaximumHeight(165);
+    signalsTable_->setMaximumHeight(82);
+    signalFrame->setMaximumHeight(135);
     signalsTable_->setMouseTracking(true);
     signalLayout->addWidget(signalsTable_);
     layout->addWidget(signalFrame);
@@ -211,9 +219,11 @@ EvidencePage::EvidencePage(QWidget* parent)
     evidenceTable_->setAlternatingRowColors(true);
     evidenceTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     evidenceTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    evidenceTable_->setWordWrap(true);
+    evidenceTable_->setWordWrap(false);
     evidenceTable_->setMouseTracking(true);
-    evidenceLayout->addWidget(evidenceTable_, 1);
+    evidenceTable_->setMinimumHeight(105);
+    evidenceTable_->setMaximumHeight(135);
+    evidenceLayout->addWidget(evidenceTable_);
 
     auto* bindRow = new QHBoxLayout;
     catalystCombo_ = new QComboBox;
@@ -246,12 +256,16 @@ EvidencePage::EvidencePage(QWidget* parent)
     bindRow->addWidget(new QLabel(QStringLiteral("时间")));
     bindRow->addWidget(timeSpin_);
     bindRow->addWidget(noteEdit_, 1);
-    bindRow->addWidget(bindButton);
-    bindRow->addWidget(reviewButton);
-    bindRow->addWidget(returnButton);
-    bindRow->addWidget(unbindButton);
     evidenceLayout->addLayout(bindRow);
-    layout->addWidget(evidenceFrame, 1);
+    auto* actionRow = new QHBoxLayout;
+    actionRow->addStretch();
+    actionRow->addWidget(bindButton);
+    actionRow->addWidget(reviewButton);
+    actionRow->addWidget(returnButton);
+    actionRow->addWidget(unbindButton);
+    evidenceLayout->addLayout(actionRow);
+    evidenceFrame->setMaximumHeight(260);
+    layout->addWidget(evidenceFrame);
 
     auto* packetFrame = new QFrame;
     packetFrame->setObjectName(QStringLiteral("aiSurface"));
@@ -270,7 +284,9 @@ EvidencePage::EvidencePage(QWidget* parent)
         "只有已关联到明确催化剂和时间点，并经人工确认的资料会进入 AI 可用内容；其余条目保留在资料列表中，不参与自动分析。")));
     packetPreview_ = new QTextEdit;
     packetPreview_->setReadOnly(true);
-    packetPreview_->setMaximumHeight(210);
+    packetPreview_->setMinimumHeight(50);
+    packetPreview_->setMaximumHeight(68);
+    packetFrame->setMaximumHeight(155);
     packetPreview_->setPlaceholderText(QStringLiteral("确认至少一条资料后，这里会显示供 AI 使用的内容。"));
     packetLayout->addWidget(packetPreview_);
     layout->addWidget(packetFrame);
