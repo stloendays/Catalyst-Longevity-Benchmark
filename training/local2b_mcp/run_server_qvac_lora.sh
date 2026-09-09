@@ -23,6 +23,8 @@ Options:
   --learning-rate VALUE    Learning rate (default: 1e-5)
   --seed N                 Seed (default: 20260908)
   --timeout-seconds N      Hard training timeout (default: 7200)
+  --checkpoint-steps N     Save checkpoint every N steps (default: 2)
+  --checkpoint-dir DIR     Checkpoint directory (default: OUTPUT.checkpoints)
   --log FILE               Training log path (default: OUTPUT.log)
   --result FILE            Result metadata path (default: OUTPUT.result.txt)
   --install FILE           Copy successful adapter to this final path
@@ -44,6 +46,8 @@ EPOCHS=1
 LR=1e-5
 SEED=20260908
 TIMEOUT_SECONDS=7200
+CHECKPOINT_STEPS=2
+CHECKPOINT_DIR=
 LOG=
 RESULT=
 INSTALL=
@@ -65,6 +69,8 @@ while [ "$#" -gt 0 ]; do
     --learning-rate) LR=$2; shift 2 ;;
     --seed) SEED=$2; shift 2 ;;
     --timeout-seconds) TIMEOUT_SECONDS=$2; shift 2 ;;
+    --checkpoint-steps) CHECKPOINT_STEPS=$2; shift 2 ;;
+    --checkpoint-dir) CHECKPOINT_DIR=$2; shift 2 ;;
     --log) LOG=$2; shift 2 ;;
     --result) RESULT=$2; shift 2 ;;
     --install) INSTALL=$2; shift 2 ;;
@@ -80,6 +86,7 @@ if [ -z "$DATA" ] || [ -z "$OUTPUT" ]; then
 fi
 if [ -z "$LOG" ]; then LOG="${OUTPUT}.log"; fi
 if [ -z "$RESULT" ]; then RESULT="${OUTPUT}.result.txt"; fi
+if [ -z "$CHECKPOINT_DIR" ]; then CHECKPOINT_DIR="${OUTPUT}.checkpoints"; fi
 
 for path in "$TRAINER" "$MODEL" "$DATA"; do
   if [ ! -s "$path" ]; then
@@ -88,7 +95,7 @@ for path in "$TRAINER" "$MODEL" "$DATA"; do
   fi
 done
 
-mkdir -p "$(dirname "$OUTPUT")" "$(dirname "$LOG")" "$(dirname "$RESULT")"
+mkdir -p "$(dirname "$OUTPUT")" "$(dirname "$LOG")" "$(dirname "$RESULT")" "$CHECKPOINT_DIR"
 rm -f "$OUTPUT" "$LOG" "$RESULT"
 
 MODEL_SHA=$(sha256sum "$MODEL" | awk '{print $1}')
@@ -126,7 +133,8 @@ timeout "$TIMEOUT_SECONDS" "$TRAINER" \
   --learning-rate "$LR" \
   --weight-decay 0 \
   --lr-scheduler constant \
-  --checkpoint-save-steps 0 \
+  --checkpoint-save-steps "$CHECKPOINT_STEPS" \
+  --checkpoint-save-dir "$CHECKPOINT_DIR" \
   --output-adapter "$OUTPUT" \
   -c "$CONTEXT" -b "$BATCH" -ub "$UBATCH" -ngl 0 -fa off \
   2>&1 | tee "$LOG"
@@ -137,6 +145,8 @@ ELAPSED=$((END - START))
 
 if [ "$RC" -ne 0 ]; then
   echo "SERVER_QVAC_TRAIN_RC=$RC" >&2
+  echo "CHECKPOINT_DIR=$CHECKPOINT_DIR" >&2
+  find "$CHECKPOINT_DIR" -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null || true
   exit "$RC"
 fi
 if [ ! -s "$OUTPUT" ]; then
@@ -176,6 +186,8 @@ fi
   echo "ubatch=$UBATCH"
   echo "epochs=$EPOCHS"
   echo "learning_rate=$LR"
+  echo "checkpoint_steps=$CHECKPOINT_STEPS"
+  echo "checkpoint_dir=$CHECKPOINT_DIR"
 } | tee "$RESULT"
 
 restore_service
