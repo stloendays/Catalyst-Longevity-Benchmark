@@ -8,11 +8,13 @@ import build_softcopyright_final_package as base
 
 ORIGINAL_BUILD_MANUAL = base.build_manual
 ORIGINAL_HEADING = base.h
+ORIGINAL_PAGE_BREAK = base.pb
 
 
-def heading_with_ai_page_break(document, text: str, size: float = 16) -> None:
+def heading_with_controlled_page_break(document, text: str, size: float = 16) -> None:
     ORIGINAL_HEADING(document, text, size)
-    if text.strip() == "12.1 AI 助手":
+    clean = text.strip()
+    if clean == "12.1 AI 助手" or clean.startswith("附录 A"):
         document.paragraphs[-1].paragraph_format.page_break_before = True
 
 
@@ -31,23 +33,37 @@ def build_manual_with_ai_section(repo: Path, out: Path) -> None:
         and line.strip() != "- 报告输出：PDF"
     )
 
+    page_break_count = {"value": 0}
+
+    def page_break_without_blank_appendix(document) -> None:
+        page_break_count["value"] += 1
+        # build_manual uses three explicit page breaks: before TOC, before body,
+        # and before the appendix. The appendix is instead handled with
+        # page_break_before on its heading to avoid an empty intervening page.
+        if page_break_count["value"] == 3:
+            return
+        ORIGINAL_PAGE_BREAK(document)
+
     with tempfile.TemporaryDirectory() as td:
         patched = Path(td) / "软件操作说明_申报版.md"
         patched.write_text(text, encoding="utf-8")
         old_manual = base.MANUAL_MD
         old_map = dict(base.SHOT_MAP)
         old_heading = base.h
+        old_page_break = base.pb
         try:
             base.MANUAL_MD = patched
             base.SHOT_MAP.pop("## 13. PDF 报告", None)
             base.SHOT_MAP["## 12.1 AI 助手"] = "08_AI助手_资料准备.png"
-            base.h = heading_with_ai_page_break
+            base.h = heading_with_controlled_page_break
+            base.pb = page_break_without_blank_appendix
             ORIGINAL_BUILD_MANUAL(repo, out)
         finally:
             base.MANUAL_MD = old_manual
             base.SHOT_MAP.clear()
             base.SHOT_MAP.update(old_map)
             base.h = old_heading
+            base.pb = old_page_break
 
 
 base.build_manual = build_manual_with_ai_section
