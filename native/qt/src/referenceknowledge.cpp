@@ -203,6 +203,14 @@ QVector<ReferenceMatch> ReferenceKnowledgeBase::matchExperimentContext(const QVe
     const bool oneToOne = hasOneToOneFeed(records);
 
     for (const auto& reference : experimentReferences()) {
+        const int familyScore = catalystFamilyScore(records, reference.catalystFamily);
+        // Do not use a Ni-family literature window for a catalyst that is not
+        // identifiable as Ni-based from the imported sample name. Reaction
+        // conditions alone are not enough to claim a close experimental analogue.
+        if (folded(reference.catalystFamily).contains(QStringLiteral("ni")) && familyScore == 0) {
+            continue;
+        }
+
         int score = 25; // DRM context identified.
         if (temperature && reference.temperatureC) {
             const double delta = qAbs(*temperature - *reference.temperatureC);
@@ -220,7 +228,7 @@ QVector<ReferenceMatch> ReferenceKnowledgeBase::matchExperimentContext(const QVe
             else if (delta <= 1.0) score += 5;
         }
         if (oneToOne && reference.feed.contains(QStringLiteral("1:1"))) score += 10;
-        score += catalystFamilyScore(records, reference.catalystFamily);
+        score += familyScore;
         score = qBound(0, score, 100);
 
         if (score >= 45) {
