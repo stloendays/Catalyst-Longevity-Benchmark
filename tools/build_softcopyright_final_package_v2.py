@@ -28,6 +28,7 @@ def build_manual_with_ai_section(repo: Path, out: Path) -> None:
     text = "\n".join(
         line for line in text.splitlines()
         if not line.startswith("工程构建产物的可执行文件名")
+        and line.strip() != "- 报告输出：PDF"
     )
 
     with tempfile.TemporaryDirectory() as td:
