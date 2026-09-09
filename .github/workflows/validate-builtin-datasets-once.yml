@@ -1,0 +1,66 @@
+name: Validate Built-in Datasets Once
+
+on:
+  push:
+    branches: [builtin-datasets-copyright-name]
+    paths:
+      - ".github/workflows/validate-builtin-datasets-once.yml"
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: builtin-datasets-copyright-name
+
+      - name: Check copyright-facing copy
+        shell: pwsh
+        run: |
+          $files = @(
+            "native/qt/src/main.cpp",
+            "native/qt/src/mainwindow.cpp",
+            "native/qt/src/reportexporter.cpp",
+            "docs/SOFTWARE_COPYRIGHT_CN.md"
+          )
+          $hits = Select-String -Path $files -Pattern "V1\.0"
+          if ($hits) { $hits | ForEach-Object { Write-Host $_ }; throw "Version wording remains in copyright-facing files" }
+          $nameHits = Select-String -Path $files -Pattern "催化剂寿命数据分析与实验辅助系统"
+          if (-not $nameHits) { throw "New product name was not found" }
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+
+      - name: Build native desktop app
+        shell: pwsh
+        run: cmake --build build-qt --config Release --parallel
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Smoke-test desktop window
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\Catalyst Longevity Research.exe").Path
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Desktop window exited unexpectedly with code $($process.ExitCode)" }
+          }
+          finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
