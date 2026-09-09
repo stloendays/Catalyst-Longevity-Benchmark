@@ -1,0 +1,155 @@
+name: Local2B MCP Step 3A finalize
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step3a-finalize.yml
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Step 3 branch
+        uses: actions/checkout@v4
+
+      - name: Validate current training wrapper syntax
+        run: bash -n training/local2b_mcp/run_server_qvac_lora.sh
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Transfer corrected wrapper
+        run: |
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/run_server_qvac_lora.sh \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'chmod +x /home/ubuntu/local2b-training/run_server_qvac_lora.sh && bash -n /home/ubuntu/local2b-training/run_server_qvac_lora.sh'
+
+      - name: Install and smoke test Stage 3A adapter
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/home/ubuntu/local2b-training/step3a-recover
+          ADAPTER="$ROOT/local2b-mcp-step3a-r4-qv.gguf"
+          INSTALLED=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          SERVER=/opt/rhocodec-llm/bin/llama-server
+          EXPECTED=db8b9d9509c752941c47261017e52dab0a9590bc1d4f94dc09fc2e061fa0eb27
+          RESULT="$ROOT/finalize-result.txt"
+          SMOKE_LOG="$ROOT/smoke-server.log"
+          SMOKE_JSON="$ROOT/smoke-response.json"
+          SMOKE_PID=""
+
+          test -s "$ADAPTER"
+          ACTUAL=$(sha256sum "$ADAPTER" | awk '{print $1}')
+          test "$ACTUAL" = "$EXPECTED"
+          test -x "$SERVER"
+          "$SERVER" --help 2>&1 | grep -q -- '--lora'
+
+          sudo install -d -m 755 "$(dirname "$INSTALLED")"
+          sudo install -m 644 "$ADAPTER" "$INSTALLED"
+          INSTALLED_SHA=$(sha256sum "$INSTALLED" | awk '{print $1}')
+          test "$INSTALLED_SHA" = "$EXPECTED"
+
+          restore_base() {
+            if [ -n "$SMOKE_PID" ]; then
+              kill "$SMOKE_PID" 2>/dev/null || true
+              wait "$SMOKE_PID" 2>/dev/null || true
+            fi
+            sudo systemctl start rhocodec-llm.service || true
+          }
+          trap restore_base EXIT INT TERM
+
+          sudo systemctl stop rhocodec-llm.service
+          "$SERVER" \
+            -m "$MODEL" \
+            --lora "$INSTALLED" \
+            --alias qwen3.5-2b-q4-step3a \
+            --host 127.0.0.1 --port 18081 \
+            -c 2048 -t 4 -b 128 -ub 128 --parallel 1 \
+            --jinja --reasoning-budget 0 --no-webui \
+            >"$SMOKE_LOG" 2>&1 &
+          SMOKE_PID=$!
+
+          READY=0
+          for _ in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18081/v1/models >/dev/null 2>&1; then
+              READY=1
+              break
+            fi
+            if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if [ "$READY" -ne 1 ]; then
+            tail -120 "$SMOKE_LOG" || true
+            exit 20
+          fi
+
+          curl -fsS http://127.0.0.1:18081/v1/chat/completions \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"qwen3.5-2b-q4-step3a","messages":[{"role":"user","content":"Reply with exactly STAGE3A_SMOKE_OK"}],"temperature":0,"max_tokens":32}' \
+            > "$SMOKE_JSON"
+          cat "$SMOKE_JSON"
+          grep -q 'STAGE3A_SMOKE_OK' "$SMOKE_JSON"
+
+          kill "$SMOKE_PID" 2>/dev/null || true
+          wait "$SMOKE_PID" 2>/dev/null || true
+          SMOKE_PID=""
+          sudo systemctl start rhocodec-llm.service
+          BASE_HEALTHY=0
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/v1/models >/dev/null 2>&1; then
+              BASE_HEALTHY=1
+              break
+            fi
+            sleep 1
+          done
+          test "$BASE_HEALTHY" -eq 1
+
+          {
+            echo 'stage3a_finalize=PASS'
+            echo "adapter_sha256=$ACTUAL"
+            echo "installed_sha256=$INSTALLED_SHA"
+            echo "adapter_bytes=$(stat -c '%s' "$INSTALLED")"
+            echo 'smoke_generation=STAGE3A_SMOKE_OK'
+            echo 'base_service=HEALTHY'
+          } | tee "$RESULT"
+
+          trap - EXIT INT TERM
+          REMOTE
+
+      - name: Collect finalization evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/step3a-finalize"
+          for f in finalize-result.txt smoke-response.json smoke-server.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3a-recover/$f" \
+              "$RUNNER_TEMP/step3a-finalize/$f" || true
+          done
+
+      - name: Upload finalization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3a-finalize
+          path: ${{ runner.temp }}/step3a-finalize/
+          if-no-files-found: warn
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
