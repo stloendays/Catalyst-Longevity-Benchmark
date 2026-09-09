@@ -25,19 +25,38 @@ jobs:
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           ROOT=/home/ubuntu/local2b-training/step3a-recover
+          ADAPTER="$ROOT/local2b-mcp-step3a-r4-qv.gguf"
+          INSTALLED=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
           date -Is
           echo '=== TRAINERS ==='
           ps -eo pid,ppid,lstart,etime,%cpu,%mem,args | grep -E 'llama-finetune-lora|timeout 4200' | grep -v grep || true
-          echo '=== CHECKPOINTS ==='
-          find "$ROOT/checkpoints" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p %s bytes\n' 2>/dev/null | sort | tail -40 || true
-          echo '=== LOG ==='
-          tail -80 "$ROOT/train.log" 2>/dev/null || true
+          echo '=== STAGE3A ADAPTER ==='
+          if [ -s "$ADAPTER" ]; then
+            ls -lh "$ADAPTER"
+            sha256sum "$ADAPTER"
+          else
+            echo 'STAGE3A_ADAPTER_MISSING'
+          fi
+          echo '=== INSTALLED ADAPTER ==='
+          if [ -s "$INSTALLED" ]; then
+            ls -lh "$INSTALLED"
+            sha256sum "$INSTALLED"
+          else
+            echo 'INSTALLED_ADAPTER_MISSING'
+          fi
+          echo '=== LATEST CHECKPOINT ==='
+          find "$ROOT/checkpoints" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p %s bytes\n' 2>/dev/null | sort | tail -12 || true
+          echo '=== LOG TAIL ==='
+          tail -70 "$ROOT/train.log" 2>/dev/null || true
+          echo '=== STAGE3B ==='
+          ls -lah /home/ubuntu/local2b-training/step3b 2>/dev/null || echo 'STAGE3B_NOT_STARTED'
           echo '=== MEMORY ==='
           free -h
           echo '=== SERVICE ==='
           systemctl is-active rhocodec-llm.service || true
+          curl -fsS http://127.0.0.1:18080/v1/models || true
           REMOTE
       - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-# post-cancel verification
+# current-state verification 2026-09-09 evening
