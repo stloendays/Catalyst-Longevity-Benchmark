@@ -17,17 +17,17 @@ jobs:
         with:
           ref: real-reference-kb-feasible-advice
           fetch-depth: 0
-      - name: Apply per-catalyst reference matching
-        run: python tools/fix_per_catalyst_reference_matching.py
-      - name: Commit matching fix
+      - name: Apply catalyst-family reference gate
+        run: python tools/fix_reference_family_gate.py
+      - name: Commit reference gate
         shell: bash
         run: |
           git config user.name "stloendays"
           git config user.email "157110190+stloendays@users.noreply.github.com"
-          git add native/qt/src/researchadvisor.cpp
+          git add native/qt/src/referenceknowledge.cpp
           if git diff --cached --quiet; then
             echo "No source changes to commit"
           else
-            git commit -m "Match public experiment references per catalyst"
+            git commit -m "Require catalyst-family compatibility for public references"
             git push origin HEAD:real-reference-kb-feasible-advice
           fi
