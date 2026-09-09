@@ -5,6 +5,7 @@
 #include "mainwindow.h"
 #include "projectstore.h"
 #include "reportexporter.h"
+#include "researchadvisor.h"
 
 #include "xlsxdocument.h"
 
@@ -812,6 +813,21 @@ int main(int argc, char* argv[]) {
         if (!catalyst::ReportExporter::exportPdf(
                 reportPath, result, QStringLiteral("self-test"), loadedEvidence, &reportMessage)) return 24;
         if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) return 25;
+
+        const auto dataCheck = catalyst::ResearchAdvisor::checkData(records, result);
+        if (dataCheck.score <= 0 || dataCheck.items.isEmpty()) return 26;
+        const auto experimentAdvice = catalyst::ResearchAdvisor::experimentAdvice(records, result);
+        if (experimentAdvice.isEmpty()) return 27;
+        const auto comparisons = catalyst::ResearchAdvisor::pairComparisons(records, result);
+        if (comparisons.size() != 1
+            || comparisons.front().catalystA.isEmpty()
+            || comparisons.front().catalystB.isEmpty()
+            || comparisons.front().sharedTimeHours <= 0.0) return 28;
+
+        const auto mismatchComparisons = catalyst::ResearchAdvisor::pairComparisons(mismatched, mismatchResult);
+        if (mismatchComparisons.size() != 1
+            || mismatchComparisons.front().comparable
+            || mismatchComparisons.front().status != QStringLiteral("条件不一致")) return 29;
 
         return 0;
     }

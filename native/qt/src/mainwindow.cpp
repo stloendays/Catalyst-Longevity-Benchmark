@@ -7,6 +7,7 @@
 #include "evidencepage.h"
 #include "projectstore.h"
 #include "reportexporter.h"
+#include "researchadvisor.h"
 
 #include <QAbstractItemView>
 #include <QButtonGroup>
@@ -24,6 +25,7 @@
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTableWidget>
+#include <QTabWidget>
 #include <QTimer>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -88,6 +90,10 @@ QString gptMonochromeStyle() {
         QTableWidget::item { padding:7px; border:none; }
         QTableWidget::item:hover { background:#F5F5F6; }
         QTableWidget::item:selected { background:#EDEDEF; color:#111111; }
+        QTabWidget::pane { background:#FFFFFF; border:1px solid #E4E4E7; border-radius:12px; top:-1px; }
+        QTabBar::tab { background:#F4F4F5; color:#71717A; border:1px solid #E4E4E7; padding:8px 18px; margin-right:4px; border-top-left-radius:8px; border-top-right-radius:8px; }
+        QTabBar::tab:hover { background:#ECECEE; color:#27272A; }
+        QTabBar::tab:selected { background:#FFFFFF; color:#111111; border-bottom-color:#FFFFFF; font-weight:650; }
         QScrollBar:vertical { background:transparent; width:10px; margin:3px 2px; }
         QScrollBar::handle:vertical { background:#D4D4D8; border-radius:4px; min-height:28px; }
         QScrollBar::handle:vertical:hover { background:#A1A1AA; }
@@ -476,6 +482,35 @@ QWidget* MainWindow::buildDataPage() {
     sourceLayout->addWidget(sourceLabel_);
     layout->addWidget(sourceFrame);
 
+    auto* checkFrame = new QFrame;
+    checkFrame->setObjectName(QStringLiteral("gptSurface"));
+    auto* checkLayout = new QVBoxLayout(checkFrame);
+    checkLayout->setContentsMargins(18, 14, 18, 14);
+    checkLayout->setSpacing(10);
+    auto* checkTop = new QHBoxLayout;
+    auto* checkTitle = new QLabel(QStringLiteral("数据检查"));
+    checkTitle->setObjectName(QStringLiteral("sectionTitle"));
+    dataCheckStatus_ = new QLabel(QStringLiteral("暂无数据"));
+    dataCheckStatus_->setObjectName(QStringLiteral("statusNeutral"));
+    dataCheckScore_ = muted(QStringLiteral("完整度评分：—"));
+    checkTop->addWidget(checkTitle);
+    checkTop->addWidget(dataCheckStatus_);
+    checkTop->addStretch();
+    checkTop->addWidget(dataCheckScore_);
+    checkLayout->addLayout(checkTop);
+    checkLayout->addWidget(muted(QStringLiteral("自动检查重复时间点、异常数值、实验条件缺失和不同催化剂之间的条件差异。")));
+    dataCheckTable_ = new QTableWidget(0, 4);
+    dataCheckTable_->setHorizontalHeaderLabels({
+        QStringLiteral("状态"), QStringLiteral("范围"), QStringLiteral("发现"), QStringLiteral("建议")});
+    configureTable(dataCheckTable_);
+    dataCheckTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    dataCheckTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    dataCheckTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    dataCheckTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+    dataCheckTable_->setMaximumHeight(210);
+    checkLayout->addWidget(dataCheckTable_);
+    layout->addWidget(checkFrame);
+
     rawTable_ = new QTableWidget(0, 9);
     rawTable_->setHorizontalHeaderLabels({
         QStringLiteral("催化剂"), QStringLiteral("时间(h)"), QStringLiteral("性能"),
@@ -516,12 +551,45 @@ QWidget* MainWindow::buildAnalysisPage() {
     guardLayout->addWidget(conditionMismatchTable_);
     layout->addWidget(guardFrame);
 
+    auto* analysisTabs = new QTabWidget;
+
+    auto* lifetimeTab = new QWidget;
+    auto* lifetimeLayout = new QVBoxLayout(lifetimeTab);
+    lifetimeLayout->setContentsMargins(12, 12, 12, 12);
     thresholdTable_ = new QTableWidget(0, 7);
     thresholdTable_->setHorizontalHeaderLabels({
         QStringLiteral("催化剂"), QStringLiteral("保持率"), QStringLiteral("T95"),
         QStringLiteral("T90"), QStringLiteral("T80"), QStringLiteral("初始值"), QStringLiteral("最新值")});
     configureTable(thresholdTable_);
-    layout->addWidget(thresholdTable_, 1);
+    lifetimeLayout->addWidget(thresholdTable_);
+    analysisTabs->addTab(lifetimeTab, QStringLiteral("寿命指标"));
+
+    auto* compareTab = new QWidget;
+    auto* compareLayout = new QVBoxLayout(compareTab);
+    compareLayout->setContentsMargins(12, 12, 12, 12);
+    compareLayout->addWidget(muted(QStringLiteral("按两个催化剂最近的共同观测时间进行比较；实验条件不一致时不会给出直接领先结论。")));
+    comparisonTable_ = new QTableWidget(0, 8);
+    comparisonTable_->setHorizontalHeaderLabels({
+        QStringLiteral("催化剂 A"), QStringLiteral("催化剂 B"), QStringLiteral("共同时间(h)"),
+        QStringLiteral("A 性能"), QStringLiteral("B 性能"), QStringLiteral("差值"),
+        QStringLiteral("状态"), QStringLiteral("结果")});
+    configureTable(comparisonTable_);
+    compareLayout->addWidget(comparisonTable_);
+    analysisTabs->addTab(compareTab, QStringLiteral("同时间对比"));
+
+    auto* adviceTab = new QWidget;
+    auto* adviceLayout = new QVBoxLayout(adviceTab);
+    adviceLayout->setContentsMargins(12, 12, 12, 12);
+    adviceLayout->addWidget(muted(QStringLiteral("根据当前观测点、T90 区间和实验条件自动生成下一轮实验建议。建议为规则计算结果，可直接用于实验计划讨论。")));
+    adviceTable_ = new QTableWidget(0, 5);
+    adviceTable_->setHorizontalHeaderLabels({
+        QStringLiteral("优先级"), QStringLiteral("催化剂"), QStringLiteral("建议"),
+        QStringLiteral("原因"), QStringLiteral("下一步")});
+    configureTable(adviceTable_);
+    adviceLayout->addWidget(adviceTable_);
+    analysisTabs->addTab(adviceTab, QStringLiteral("实验建议"));
+
+    layout->addWidget(analysisTabs, 1);
 
     auto* note = new QFrame;
     note->setObjectName(QStringLiteral("infoPanel"));
@@ -921,6 +989,7 @@ void MainWindow::refreshAnalysisViews() {
         thresholdTable_->setItem(row, 6, readOnlyItem(QString::number(summary.latestPerformance, 'g', 8)));
     }
     refreshDecisionOverview();
+    refreshResearchSupportViews();
 }
 
 void MainWindow::refreshDecisionOverview() {
@@ -994,6 +1063,105 @@ void MainWindow::refreshDecisionOverview() {
         setStatusChip(aiEvidenceStatus_, QStringLiteral("暂无资料"), QStringLiteral("statusNeutral"));
         setStatusChip(aiPacketStageStatus_, QStringLiteral("暂无资料"), QStringLiteral("statusNeutral"));
         if (aiEvidenceDetail_) aiEvidenceDetail_->setText(QStringLiteral("目前还没有可供 AI 使用的已确认资料。"));
+    }
+}
+
+void MainWindow::refreshResearchSupportViews() {
+    const DataCheckResult check = ResearchAdvisor::checkData(records_, analysis_);
+    if (dataCheckStatus_) {
+        QString style = QStringLiteral("statusGood");
+        if (records_.isEmpty()) style = QStringLiteral("statusNeutral");
+        else if (check.errorCount > 0) style = QStringLiteral("statusBad");
+        else if (check.warningCount > 0) style = QStringLiteral("statusWarn");
+        setStatusChip(dataCheckStatus_, check.statusText(), style);
+    }
+    if (dataCheckScore_) {
+        dataCheckScore_->setText(records_.isEmpty()
+            ? QStringLiteral("完整度评分：—")
+            : QStringLiteral("完整度评分：%1 / 100 · %2 个需处理 · %3 个建议")
+                .arg(check.score).arg(check.errorCount).arg(check.warningCount));
+    }
+    if (dataCheckTable_) {
+        dataCheckTable_->setRowCount(check.items.size());
+        for (qsizetype row = 0; row < check.items.size(); ++row) {
+            const auto& item = check.items[row];
+            auto* level = readOnlyItem(ResearchAdvisor::checkLevelText(item.level));
+            if (item.level == CheckLevel::Error) {
+                level->setForeground(QColor(QStringLiteral("#991B1B")));
+                level->setBackground(QColor(QStringLiteral("#FEF2F2")));
+            } else if (item.level == CheckLevel::Warning) {
+                level->setForeground(QColor(QStringLiteral("#92400E")));
+                level->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            } else {
+                level->setForeground(QColor(QStringLiteral("#52525B")));
+                level->setBackground(QColor(QStringLiteral("#F4F4F5")));
+            }
+            dataCheckTable_->setItem(row, 0, level);
+            dataCheckTable_->setItem(row, 1, readOnlyItem(item.scope));
+            dataCheckTable_->setItem(row, 2, readOnlyItem(item.issue));
+            dataCheckTable_->setItem(row, 3, readOnlyItem(item.suggestion));
+        }
+        dataCheckTable_->resizeRowsToContents();
+    }
+
+    if (comparisonTable_) {
+        const auto comparisons = ResearchAdvisor::pairComparisons(records_, analysis_);
+        comparisonTable_->setRowCount(comparisons.size());
+        for (qsizetype row = 0; row < comparisons.size(); ++row) {
+            const auto& item = comparisons[row];
+            comparisonTable_->setItem(row, 0, readOnlyItem(item.catalystA));
+            comparisonTable_->setItem(row, 1, readOnlyItem(item.catalystB));
+            comparisonTable_->setItem(row, 2, readOnlyItem(item.sharedTimeHours > 0.0
+                ? QString::number(item.sharedTimeHours, 'g', 8) : QStringLiteral("—")));
+            comparisonTable_->setItem(row, 3, readOnlyItem(item.sharedTimeHours > 0.0
+                ? QString::number(item.performanceA, 'g', 8) : QStringLiteral("—")));
+            comparisonTable_->setItem(row, 4, readOnlyItem(item.sharedTimeHours > 0.0
+                ? QString::number(item.performanceB, 'g', 8) : QStringLiteral("—")));
+            comparisonTable_->setItem(row, 5, readOnlyItem(item.sharedTimeHours > 0.0
+                ? QString::number(item.absoluteDifference, 'g', 8) : QStringLiteral("—")));
+            auto* status = readOnlyItem(item.status);
+            if (item.status == QStringLiteral("条件不一致")) {
+                status->setForeground(QColor(QStringLiteral("#991B1B")));
+                status->setBackground(QColor(QStringLiteral("#FEF2F2")));
+            } else if (item.status == QStringLiteral("仅供参考")) {
+                status->setForeground(QColor(QStringLiteral("#92400E")));
+                status->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            } else if (item.status == QStringLiteral("可比较")) {
+                status->setForeground(QColor(QStringLiteral("#166534")));
+                status->setBackground(QColor(QStringLiteral("#F0FDF4")));
+            }
+            comparisonTable_->setItem(row, 6, status);
+            const QString outcome = item.comparable && !item.leader.isEmpty()
+                ? QStringLiteral("%1 当前较高").arg(item.leader)
+                : QStringLiteral("暂不判断");
+            comparisonTable_->setItem(row, 7, readOnlyItem(outcome));
+        }
+        comparisonTable_->resizeRowsToContents();
+    }
+
+    if (adviceTable_) {
+        const auto advice = ResearchAdvisor::experimentAdvice(records_, analysis_);
+        adviceTable_->setRowCount(advice.size());
+        for (qsizetype row = 0; row < advice.size(); ++row) {
+            const auto& item = advice[row];
+            auto* priority = readOnlyItem(ResearchAdvisor::advicePriorityText(item.priority));
+            if (item.priority == AdvicePriority::High) {
+                priority->setForeground(QColor(QStringLiteral("#991B1B")));
+                priority->setBackground(QColor(QStringLiteral("#FEF2F2")));
+            } else if (item.priority == AdvicePriority::Important) {
+                priority->setForeground(QColor(QStringLiteral("#92400E")));
+                priority->setBackground(QColor(QStringLiteral("#FFFBEB")));
+            } else {
+                priority->setForeground(QColor(QStringLiteral("#52525B")));
+                priority->setBackground(QColor(QStringLiteral("#F4F4F5")));
+            }
+            adviceTable_->setItem(row, 0, priority);
+            adviceTable_->setItem(row, 1, readOnlyItem(item.catalyst));
+            adviceTable_->setItem(row, 2, readOnlyItem(item.action));
+            adviceTable_->setItem(row, 3, readOnlyItem(item.reason));
+            adviceTable_->setItem(row, 4, readOnlyItem(item.target));
+        }
+        adviceTable_->resizeRowsToContents();
     }
 }
 
