@@ -16,9 +16,9 @@ constexpr qsizetype kMaxJsonLineBytes = 256 * 1024;
 
 QString randomToken() {
     QString token = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    token.remove(QChar('-'));
+    token.remove(QLatin1Char('-'));
     QString second = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    second.remove(QChar('-'));
+    second.remove(QLatin1Char('-'));
     return token + second;
 }
 
