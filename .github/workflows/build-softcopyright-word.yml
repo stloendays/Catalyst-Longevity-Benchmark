@@ -1,0 +1,97 @@
+name: Build Zhice Software Copyright Word
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - tools/build_softcopyright_word.py
+      - .github/workflows/build-softcopyright-word.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zhice-softcopyright-word
+  cancel-in-progress: true
+
+jobs:
+  build-materials:
+    runs-on: windows-2022
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: "win64_msvc2022_64"
+          cache: true
+          modules: "qtpdf"
+
+      - name: Configure and build Zhice
+        shell: pwsh
+        run: |
+          cmake -S native/qt -B build-qt -G "Visual Studio 17 2022" -A x64
+          cmake --build build-qt --config Release --parallel
+          if (-not (Test-Path "build-qt\Release\智策.exe")) { throw "智策.exe was not produced" }
+
+      - name: Run native self-test
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $test = Start-Process -FilePath $exe -ArgumentList "--self-test" -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($test.ExitCode -ne 0) { throw "Native self-test failed with exit code $($test.ExitCode)" }
+
+      - name: Capture real Qt screenshots
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "ui-screenshots" | Out-Null
+          $output = (Resolve-Path "ui-screenshots").Path
+          $exe = (Resolve-Path "build-qt\Release\智策.exe").Path
+          $capture = Start-Process -FilePath $exe -ArgumentList @("--capture-screenshots", $output) -WorkingDirectory (Split-Path $exe) -Wait -PassThru
+          if ($capture.ExitCode -ne 0) { throw "Screenshot capture failed with exit code $($capture.ExitCode)" }
+          $shots = Get-ChildItem "ui-screenshots" -Filter "*.png"
+          if ($shots.Count -lt 11) { throw "Expected at least 11 screenshots, got $($shots.Count)" }
+          $shots | Sort-Object Name | Select-Object Name, Length
+
+      - name: Install document dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install python-docx Pillow
+
+      - name: Build software-copyright Word
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "docs\software-copyright\screenshots" | Out-Null
+          python tools/build_softcopyright_word.py --screenshots ui-screenshots --output "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx"
+          Copy-Item "ui-screenshots\*.png" "docs\software-copyright\screenshots\" -Force
+          if (-not (Test-Path "docs\software-copyright\智策_V1.0_软件著作权界面材料.docx")) { throw "DOCX was not produced" }
+
+      - name: Commit generated materials
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "docs/software-copyright"
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No generated material changes to commit."
+            exit 0
+          }
+          git commit -m "Update Zhice software copyright screenshots and Word [skip ci]"
+          git push origin HEAD:main
+
+      - name: Upload material artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhice-Software-Copyright-Materials
+          path: |
+            docs/software-copyright/智策_V1.0_软件著作权界面材料.docx
+            docs/software-copyright/screenshots/*.png
+          if-no-files-found: error
