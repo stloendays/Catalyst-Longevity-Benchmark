@@ -804,7 +804,7 @@ void MainWindow::exportReport() {
     const QVector<EvidenceItem> evidence = evidencePage_
         ? evidencePage_->evidenceItems()
         : QVector<EvidenceItem>{};
-    if (!ReportExporter::exportPdf(path, analysis_, sourceLabelText_, evidence, &message)) {
+    if (!ReportExporter::exportPdf(path, records_, analysis_, sourceLabelText_, evidence, &message)) {
         QMessageBox::warning(this, QStringLiteral("导出失败"), message);
         setStatus(message, true);
         return;

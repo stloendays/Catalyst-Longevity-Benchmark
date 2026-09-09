@@ -811,7 +811,7 @@ int main(int argc, char* argv[]) {
         const QString reportPath = tempDir.filePath(QStringLiteral("self-test-report.pdf"));
         QString reportMessage;
         if (!catalyst::ReportExporter::exportPdf(
-                reportPath, result, QStringLiteral("self-test"), loadedEvidence, &reportMessage)) return 24;
+                reportPath, records, result, QStringLiteral("self-test"), loadedEvidence, &reportMessage)) return 24;
         if (!QFileInfo::exists(reportPath) || QFileInfo(reportPath).size() <= 0) return 25;
 
         const auto dataCheck = catalyst::ResearchAdvisor::checkData(records, result);
