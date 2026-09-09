@@ -478,9 +478,9 @@ bool MainWindow::captureDocumentationScreenshots(const QString& outputDir, QStri
     selectAnalysisTab(1);
     if (!saveShot(QStringLiteral("04_分析_同时间对比.png"))) return false;
 
-    loadDataset(2);
-    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(120.0);
-    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(24.0);
+    loadDataset(1);
+    if (maxAdditionalHoursSpin_) maxAdditionalHoursSpin_->setValue(48.0);
+    if (minSamplingIntervalSpin_) minSamplingIntervalSpin_->setValue(6.0);
     refreshResearchSupportViews();
     selectPage(4, QStringLiteral("分析"));
     selectAnalysisTab(2);
@@ -1520,13 +1520,10 @@ void MainWindow::refreshResearchSupportViews() {
             auto* level = readOnlyItem(ResearchAdvisor::checkLevelText(item.level));
             if (item.level == CheckLevel::Error) {
                 level->setForeground(QColor(QStringLiteral("#991B1B")));
-                level->setBackground(QColor(QStringLiteral("#FEF2F2")));
             } else if (item.level == CheckLevel::Warning) {
                 level->setForeground(QColor(QStringLiteral("#92400E")));
-                level->setBackground(QColor(QStringLiteral("#FFFBEB")));
             } else {
                 level->setForeground(QColor(QStringLiteral("#52525B")));
-                level->setBackground(QColor(QStringLiteral("#F4F4F5")));
             }
             dataCheckTable_->setItem(row, 0, level);
             dataCheckTable_->setItem(row, 1, readOnlyItem(item.scope));
@@ -1554,13 +1551,10 @@ void MainWindow::refreshResearchSupportViews() {
             auto* status = readOnlyItem(item.status);
             if (item.status == QStringLiteral("条件不一致")) {
                 status->setForeground(QColor(QStringLiteral("#991B1B")));
-                status->setBackground(QColor(QStringLiteral("#FEF2F2")));
             } else if (item.status == QStringLiteral("仅供参考")) {
                 status->setForeground(QColor(QStringLiteral("#92400E")));
-                status->setBackground(QColor(QStringLiteral("#FFFBEB")));
             } else if (item.status == QStringLiteral("可比较")) {
                 status->setForeground(QColor(QStringLiteral("#166534")));
-                status->setBackground(QColor(QStringLiteral("#F0FDF4")));
             }
             comparisonTable_->setItem(row, 6, status);
             const QString outcome = item.comparable && !item.leader.isEmpty()
@@ -1582,25 +1576,19 @@ void MainWindow::refreshResearchSupportViews() {
             auto* priority = readOnlyItem(ResearchAdvisor::advicePriorityText(item.priority));
             if (item.priority == AdvicePriority::High) {
                 priority->setForeground(QColor(QStringLiteral("#991B1B")));
-                priority->setBackground(QColor(QStringLiteral("#FEF2F2")));
             } else if (item.priority == AdvicePriority::Important) {
                 priority->setForeground(QColor(QStringLiteral("#92400E")));
-                priority->setBackground(QColor(QStringLiteral("#FFFBEB")));
             } else {
                 priority->setForeground(QColor(QStringLiteral("#52525B")));
-                priority->setBackground(QColor(QStringLiteral("#F4F4F5")));
             }
             auto* feasibility = readOnlyItem(QStringLiteral("%1 · %2/100")
                 .arg(item.feasibility).arg(item.feasibilityScore));
             if (item.feasibilityScore >= 85) {
                 feasibility->setForeground(QColor(QStringLiteral("#166534")));
-                feasibility->setBackground(QColor(QStringLiteral("#F0FDF4")));
             } else if (item.feasibilityScore >= 70) {
                 feasibility->setForeground(QColor(QStringLiteral("#92400E")));
-                feasibility->setBackground(QColor(QStringLiteral("#FFFBEB")));
             } else {
                 feasibility->setForeground(QColor(QStringLiteral("#991B1B")));
-                feasibility->setBackground(QColor(QStringLiteral("#FEF2F2")));
             }
             adviceTable_->setItem(row, 0, priority);
             adviceTable_->setItem(row, 1, readOnlyItem(item.catalyst));
@@ -1670,7 +1658,7 @@ void MainWindow::updateProjectUi() {
         }
     }
 
-    QString title = QStringLiteral("催化剂长期稳定性评估与实验决策系统");
+    QString title = QStringLiteral("智策");
     title += currentProjectPath_.isEmpty()
         ? QStringLiteral(" — 未命名项目")
         : QStringLiteral(" — %1").arg(QFileInfo(currentProjectPath_).completeBaseName());
