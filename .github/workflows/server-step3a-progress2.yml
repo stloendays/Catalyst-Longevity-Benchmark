@@ -29,11 +29,11 @@ jobs:
           echo '=== ROOT ==='
           ls -lh "$ROOT" 2>/dev/null || true
           echo '=== CHECKPOINTS ==='
-          find "$ROOT/checkpoints" -maxdepth 2 -type f -printf '%p %s bytes\n' 2>/dev/null | tail -30 || true
+          find "$ROOT/checkpoints" -maxdepth 2 -type f -printf '%TY-%Tm-%TdT%TH:%TM:%TS %p %s bytes\n' 2>/dev/null | sort | tail -30 || true
           echo '=== LOG TAIL ==='
-          tail -60 "$ROOT/train.log" 2>/dev/null || true
+          tail -80 "$ROOT/train.log" 2>/dev/null || true
           echo '=== PROC ==='
-          ps -eo pid,%cpu,%mem,etime,args | grep -E 'llama-finetune-lora|llama-server' | grep -v grep || true
+          ps -eo pid,ppid,lstart,etime,%cpu,%mem,args | grep -E 'llama-finetune-lora|timeout 4200|llama-server' | grep -v grep || true
           echo '=== MEMORY ==='
           free -h
           echo '=== SERVICE ==='
@@ -42,4 +42,4 @@ jobs:
       - name: Cleanup
         if: always()
         run: rm -f "$HOME/.ssh/server_key"
-# recovery checkpoint probe
+# duplicate inspection
