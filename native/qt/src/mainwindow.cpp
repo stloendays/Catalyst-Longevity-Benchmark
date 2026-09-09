@@ -45,7 +45,6 @@ QString gptMonochromeStyle() {
         QMainWindow, QWidget {
             background:#F5F5F5;
             color:#171717;
-            font-family:"Microsoft YaHei";
             font-size:13px;
         }
         QMainWindow { background:#F5F5F5; }
@@ -257,7 +256,10 @@ QString gptMonochromeStyle() {
 
 QLabel* heading(const QString& text, int pointSize = 20) {
     auto* label = new QLabel(text);
-    label->setFont(QFont(QStringLiteral("Microsoft YaHei"), pointSize, QFont::DemiBold));
+    QFont font = label->font();
+    font.setPointSize(pointSize);
+    font.setWeight(QFont::DemiBold);
+    label->setFont(font);
     label->setObjectName(QStringLiteral("pageHeading"));
     return label;
 }
