@@ -148,8 +148,8 @@ int baseFeasibilityScore(
     bool hasReferenceSupport,
     double extensionRatio = 1.0) {
     int score = 92;
-    score -= qMin(20, missingConditionFields(rows).size() * 5);
-    score -= qMin(24, internallyVariableFields(rows).size() * 12);
+    score -= qMin(20, static_cast<int>(missingConditionFields(rows).size()) * 5);
+    score -= qMin(24, static_cast<int>(internallyVariableFields(rows).size()) * 12);
     if (rows.size() < 3) score -= 15;
     if (analysis.conditionAudit.blocksDirectRanking()) score -= 12;
     if (extensionRatio > 1.75) score -= 8;
@@ -480,7 +480,7 @@ QVector<ExperimentAdvice> ResearchAdvisor::experimentAdvice(
 
         const QStringList missing = missingConditionFields(rows);
         if (!missing.isEmpty()) {
-            const int score = qBound(55, 92 - missing.size() * 5, 90);
+            const int score = qBound(55, 92 - static_cast<int>(missing.size()) * 5, 90);
             advice.append(makeAdvice(
                 AdvicePriority::Normal,
                 summary.catalyst,
