@@ -1,0 +1,55 @@
+name: Build Zhice Software Copyright Filing Guide
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - tools/build_softcopyright_filing_guide.py
+      - .github/workflows/build-softcopyright-filing-guide.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zhice-softcopyright-filing-guide
+  cancel-in-progress: true
+
+jobs:
+  build-guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install document dependency
+        run: python -m pip install python-docx
+
+      - name: Generate filing guide
+        run: |
+          python tools/build_softcopyright_filing_guide.py
+          test -s "docs/software-copyright/final/智策_V1.0_软著申报填写指南.docx"
+
+      - name: Commit generated guide
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "docs/software-copyright/final/智策_V1.0_软著申报填写指南.docx"
+          git diff --cached --quiet && exit 0
+          git commit -m "Generate Zhice V1.0 software copyright filing guide [skip ci]"
+          git push origin HEAD:main
+
+      - name: Upload filing guide artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zhice-V1.0-Software-Copyright-Filing-Guide
+          path: docs/software-copyright/final/智策_V1.0_软著申报填写指南.docx
+          if-no-files-found: error
