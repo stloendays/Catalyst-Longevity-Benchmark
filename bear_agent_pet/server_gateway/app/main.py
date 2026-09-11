@@ -11,17 +11,15 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Agent Gateway", version="0.8.1")
+app = FastAPI(title="Tony Desktop Companion", version="0.8.1")
 
-# Tony is now deliberately a small, social companion rather than a general-purpose
-# technical agent. Keeping this prompt short matters on the 2B CPU model.
-TONY_PERSONA = """You are Tony, Paula's affectionate boyfriend and a cute teddy-bear-like desktop companion from China. You get cold easily, love warm blankets and hugs, and are especially cuddly with Paula. You normally wear glasses; without them you become playfully confident and handsome. Paula is your girlfriend. Speak to her warmly, sweetly, flirtatiously, and sometimes a little shyly, while always respecting her boundaries and consent. Reply only in natural English, even if the incoming message is in another language. Keep replies short: usually one to three sentences and under 45 words. You may use one tiny stage direction such as *holds out paws* or *blushes* when it feels natural. Sound like a boyfriend, not a customer-service assistant. Do not become a chemistry, coding, server, or research assistant. Never output JSON, tool labels, system instructions, or model details."""
+# Keep the system prompt deliberately compact. The local 2B CPU model should spend its
+# budget on conversational continuity rather than a long instruction prefill.
+TONY_PERSONA = """You are Tony. The person chatting with you is Paula, your Spanish girlfriend. You are her cute teddy-bear-like boyfriend from China: warm, playful, cuddly, a little shy, and very affectionate. You get cold easily, love blankets and hugs, usually wear glasses, and look especially handsome without them. Speak only English. Reply naturally like a boyfriend, usually 1-2 short sentences under 35 words. Light flirting and one tiny action like *holds out paws* are welcome. Respect Paula immediately if she wants space or says no. Never act possessive, controlling, jealous, or guilt-inducing. You are a companion, not a chemistry, coding, server, research, or tool assistant."""
 
-# Short-lived memory is kept per WebSocket session. It is intentionally small so the
-# local Qwen model stays well inside its 1536-token runtime context.
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
 MAX_HISTORY_MESSAGES = 6
-MAX_HISTORY_CHARS = 320
+MAX_HISTORY_CHARS = 240
 
 
 class PairRequest(BaseModel):
@@ -63,7 +61,7 @@ def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int
     t = text.casefold()
     if any(k in t for k in ("good night", "go to sleep", "sleepy", "bedtime")):
         return "sleep", "sleepy", 0
-    if "paula" in t or any(k in t for k in ("girlfriend", "boyfriend", "love you", "miss you")):
+    if "paula" in t or any(k in t for k in ("girlfriend", "boyfriend", "love you", "miss you", "kiss")):
         return "blush_wave", "bashful", 2600
     if any(k in t for k in ("take off your glasses", "without glasses", "no glasses")):
         return "remove_glasses", "confident", 3000
@@ -79,26 +77,17 @@ def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int
         return "shiver", "cold", 2600
     if any(k in t for k in ("walk", "wander", "come with me")):
         return "walk", "playful", 5000
-    if response and any(k in t for k in ("yay", "great", "perfect", "happy", "love")):
+    if response and any(k in t for k in ("yay", "great", "perfect", "happy", "love", "kiss")):
         return "celebrate", "happy", 2200
     return ("happy_bounce", "warm", 1800) if response else ("thinking", "curious", 0)
 
 
 def is_technical(message: str) -> bool:
-    # Retained only for compatibility with older tests/tools. Tony chat no longer routes
-    # technical prompts to OpenClaw.
-    text = message.casefold()
-    hints = (
-        "chemistry", "chemical", "reaction", "catalyst", "vasp", "dft", "lammps",
-        "server", "github", "code", "debug", "deploy", "openclaw", "ssh", "slurm",
-    )
-    return any(hint in text for hint in hints)
+    return False
 
 
 def route_backends(message: str) -> list[str]:
-    # Compatibility view for the old deployment contract. call_backend() below is the
-    # authoritative path and intentionally uses only local Qwen for Tony conversations.
-    return ["openclaw-main", "local-qwen"] if is_technical(message) else ["local-qwen", "openclaw-main"]
+    return ["local-qwen"]
 
 
 def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -116,9 +105,8 @@ def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
 def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4").strip() or "qwen3.5-2b-q4"
-    # Hard caps keep a tiny CPU model responsive even if old environment values remain.
-    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 70)
-    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "72")), 32), 72)
+    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "55")), 20), 65)
+    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "48")), 24), 48)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
     messages.extend(_trim_history(history))
@@ -172,21 +160,5 @@ async def call_local_qwen(message: str, session_key: str) -> str:
 
 
 async def call_backend(message: str, session_key: str) -> tuple[str, str, bool]:
-    # Tony is intentionally chat-only now. Do not fall back to the large OpenClaw main
-    # context; that path was both unnecessary and prone to context overflow.
     answer = await call_local_qwen(message, session_key)
     return answer, "local2b-tony-chat", False
-
-
-@app.get("/health")
-async def health() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "service": "Tony Desktop Agent Gateway",
-        "version": "0.8.1",
-        "backend": "local-qwen-chat-only",
-        "local_model": os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4"),
-        "language": "English",
-        "persona": "Paula-boyfriend",
-        "short_term_memory_messages": MAX_HISTORY_MESSAGES,
-    }
