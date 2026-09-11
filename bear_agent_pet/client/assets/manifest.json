@@ -1,0 +1,45 @@
+{
+  "version": "2.0",
+  "states": [
+    "adjust_glasses.png",
+    "ask_hug.png",
+    "blush.png",
+    "blush_wave.png",
+    "celebrate.png",
+    "hug.png",
+    "idle.png",
+    "remove_glasses.png",
+    "shiver.png",
+    "sleep.png",
+    "study.png",
+    "thinking.png",
+    "walk.png",
+    "wave.png",
+    "working.png"
+  ],
+  "animations": {
+    "idle": [
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png"
+    ],
+    "ask_hug": [
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png"
+    ],
+    "shiver": [
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png"
+    ],
+    "walk": [
+      "frame_01.png",
+      "frame_02.png",
+      "frame_03.png"
+    ]
+  },
+  "runtime_state_px": 220,
+  "runtime_frame_px": 200,
+  "palette_colors": 128
+}

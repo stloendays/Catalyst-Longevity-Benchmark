@@ -290,10 +290,6 @@ const QPixmap *PetWindow::pixmapForAction(Action action) const {
     }
     auto it=stateAssets_.constFind(key);
     if(it!=stateAssets_.constEnd()) return &it.value();
-    if(action==Action::BlushWave) {
-        it=stateAssets_.constFind("blush");
-        if(it!=stateAssets_.constEnd()) return &it.value();
-    }
     it=stateAssets_.constFind("idle");
     if(it!=stateAssets_.constEnd()) return &it.value();
     return pet_.isNull() ? nullptr : &pet_;

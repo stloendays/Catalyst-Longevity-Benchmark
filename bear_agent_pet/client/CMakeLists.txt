@@ -25,3 +25,10 @@ if(WIN32)
   target_link_libraries(TonyDesktopPet PRIVATE Crypt32)
 endif()
 install(TARGETS TonyDesktopPet RUNTIME DESTINATION .)
+install(DIRECTORY assets/ DESTINATION assets)
+add_custom_command(TARGET TonyDesktopPet POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:TonyDesktopPet>/assets"
+    COMMENT "Copying Tony state artwork and animation frames"
+)

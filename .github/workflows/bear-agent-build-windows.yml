@@ -39,11 +39,51 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path bear_agent_pet/client/package/assets | Out-Null
-          Copy-Item bear_agent_pet/client/build/Release/TonyDesktopPet.exe bear_agent_pet/client/package/
-          Copy-Item bear_agent_pet/client/assets/* bear_agent_pet/client/package/assets/ -Recurse -Force
+          cmake --install bear_agent_pet/client/build --config Release --prefix bear_agent_pet/client/package
+          if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
           Copy-Item bear_agent_pet/client/RUN_TONY.md bear_agent_pet/client/package/
-          "TonyDesktopPet 0.5.0`ncommit=$env:GITHUB_SHA" | Set-Content bear_agent_pet/client/package/VERSION.txt
+          $projectLine = Get-Content bear_agent_pet/client/CMakeLists.txt | Select-String 'project\(TonyDesktopPet VERSION ([0-9.]+)'
+          $version = $projectLine.Matches[0].Groups[1].Value
+          "TonyDesktopPet $version`ncommit=$env:GITHUB_SHA" | Set-Content bear_agent_pet/client/package/VERSION.txt
           windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+      - name: Verify packaged artwork and executable
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path bear_agent_pet/client/assets).Path
+          $package = (Resolve-Path bear_agent_pet/client/package).Path
+          foreach ($required in @('TonyDesktopPet.exe', 'assets/tony.png', 'assets/states', 'assets/animations')) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+          Add-Type -AssemblyName System.Drawing
+          foreach ($file in Get-ChildItem $source -File -Recurse) {
+            $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
+            $deployed = Join-Path "$package/assets" $relative
+            if (-not (Test-Path $deployed)) { throw "Missing artwork: $relative" }
+            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $deployed).Hash) {
+              throw "Packaged artwork differs: $relative"
+            }
+            if ($file.Extension -eq '.png') {
+              $bitmap = [Drawing.Bitmap]::new($deployed)
+              try {
+                if ($bitmap.Width -lt 1 -or $bitmap.Height -lt 1) { throw "Invalid PNG: $relative" }
+                $null = $bitmap.GetPixel($bitmap.Width - 1, $bitmap.Height - 1)
+              } finally { $bitmap.Dispose() }
+            }
+          }
+          Write-Host 'TONY_PACKAGE_ASSETS=PASS (all source files, including manifest, match SHA256)'
+          $originalPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          try {
+            $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+            try {
+              Start-Sleep -Seconds 6
+              if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+              Write-Host 'TONY_DEPLOYED_SMOKE=PASS'
+            } finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            }
+          } finally { $env:PATH = $originalPath }
       - uses: actions/upload-artifact@v4
         with:
           name: TonyDesktopPet-windows-x64
