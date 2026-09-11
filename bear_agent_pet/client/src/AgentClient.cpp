@@ -10,6 +10,7 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
 
     connect(&socket_, &QWebSocket::connected, this, [this]{
         reconnectTimer_.stop();
+        outageReported_=false;
         emit connectionChanged(true);
     });
     connect(&socket_, &QWebSocket::disconnected, this, [this]{
@@ -18,7 +19,10 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
     });
     connect(&socket_, &QWebSocket::textMessageReceived, this, &AgentClient::onText);
     connect(&socket_, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError){
-        emit errorMessage(socket_.errorString());
+        if(!outageReported_){
+            outageReported_=true;
+            emit errorMessage(socket_.errorString());
+        }
         if(endpoint_.isValid() && socket_.state()==QAbstractSocket::UnconnectedState && !reconnectTimer_.isActive())
             reconnectTimer_.start();
     });
@@ -26,6 +30,7 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
 
 void AgentClient::connectTo(const QUrl &url) {
     endpoint_=url;
+    outageReported_=false;
     reconnect();
 }
 
@@ -38,7 +43,10 @@ bool AgentClient::connected() const { return socket_.state() == QAbstractSocket:
 
 void AgentClient::sendMessage(const QString &text) {
     if(!connected()) {
-        emit errorMessage("Tony Agent is not connected yet.");
+        if(!outageReported_){
+            outageReported_=true;
+            emit errorMessage("Tony Agent is not connected yet.");
+        }
         return;
     }
     QJsonObject o{{"type","message"},{"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"content",text}};
