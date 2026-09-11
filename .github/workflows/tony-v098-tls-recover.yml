@@ -14,7 +14,7 @@ permissions:
 jobs:
   recover-tls:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     env:
       TONY_SERVER_IP: 150.158.27.206
     steps:
@@ -29,25 +29,26 @@ jobs:
           chmod 600 "$RUNNER_TEMP/tony_server_key"
           echo "TONY_SSH_KEY=$RUNNER_TEMP/tony_server_key" >> "$GITHUB_ENV"
 
-      - name: Install issued trusted IP certificate into Caddy
+      - name: Configure Caddy default SNI for trusted IP certificate
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/install_tony_ip_tls.sh" <<'REMOTE'
+          cat > "$RUNNER_TEMP/configure_ip_tls.sh" <<'REMOTE'
           set -euo pipefail
           IP='150.158.27.206'
-          CERTBOT='/opt/tony-certbot/bin/certbot'
           LIVE="/etc/letsencrypt/live/$IP"
 
-          sudo test -x "$CERTBOT"
           sudo test -s "$LIVE/fullchain.pem"
           sudo test -s "$LIVE/privkey.pem"
-
           sudo install -d -o caddy -g caddy -m 750 /etc/caddy/tony-tls
           sudo install -o caddy -g caddy -m 644 "$LIVE/fullchain.pem" /etc/caddy/tony-tls/fullchain.pem
           sudo install -o caddy -g caddy -m 600 "$LIVE/privkey.pem" /etc/caddy/tony-tls/privkey.pem
 
           printf '%s\n' \
+            '{' \
+            "    default_sni $IP" \
+            '}' \
+            '' \
             "https://$IP {" \
             '    tls /etc/caddy/tony-tls/fullchain.pem /etc/caddy/tony-tls/privkey.pem' \
             '    encode zstd gzip' \
@@ -59,15 +60,14 @@ jobs:
           sudo systemctl restart caddy
           sleep 3
           sudo systemctl is-active caddy
-
-          echo '=== CERTIFICATE ==='
-          sudo openssl x509 -in /etc/caddy/tony-tls/fullchain.pem -noout -subject -issuer -dates -ext subjectAltName
           echo '=== CADDYFILE ==='
           sudo cat /etc/caddy/Caddyfile
+          echo '=== CERTIFICATE ==='
+          sudo openssl x509 -in /etc/caddy/tony-tls/fullchain.pem -noout -issuer -dates -ext subjectAltName
           echo '=== LOCAL HTTPS ==='
           curl -fsS --max-time 10 "https://$IP/health"
           REMOTE
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/install_tony_ip_tls.sh"
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/configure_ip_tls.sh"
 
       - name: Install automatic IP certificate renewal
         shell: bash
