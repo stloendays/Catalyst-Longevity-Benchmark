@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QWebSocket>
 #include <QUrl>
+#include <QTimer>
 
 class AgentClient : public QObject {
     Q_OBJECT
@@ -19,6 +20,9 @@ signals:
     void errorMessage(const QString &text);
 private slots:
     void onText(const QString &message);
+    void reconnect();
 private:
     QWebSocket socket_;
+    QUrl endpoint_;
+    QTimer reconnectTimer_;
 };
