@@ -87,6 +87,7 @@ jobs:
           #include <QProcess>
           #include <QTimer>
           #include <QUrl>
+          #include <cstdlib>
           #include <iostream>
 
           int main(int argc, char **argv) {
@@ -157,7 +158,9 @@ jobs:
               }
               std::cout << "TONY_FINAL_RECEIVED=PASS" << std::endl;
               std::cout << "WINDOWS_HTTPS_PAIR_WSS_QWEN_TONY=PASS" << std::endl;
-              app.exit(0);
+              std::cout.flush();
+              std::cerr.flush();
+              std::_Exit(0);
             });
 
             QObject::connect(&client, &AgentClient::pairingFailed, [&](const QString &message) {
