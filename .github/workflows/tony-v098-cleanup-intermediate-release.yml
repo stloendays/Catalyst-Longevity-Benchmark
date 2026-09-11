@@ -1,0 +1,42 @@
+name: Clean stale Tony 0.9.8 intermediate release
+
+on:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-cleanup-intermediate-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the known intermediate 0.9.8 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_SHA: 6d0253a6e4eafeb9d6abb80991b8f890fb26c17b
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          tag='tony-v0.9.8'
+          if ! gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo 'STALE_TONY_V098_RELEASE=ABSENT'
+            exit 0
+          fi
+          current_sha="$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha')"
+          echo "TONY_V098_CURRENT_TAG_SHA=$current_sha"
+          if [ "$current_sha" != "$STALE_SHA" ]; then
+            echo "Refusing cleanup: $tag no longer points to the known intermediate commit."
+            exit 1
+          fi
+          gh release delete "$tag" --repo "$repo" --cleanup-tag --yes
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo 'Release still exists after cleanup' >&2
+            exit 1
+          fi
+          echo 'STALE_TONY_V098_RELEASE=REMOVED'
