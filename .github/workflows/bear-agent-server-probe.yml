@@ -1,0 +1,102 @@
+name: BearAgent server probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bear-agent-server-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Inspect OpenClaw and local inference runtime
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          OC='/home/ubuntu/.npm-global/bin/openclaw'
+
+          echo '=== HOST ==='
+          hostname
+          date -Is
+          uname -a
+
+          echo '=== RESOURCES ==='
+          free -h
+          df -h /
+
+          echo '=== OPENCLAW ==='
+          "$OC" --version || true
+          "$OC" config validate || true
+          "$OC" gateway status --deep --json > /tmp/bear-openclaw-gateway.json || true
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/tmp/bear-openclaw-gateway.json')
+          if p.exists() and p.stat().st_size:
+              try:
+                  d=json.loads(p.read_text())
+                  out={
+                      'service_status': (((d.get('service') or {}).get('runtime') or {}).get('status')),
+                      'rpc_ok': (d.get('rpc') or {}).get('ok'),
+                      'server_version': (((d.get('rpc') or {}).get('server') or {}).get('version')),
+                  }
+                  print(json.dumps(out, ensure_ascii=False))
+              except Exception as e:
+                  print('gateway_status_parse_error:', type(e).__name__)
+          PY
+
+          echo '=== AGENTS (SANITIZED) ==='
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('/home/ubuntu/.openclaw/openclaw.json')
+          if not p.exists():
+              print('openclaw.json not found')
+              raise SystemExit(0)
+          d=json.loads(p.read_text())
+          agents=((d.get('agents') or {}).get('entries') or {})
+          for key, value in agents.items():
+              if not isinstance(value, dict):
+                  print(key, '<non-object>')
+                  continue
+              safe={
+                  'name': value.get('name'),
+                  'model': value.get('model'),
+                  'workspace': value.get('workspace'),
+                  'skills_count': len(value.get('skills') or []) if isinstance(value.get('skills'), list) else None,
+                  'tools_profile': (value.get('tools') or {}).get('profile') if isinstance(value.get('tools'), dict) else None,
+                  'thinkingDefault': value.get('thinkingDefault'),
+              }
+              print(key, json.dumps(safe, ensure_ascii=False))
+          PY
+
+          echo '=== LOCAL MODEL API ==='
+          curl -fsS --max-time 8 http://127.0.0.1:18080/v1/models | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d, ensure_ascii=False)[:3000])" || true
+
+          echo '=== RELEVANT PORTS ==='
+          sudo ss -lntp | grep -E '(:18080|:18789|:8000|:8080|:11931)' || true
+
+          echo '=== RELEVANT SERVICES ==='
+          systemctl --no-pager --type=service --state=running | grep -Ei 'openclaw|rhocodec|llama|bear' || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
