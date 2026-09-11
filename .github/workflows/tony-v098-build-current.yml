@@ -1,0 +1,111 @@
+name: Build connectable Tony v0.9.8 Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-build-current.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version and trusted endpoint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '0.9.8') { throw "Expected Tony 0.9.8, got $version" }
+          $source = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          if ($source -notmatch [regex]::Escape('wss://150.158.27.206/agent/ws')) { throw 'Trusted public WSS endpoint is missing' }
+          if ($source -match '150-158-27-206\.sslip\.io') { throw 'Blocked sslip endpoint is still present' }
+          "TONY_VERSION=$version" >> $env:GITHUB_ENV
+          Write-Host 'TONY_VERSION_AND_ENDPOINT=PASS'
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure and build Tony
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build bear_agent_pet/client/build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Tony Windows build failed' }
+          Write-Host 'TONY_WINDOWS_BUILD=PASS'
+
+      - name: Package portable Tony
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = "$PWD/bear_agent_pet/client/package"
+          $dist = "$PWD/bear_agent_pet/client/dist"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          $zip = Join-Path $dist "TonyDesktopPet-$env:TONY_VERSION-windows-x64-connectable.zip"
+          Compress-Archive -Path "$package/*" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+          Write-Host "TONY_PORTABLE_SHA256=$hash"
+
+      - name: Portable startup smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "$PWD/bear_agent_pet/client/package/TonyDesktopPet.exe"
+          $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 7
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_PORTABLE_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup install failed' }
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          & $iscc "/DMyAppVersion=$env:TONY_VERSION" "$PWD/bear_agent_pet/client/installer/TonyDesktopPet.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+          $setup = "$PWD/bear_agent_pet/client/dist/TonyDesktopPet-Setup-v$env:TONY_VERSION.exe"
+          if (-not (Test-Path $setup)) { throw 'Installer output missing' }
+          $hash = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $setup -Leaf)" | Set-Content "$setup.sha256" -Encoding ascii
+          Write-Host "TONY_INSTALLER_SHA256=$hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-0.9.8-connectable-windows
+          path: |
+            bear_agent_pet/client/dist/TonyDesktopPet-0.9.8-windows-x64-connectable.zip
+            bear_agent_pet/client/dist/TonyDesktopPet-0.9.8-windows-x64-connectable.zip.sha256
+            bear_agent_pet/client/dist/TonyDesktopPet-Setup-v0.9.8.exe
+            bear_agent_pet/client/dist/TonyDesktopPet-Setup-v0.9.8.exe.sha256
+          if-no-files-found: error
