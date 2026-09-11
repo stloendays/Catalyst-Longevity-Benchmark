@@ -4,6 +4,7 @@
 #include <QContextMenuEvent>
 #include <QCoreApplication>
 #include <QDir>
+#include <QEvent>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QInputDialog>
@@ -16,7 +17,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QSysInfo>
-#include <QToolTip>
+#include <QTime>
 #include <QtMath>
 
 #ifdef Q_OS_WIN
@@ -63,7 +64,7 @@ QString unprotectSecret(const QString &stored) {
 }
 }
 
-PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
+PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr) {
     setWindowTitle("Tony");
     setFixedSize(230,250);
     setWindowFlags(Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint|Qt::Tool);
@@ -76,25 +77,10 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     connect(&animTimer_, &QTimer::timeout, this, &PetWindow::tickAnimation);
     animTimer_.start();
 
-    idleTimer_.setInterval(22000);
-    connect(&idleTimer_, &QTimer::timeout, this, [this]{
-        if(action_!=Action::Idle || dragging_ || agentState_!="idle") return;
-        const int r=QRandomGenerator::global()->bounded(12);
-        if(r==0) {
-            setAction(Action::Shiver,2600);
-            showBubble("Brrr... it's a little cold here.");
-        } else if(r==1) {
-            setAction(Action::AskHug,3200);
-            showBubble("Can I have a tiny hug?");
-        } else if(r==2) {
-            setAction(Action::Walk,5000);
-        } else if(r==3) {
-            setAction(Action::Think,2200);
-        } else if(r==4) {
-            setAction(Action::Wave,1700);
-        }
-    });
-    idleTimer_.start();
+    // Randomized passive behavior feels much less mechanical than a fixed 22 s loop.
+    idleTimer_.setSingleShot(true);
+    connect(&idleTimer_, &QTimer::timeout, this, &PetWindow::runIdleMoment);
+    scheduleIdleMoment();
 
     actionTimer_.setSingleShot(true);
     connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);
@@ -111,13 +97,19 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     });
     connect(&agent_, &AgentClient::textDelta, this, [this](const QString &t){
         answer_ += t;
-        showBubble(answer_);
+        // Streaming text remains visible; the final event starts the dismiss timer.
+        showBubble(answer_,0);
     });
     connect(&agent_, &AgentClient::answerFinished, this, [this]{
+        if(!answer_.isEmpty()) showBubble(answer_,8000);
         if(!actionTimer_.isActive()) setAction(Action::Celebrate,1600);
     });
     connect(&agent_, &AgentClient::connectionChanged, this, [this](bool connected){
-        if(!connected) agentState_="idle";
+        if(!connected) {
+            agentState_="idle";
+        } else if(agentState_=="idle" && !actionTimer_.isActive()) {
+            setAction(Action::Wave,1300);
+        }
         tray_.setToolTip(connected ? "Tony · connected" : "Tony · waiting for server");
     });
     connect(&agent_, &AgentClient::paired, this,
@@ -127,23 +119,28 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
         s.setValue("agent/token",protectSecret(token));
         s.setValue("agent/device_id",deviceId);
         if(endpoint.host()!="127.0.0.1" && endpoint.host()!="localhost") tunnel_.stop();
+        emotion_="happy";
+        setAction(Action::Celebrate,2200);
         tray_.setToolTip("Tony · paired · connecting");
-        showBubble("配对成功。以后这台电脑可以直接连接 Tony，不需要保存服务器 SSH 私钥。");
+        showBubble("配对成功。以后这台电脑可以直接连接 Tony，不需要保存服务器 SSH 私钥。",6500);
     });
     connect(&agent_, &AgentClient::pairingFailed, this, [this](const QString &text){
+        emotion_="worried";
         tray_.setToolTip("Tony · pairing failed");
-        showBubble(text);
+        showBubble(text,6500);
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
         agentState_="error";
         emotion_="worried";
         setAction(Action::Think,2600);
-        showBubble("Tony couldn't finish that: " + text.left(260));
+        showBubble("Tony couldn't finish that: " + text.left(260),7000);
     });
     connect(&tunnel_, &SshTunnel::statusChanged, this, [this](const QString &status){
         if(!agent_.connected()) tray_.setToolTip("Tony · "+status);
-        if(status.contains("unavailable",Qt::CaseInsensitive) || status.contains("waiting",Qt::CaseInsensitive))
-            showBubble("SSH 连接没有准备好。你也可以右键 Tony → “连接 / 配对新设备…” 使用 WSS 配对。");
+        if(status.contains("unavailable",Qt::CaseInsensitive) || status.contains("waiting",Qt::CaseInsensitive)) {
+            emotion_="worried";
+            showBubble("SSH 连接没有准备好。你也可以右键 Tony → “连接 / 配对新设备…” 使用 WSS 配对。",6500);
+        }
     });
 
     tray_.setToolTip("Tony · Desktop Agent");
@@ -160,6 +157,7 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
 }
 
 PetWindow::~PetWindow() {
+    bubble_.dismiss();
     tunnel_.stop();
 }
 
@@ -298,6 +296,15 @@ void PetWindow::paintEvent(QPaintEvent*) {
         break;
     }
 
+    // A tiny ground shadow makes the transparent sticker feel planted on the desktop.
+    p.save();
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0,0,0,38));
+    const qreal shadowScale=(action_==Action::Celebrate ? .78 : action_==Action::Walk ? .9 : 1.0);
+    const qreal sw=112*shadowScale;
+    p.drawEllipse(QRectF(width()/2.0-sw/2.0,196,sw,13));
+    p.restore();
+
     const QPointF center(width()/2.0+dx,112+dy);
     const QSizeF size(200*scale,200*scale);
     QRectF target(QPointF(-size.width()/2.0,-size.height()/2.0),size);
@@ -317,9 +324,15 @@ void PetWindow::paintEvent(QPaintEvent*) {
     }
     p.restore();
 
-    p.setPen(QColor(255,255,255,235));
-    QFont f=p.font(); f.setBold(true); f.setPointSize(12); p.setFont(f);
-    p.drawText(QRect(0,210,width(),25),Qt::AlignCenter,"Tony");
+    // Name plate stays readable on both light and dark wallpapers.
+    const QRect namePlate(width()/2-35,218,70,23);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(20,20,20,105));
+    p.drawRoundedRect(namePlate,11,11);
+    p.setPen(QColor(255,255,255,245));
+    QFont f("Microsoft YaHei UI",10,QFont::DemiBold);
+    p.setFont(f);
+    p.drawText(namePlate,Qt::AlignCenter,"Tony");
 }
 
 void PetWindow::setAction(Action a,int durationMs){
@@ -381,7 +394,51 @@ void PetWindow::tickAnimation(){
         }
         move(n);
     }
+    bubble_.follow(mapToGlobal(QPoint(width()/2,20)));
     update();
+}
+
+void PetWindow::scheduleIdleMoment(){
+    const int delayMs=QRandomGenerator::global()->bounded(18000,46001);
+    idleTimer_.start(delayMs);
+}
+
+void PetWindow::runIdleMoment(){
+    if(action_!=Action::Idle || dragging_ || agentState_!="idle") {
+        scheduleIdleMoment();
+        return;
+    }
+
+    const int hour=QTime::currentTime().hour();
+    const bool night=(hour>=23 || hour<7);
+    const int r=QRandomGenerator::global()->bounded(100);
+
+    if(night && r<22) {
+        emotion_="sleepy";
+        setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,11001));
+    } else if(r<12) {
+        emotion_="cold";
+        setAction(Action::Shiver,2800);
+        showBubble("Brrr... Tony wants somewhere warm.",4200);
+    } else if(r<23) {
+        emotion_="hopeful";
+        setAction(Action::AskHug,3300);
+        showBubble("Can I have a tiny hug?",4200);
+    } else if(r<36) {
+        emotion_="playful";
+        setAction(Action::Walk,QRandomGenerator::global()->bounded(4200,7201));
+    } else if(r<49) {
+        emotion_="curious";
+        setAction(Action::Think,2300);
+    } else if(r<62) {
+        emotion_="friendly";
+        setAction(Action::Wave,1700);
+    } else if(r<71) {
+        emotion_="focused";
+        setAction(Action::AdjustGlasses,1900);
+    }
+
+    scheduleIdleMoment();
 }
 
 QString PetWindow::actionName() const {
@@ -404,20 +461,34 @@ QString PetWindow::actionName() const {
     return "idle";
 }
 
+void PetWindow::enterEvent(QEnterEvent*){
+    if(agentState_=="idle" && action_==Action::Idle && !actionTimer_.isActive() && !dragging_) {
+        emotion_="friendly";
+        setAction(Action::Wave,1150);
+    }
+}
+
+void PetWindow::leaveEvent(QEvent*){
+    // Temporary hover wave naturally returns through actionTimer_.
+}
+
 void PetWindow::mousePressEvent(QMouseEvent *e){
     if(e->button()==Qt::LeftButton){
         dragging_=true;
         dragOffset_=e->globalPosition().toPoint()-frameGeometry().topLeft();
     }
 }
+
 void PetWindow::mouseMoveEvent(QMouseEvent *e){
     if(dragging_ && (e->buttons()&Qt::LeftButton)){
         move(e->globalPosition().toPoint()-dragOffset_);
         action_=Action::Bob;
         frame_=0;
+        bubble_.follow(mapToGlobal(QPoint(width()/2,20)));
         update();
     }
 }
+
 void PetWindow::mouseReleaseEvent(QMouseEvent *e){
     if(e->button()==Qt::LeftButton){
         dragging_=false;
@@ -425,7 +496,10 @@ void PetWindow::mouseReleaseEvent(QMouseEvent *e){
         restoreAgentAction();
     }
 }
-void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){ if(e->button()==Qt::LeftButton) askTony(); }
+
+void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){
+    if(e->button()==Qt::LeftButton) askTony();
+}
 
 void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     QMenu m;
@@ -459,7 +533,11 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==glasses) setAction(Action::AdjustGlasses,2200);
     else if(chosen==noGlasses) setAction(Action::RemoveGlasses,3500);
     else if(chosen==celebrate) setAction(Action::Celebrate,2200);
-    else if(chosen==cold) { setAction(Action::Shiver,3000); showBubble("Brrr... warm paws, please."); }
+    else if(chosen==cold) {
+        emotion_="cold";
+        setAction(Action::Shiver,3000);
+        showBubble("Brrr... warm paws, please.",4200);
+    }
     else if(chosen==sleep) setAction(Action::Sleep);
     else if(chosen==quit) qApp->quit();
 }
@@ -469,16 +547,17 @@ void PetWindow::askTony(){
     auto text=QInputDialog::getText(this,"Tony","想让我做什么？",QLineEdit::Normal,{},&ok);
     if(!ok||text.trimmed().isEmpty()) return;
     answer_.clear();
+    emotion_="curious";
     agentState_="thinking";
     restoreAgentAction();
     if(agent_.connected()) agent_.sendMessage(text);
-    else showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\n\n"+text);
+    else showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\n\n"+text,6500);
 }
 
 void PetWindow::hugTony(){
     emotion_="happy";
     setAction(Action::Hug,3000);
-    showBubble("抱到啦。*Tony 开心地蹭了蹭* ");
+    showBubble("抱到啦。Tony 开心地蹭了蹭。",4300);
 }
 
 void PetWindow::configureConnection(){
@@ -505,8 +584,10 @@ void PetWindow::configureConnection(){
         this,"设备名称","给这台电脑起个名字：",QLineEdit::Normal,defaultName,&ok);
     if(!ok) return;
 
+    emotion_="curious";
+    setAction(Action::Think,0);
     tray_.setToolTip("Tony · pairing…");
-    showBubble("正在安全配对这台电脑…");
+    showBubble("正在安全配对这台电脑…",0);
     agent_.pairAndConnect(endpoint,code,deviceName);
 }
 
@@ -518,11 +599,12 @@ void PetWindow::useLocalSshConnection(){
     s.remove("agent/device_id");
     tunnel_.start();
     agent_.connectTo(endpoint,{});
-    showBubble("已切回本机 SSH 隧道模式。Tony 不会在程序里保存 SSH 私钥。");
+    emotion_="friendly";
+    showBubble("已切回本机 SSH 隧道模式。Tony 不会在程序里保存 SSH 私钥。",5600);
 }
 
-void PetWindow::showBubble(const QString &text){
-    QToolTip::showText(mapToGlobal(QPoint(width()/2,-10)),text.left(700),this);
+void PetWindow::showBubble(const QString &text, int timeoutMs){
+    bubble_.showMessage(text,mapToGlobal(QPoint(width()/2,20)),emotion_,timeoutMs);
 }
 
 void PetWindow::restorePosition(){
@@ -534,4 +616,7 @@ void PetWindow::restorePosition(){
         move(a.right()-width()-40,a.bottom()-height()-20);
     }
 }
-void PetWindow::savePosition(){ QSettings().setValue("pet/position",pos()); }
+
+void PetWindow::savePosition(){
+    QSettings().setValue("pet/position",pos());
+}
