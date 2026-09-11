@@ -18,12 +18,19 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrlQuery>
 #include <QVersionNumber>
 
 namespace {
 QUrl manifestUrl() {
-    return QUrl(QStringLiteral(
+    QUrl url(QStringLiteral(
         "https://github.com/stloendays/Catalyst-Longevity-Benchmark/releases/download/tony-desktop-latest/latest.json"));
+    // GitHub release assets may be cached at the edge. A changing query keeps the
+    // update channel fresh without changing the stable public release URL.
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("t"), QString::number(QDateTime::currentMSecsSinceEpoch()));
+    url.setQuery(query);
+    return url;
 }
 
 QNetworkRequest requestFor(const QUrl &url) {
@@ -87,9 +94,10 @@ void UpdateManager::checkNow(bool userInitiated) {
     userInitiatedCheck_ = userInitiated;
     emit statusChanged(userInitiated ? QStringLiteral("Checking for updates…")
                                      : QStringLiteral("Checking for updates in the background…"));
-    qInfo().noquote() << "Checking Tony update manifest" << manifestUrl().toString();
+    const QUrl manifest = manifestUrl();
+    qInfo().noquote() << "Checking Tony update manifest" << manifest.toString();
 
-    auto *reply = network_.get(requestFor(manifestUrl()));
+    auto *reply = network_.get(requestFor(manifest));
     connect(reply, &QNetworkReply::finished, this, [this, reply]{
         checking_ = false;
         const QByteArray raw = reply->readAll();
@@ -104,10 +112,13 @@ void UpdateManager::checkNow(bool userInitiated) {
 
         const QJsonDocument doc = QJsonDocument::fromJson(raw);
         const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+        const int schema = obj.value(QStringLiteral("schema")).toInt(0);
         const QString version = obj.value(QStringLiteral("version")).toString().trimmed();
         const QUrl package(obj.value(QStringLiteral("url")).toString());
         const QByteArray sha = obj.value(QStringLiteral("sha256")).toString().trimmed().toLatin1().toLower();
-        if(version.isEmpty() || !package.isValid() || package.scheme().toLower() != QStringLiteral("https") || sha.size() != 64) {
+        const QString platform = obj.value(QStringLiteral("platform")).toString();
+        if(schema != 1 || version.isEmpty() || platform != QStringLiteral("windows-x64") ||
+           !package.isValid() || package.scheme().toLower() != QStringLiteral("https") || sha.size() != 64) {
             const QString message = QStringLiteral("Update manifest is incomplete or invalid.");
             qWarning().noquote() << message;
             emit updateError(message);
@@ -154,7 +165,7 @@ void UpdateManager::downloadAvailableUpdate() {
         }
 
         const QByteArray actual = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex().toLower();
-        if(!expectedSha256_.isEmpty() && actual != expectedSha256_) {
+        if(expectedSha256_.isEmpty() || actual != expectedSha256_) {
             const QString message = QStringLiteral("Downloaded update failed SHA-256 verification.");
             qCritical().noquote() << message << "expected" << expectedSha256_ << "actual" << actual;
             emit updateError(message);
@@ -173,10 +184,18 @@ void UpdateManager::downloadAvailableUpdate() {
         }
 
         downloadedPath_ = path;
-        emit statusChanged(QStringLiteral("Tony %1 is ready to install.").arg(latestVersion_));
+        emit statusChanged(QStringLiteral("Tony %1 is verified and ready to install.").arg(latestVersion_));
         emit updateDownloaded(latestVersion_);
         qInfo().noquote() << "Verified Tony update ready" << latestVersion_ << downloadedPath_;
         reply->deleteLater();
+
+        // A background check is genuinely automatic: after hash verification Tony
+        // hands the package to the updater, exits, installs, and restarts. A manual
+        // Settings-page check stays manual so the user is not surprised mid-session.
+        if(automaticUpdatesEnabled() && !userInitiatedCheck_) {
+            emit statusChanged(QStringLiteral("Installing the verified update automatically…"));
+            QTimer::singleShot(1500, this, [this]{ applyDownloadedUpdate(); });
+        }
     });
 }
 
@@ -211,6 +230,8 @@ try {
     $stage = Join-Path $env:TEMP ("TonyUpdateStage-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
+    $candidate = Join-Path $stage $Executable
+    if (-not (Test-Path -LiteralPath $candidate)) { throw "Update archive does not contain $Executable" }
     Write-UpdateLog "Copying verified update into $Destination"
     & robocopy $stage $Destination /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
