@@ -12,6 +12,7 @@ permissions:
 # All workflows that restart the Tony gateway or local model share this lock.
 # Do not cancel an in-flight server mutation: a half-finished model/service switch
 # is worse than waiting for the previous job to finish.
+# This suite runs only after the selected runtime profile is fully active.
 concurrency:
   group: tony-server-runtime
   cancel-in-progress: false
