@@ -12,18 +12,35 @@ from typing import Any
 
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
 from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, send_json
-from .pairing import consume_pairing_code, paired_device_count, reusable_friend_code_enabled
+from .pairing import (
+    claim_device_pairing_request,
+    consume_pairing_code,
+    create_device_pairing_request,
+    paired_device_count,
+    reusable_friend_code_enabled,
+)
 
-app = FastAPI(title="Tony Desktop Companion", version="0.9.0")
+app = FastAPI(title="Tony Desktop Companion", version="0.9.1")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
+_PAIR_REQUESTS: dict[str, list[float]] = {}
 _PAIR_WINDOW_SECONDS = 600
 _PAIR_MAX_FAILURES = 8
+_PAIR_MAX_REQUESTS = 12
 _BATCH_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_BATCH_BYTES = 768 * 1024
 _MAX_EVENTS = 10000
+
+
+class DevicePairStartRequest(BaseModel):
+    device_name: str = Field(default="Tony desktop", min_length=1, max_length=80)
+
+
+class DevicePairStatusRequest(BaseModel):
+    request_id: str = Field(min_length=24, max_length=128)
 
 
 def _pair_client_key(request: Request) -> str:
@@ -43,6 +60,20 @@ def _record_pair_failure(key: str) -> None:
     recent = [t for t in _PAIR_FAILURES.get(key, []) if now - t < _PAIR_WINDOW_SECONDS]
     recent.append(now)
     _PAIR_FAILURES[key] = recent[-_PAIR_MAX_FAILURES:]
+
+
+def _device_request_rate_limited(key: str) -> bool:
+    now = time.monotonic()
+    recent = [t for t in _PAIR_REQUESTS.get(key, []) if now - t < _PAIR_WINDOW_SECONDS]
+    _PAIR_REQUESTS[key] = recent
+    return len(recent) >= _PAIR_MAX_REQUESTS
+
+
+def _record_device_request(key: str) -> None:
+    now = time.monotonic()
+    recent = [t for t in _PAIR_REQUESTS.get(key, []) if now - t < _PAIR_WINDOW_SECONDS]
+    recent.append(now)
+    _PAIR_REQUESTS[key] = recent[-_PAIR_MAX_REQUESTS:]
 
 
 def _spool_root() -> Path:
@@ -164,7 +195,7 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "0.9.0",
+        "version": "0.9.1",
         "backend": "local-qwen-chat-only",
         "local_model": model,
         "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
@@ -176,11 +207,49 @@ async def health() -> dict[str, Any]:
         "streaming": True,
         "persona_core": True,
         "pairing_supported": True,
-        "pairing_mode": "reusable-friend-code" if reusable_friend_code_enabled() else "one-time-only",
+        "pairing_mode": "device-code+recovery",
+        "device_code_pairing": True,
+        "reusable_friend_code_recovery": reusable_friend_code_enabled(),
         "paired_devices": paired_device_count(),
         "local_tools_enabled": False,
         "openclaw_enabled": False,
         "operator_log_ingest": "encrypted-spool",
+    }
+
+
+@app.post("/pair/request")
+async def request_device_pairing(pair_request: DevicePairStartRequest, request: Request) -> dict[str, Any]:
+    key = _pair_client_key(request)
+    if _device_request_rate_limited(key):
+        raise HTTPException(status_code=429, detail="Too many device pairing requests. Try again later.")
+    _record_device_request(key)
+    request_id, code, expires_at = create_device_pairing_request(pair_request.device_name, ttl_seconds=600)
+    return {
+        "ok": True,
+        "status": "pending",
+        "request_id": request_id,
+        "code": code,
+        "expires_at": expires_at,
+        "poll_after_ms": 2000,
+    }
+
+
+@app.post("/pair/status")
+async def device_pairing_status(pair_request: DevicePairStatusRequest) -> dict[str, Any]:
+    try:
+        status, token, device_id = claim_device_pairing_request(pair_request.request_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if status == "expired":
+        raise HTTPException(status_code=410, detail="This device connection code has expired.")
+    if status == "pending":
+        return {"ok": True, "status": "pending"}
+    return {
+        "ok": True,
+        "status": "approved",
+        "device_id": device_id,
+        "token": token,
+        "ws_path": "/agent/ws",
     }
 
 
@@ -226,8 +295,8 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "0.9.0",
-                    "accepted_capabilities": ["operator_log_sync_v1"],
+                    "server_version": "0.9.1",
+                    "accepted_capabilities": ["operator_log_sync_v1", "device_code_pairing_v1"],
                     "chat_only": True,
                     "streaming": True,
                     "local_model": local_model_id(),
