@@ -37,7 +37,7 @@ jobs:
 
       - name: Validate artwork
         shell: pwsh
-        run: python .github/scripts/validate_state_assets.py
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
 
       - name: Configure and build
         shell: pwsh
