@@ -1,0 +1,146 @@
+name: Temporary Tony legacy behavior sync
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/_temporary-tony-legacy-sync.yml'
+      - '.github/scripts/sync_tony_legacy_behavior.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-legacy-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v093-release-integration
+          fetch-depth: 0
+
+      - name: Stage latest validated V0.8.3 behavior source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/teddy-agent-pet-v083
+          git show origin/feature/teddy-agent-pet-v083:teddy_agent_pet/client/src/PetWindow.h > bear_agent_pet/client/src/PetWindow.h
+          git show origin/feature/teddy-agent-pet-v083:teddy_agent_pet/client/src/PetWindowV7.cpp > bear_agent_pet/client/src/PetWindowV7.cpp
+          git show origin/feature/teddy-agent-pet-v083:teddy_agent_pet/client/src/TonyBehaviorEngine.h > bear_agent_pet/client/src/TonyBehaviorEngine.h
+          git show origin/feature/teddy-agent-pet-v083:teddy_agent_pet/client/src/TonyBehaviorEngine.cpp > bear_agent_pet/client/src/TonyBehaviorEngine.cpp
+
+      - name: Merge behavior with current 0.9 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/sync_tony_legacy_behavior.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "0.9.4"
+          grep -q 'TonyBehaviorEngine.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'void tickPhysics();' bear_agent_pet/client/src/PetWindow.h
+          grep -q 'syncOperatorLogsForUpdate' bear_agent_pet/client/src/PetWindow.h
+          grep -q 'void PetWindow::walkAlongForegroundWindow' bear_agent_pet/client/src/PetWindowV7.cpp
+          echo 'TONY_V094_BEHAVIOR_MERGE_STATIC=PASS'
+
+      - name: Commit migrated source
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/VERSION \
+                  bear_agent_pet/client/CMakeLists.txt \
+                  bear_agent_pet/client/src/PetWindow.h \
+                  bear_agent_pet/client/src/PetWindowV7.cpp \
+                  bear_agent_pet/client/src/TonyBehaviorEngine.h \
+                  bear_agent_pet/client/src/TonyBehaviorEngine.cpp
+          if git diff --cached --quiet; then
+            echo 'No behavior migration changes to commit.'
+          else
+            git commit -m 'Restore Tony desktop life and physics behavior'
+            git push origin HEAD:feature/tony-v093-release-integration
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows-validate:
+    needs: integrate
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v093-release-integration
+
+      - name: Read canonical version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '0.9.4') { throw "Expected Tony 0.9.4, got $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "TONY_CANONICAL_VERSION=$version"
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package runtime
+        shell: pwsh
+        run: |
+          if (Test-Path bear_agent_pet/client/package) { Remove-Item bear_agent_pet/client/package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix bear_agent_pet/client/package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+      - name: Verify version behavior and startup
+        shell: pwsh
+        run: |
+          $package = (Resolve-Path bear_agent_pet/client/package).Path
+          $canonical = (Get-Content (Join-Path $package 'VERSION') -Raw).Trim()
+          if ($canonical -ne '0.9.4') { throw "Packaged VERSION mismatch: $canonical" }
+          $productVersion = (Get-Item (Join-Path $package 'TonyDesktopPet.exe')).VersionInfo.ProductVersion
+          if (-not $productVersion.StartsWith('0.9.4')) { throw "EXE ProductVersion mismatch: $productVersion" }
+          foreach ($required in @(
+            'assets/states/idle.png',
+            'TonyDesktopPet.exe',
+            'tony-install-root.marker'
+          )) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+          $proc = Start-Process -FilePath (Join-Path $package 'TonyDesktopPet.exe') -WorkingDirectory $package -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            if ($proc.HasExited) { throw "Tony exited during V0.9.4 smoke test: $($proc.ExitCode)" }
+            Write-Host "TONY_V094_WINDOWS_SMOKE=PASS ProductVersion=$productVersion"
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.9.4-legacy-synced-windows-x64
+          path: bear_agent_pet/client/package
+          if-no-files-found: error
