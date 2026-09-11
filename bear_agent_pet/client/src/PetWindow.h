@@ -27,6 +27,8 @@ private:
     void loadAsset();
     void setAction(Action action, int durationMs=0);
     Action actionFromWire(const QString &name) const;
+    Action baseActionForAgentState() const;
+    void restoreAgentAction();
     void tickAnimation();
     void askTony();
     void hugTony();
@@ -49,4 +51,5 @@ private:
     int walkDirection_{1};
     QString answer_;
     QString emotion_{"neutral"};
+    QString agentState_{"idle"};
 };
