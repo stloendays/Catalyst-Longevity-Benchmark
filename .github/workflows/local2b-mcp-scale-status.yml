@@ -1,0 +1,53 @@
+name: Local2B MCP scale-sweep status
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-scale-status.yml
+
+permissions:
+  contents: read
+
+jobs:
+  status:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Read scale sweep progress only
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-scale-sweep
+          date -Is
+          test -d "$ROOT"
+          for label in base32 s025 s050 s075 s100; do
+            f="$ROOT/${label}.json"
+            if [ -s "$f" ]; then
+              echo "=== ${label} COMPLETE ==="
+              python3 - "$f" <<'PY'
+          import json, sys
+          d=json.load(open(sys.argv[1]))
+          print(json.dumps(d.get('metrics',{}), sort_keys=True))
+          PY
+            else
+              echo "=== ${label} PENDING ==="
+            fi
+          done
+          echo '--- processes ---'
+          pgrep -af 'llama-server|benchmark_tool_use_trace' || true
+          echo '--- base service ---'
+          systemctl is-active rhocodec-llm.service || true
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
