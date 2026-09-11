@@ -1,0 +1,72 @@
+name: Integrate Tony post-0.9.5 visual fixes
+
+on:
+  push:
+    branches:
+      - fix/tony-post095-visual-regressions
+    paths:
+      - '.github/workflows/tony-post095-visual-integrate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Verify shared branch has not moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='63a469555cffb35917b0c10c2fd9b5dc2a8e7077'
+          current=$(git rev-parse HEAD)
+          test "$current" = "$expected" || {
+            echo "Shared branch moved: expected $expected, found $current. Abort rather than overwrite concurrent work."
+            exit 1
+          }
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '0.9.5' || {
+            echo 'VERSION is no longer 0.9.5; aborting automatic integration.'
+            exit 1
+          }
+
+      - name: Cherry-pick Windows-tested visual fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin fix/tony-post095-visual-regressions
+          git cherry-pick 0a8b73ca5cf62fed73a73f985ec49fb0aba29593
+          grep -q 'setFixedSize(280,250);' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'QRectF(0,0,sprite->width(),sprite->height())' bear_agent_pet/client/src/PetWindowV7.cpp
+          if grep -q 'animationAssets_\.constFind("idle")' bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'Legacy idle animation lookup unexpectedly remains.'
+            exit 1
+          fi
+
+      - name: Advance canonical version to 0.9.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '0.9.6\n' > bear_agent_pet/client/VERSION
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/VERSION
+          git commit -m 'Release Tony 0.9.6 visual hardening'
+
+      - name: Push only if remote is still the verified base
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='63a469555cffb35917b0c10c2fd9b5dc2a8e7077'
+          remote=$(git ls-remote origin refs/heads/feature/bear-agent-pet | cut -f1)
+          test "$remote" = "$expected" || {
+            echo "Concurrent update detected before push: $remote. Abort safely."
+            exit 1
+          }
+          git push origin HEAD:feature/bear-agent-pet
