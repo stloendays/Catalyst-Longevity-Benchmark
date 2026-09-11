@@ -1,0 +1,97 @@
+name: Tony 0.9.6 runtime visual QA
+
+on:
+  push:
+    branches:
+      - qa/tony-v096-visual
+    paths:
+      - '.github/workflows/tony-v096-runtime-visual-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-visual:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate exact source and artwork
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if($version -ne '0.9.6'){ throw "Expected 0.9.6, got $version" }
+          python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Build exact 0.9.6 candidate
+        shell: pwsh
+        run: |
+          cmake -S bear_agent_pet/client -B build/v096 -G "Visual Studio 17 2022" -A x64
+          cmake --build build/v096 --config Release --parallel
+          if(-not (Test-Path build/v096/Release/TonyDesktopPet.exe)){ throw 'TonyDesktopPet.exe missing' }
+
+      - name: Capture runtime blink and hug phases
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path proof/idle | Out-Null
+          New-Item -ItemType Directory -Force -Path proof/hug | Out-Null
+
+          function Save-Desktop([string]$path) {
+            $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+            $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+              $bmp.Save((Join-Path $PWD $path),[System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $gfx.Dispose(); $bmp.Dispose() }
+          }
+
+          function Run-Series([string]$action,[string]$folder,[int]$warmupMs,[int]$count,[int]$intervalMs) {
+            $env:TONY_VISUAL_ACTION=$action
+            $exe=(Resolve-Path build/v096/Release/TonyDesktopPet.exe).Path
+            $proc=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            try {
+              Start-Sleep -Milliseconds $warmupMs
+              for($i=0;$i -lt $count;$i++) {
+                if($proc.HasExited){ throw "Tony exited during $action QA: $($proc.ExitCode)" }
+                Save-Desktop ("proof/$folder/frame_{0:D2}.png" -f $i)
+                Start-Sleep -Milliseconds $intervalMs
+              }
+            } finally {
+              if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+              Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+              Start-Sleep -Milliseconds 400
+            }
+          }
+
+          # Blink cadence is 7.5-15 s. A 5 s warmup + 16 s sampling window guarantees a blink opportunity.
+          Run-Series 'idle' 'idle' 5000 80 200
+          # Sample multiple motion phases; rotation-aware safe fit should keep all visible pixels inside.
+          Run-Series 'hug' 'hug' 6500 16 350
+
+      - name: Confirm proof set
+        shell: pwsh
+        run: |
+          $idle=(Get-ChildItem proof/idle -Filter '*.png').Count
+          $hug=(Get-ChildItem proof/hug -Filter '*.png').Count
+          if($idle -ne 80){ throw "Expected 80 idle frames, found $idle" }
+          if($hug -ne 16){ throw "Expected 16 hug frames, found $hug" }
+          Write-Host "TONY_V096_RUNTIME_PROOF=PASS idle=$idle hug=$hug"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-v0.9.6-runtime-visual-proof
+          path: proof/**/*.png
+          if-no-files-found: error
