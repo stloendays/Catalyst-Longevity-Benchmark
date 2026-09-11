@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ def _store_path() -> Path:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"version": 2, "pairing": None, "devices": []}
+    return {"version": 3, "pairing": None, "device_requests": [], "devices": []}
 
 
 def _read_store() -> dict[str, Any]:
@@ -40,8 +41,9 @@ def _read_store() -> dict[str, Any]:
         return _empty_store()
     if not isinstance(data, dict):
         return _empty_store()
-    data.setdefault("version", 2)
+    data["version"] = max(3, int(data.get("version") or 0))
     data.setdefault("pairing", None)
+    data.setdefault("device_requests", [])
     data.setdefault("devices", [])
     return data
 
@@ -70,6 +72,10 @@ def _normalize_code(code: str) -> str:
     return "".join(ch for ch in code.upper() if ch.isalnum())
 
 
+def _clean_device_name(device_name: str) -> str:
+    return " ".join(device_name.split()).strip()[:80] or "Tony desktop"
+
+
 def _friend_code_hash() -> str:
     configured = os.getenv("BEAR_FRIEND_CODE_SHA256", "").strip().lower()
     return configured or _DEFAULT_FRIEND_CODE_SHA256
@@ -89,6 +95,146 @@ def _new_pairing_code() -> str:
     return "-".join(raw[i : i + 4] for i in range(0, 12, 4))
 
 
+def _new_device_code() -> str:
+    raw = "".join(secrets.choice(_ALPHABET) for _ in range(8))
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def _device_token_for_request(request_id: str) -> str:
+    # request_id is an unguessable transaction secret held only by the client. Deriving
+    # the device token from it lets an approved client safely retry a lost status reply
+    # without ever storing the plaintext device token on the server.
+    raw = hashlib.sha256(("tony-device-token-v1:" + request_id).encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _prune_device_requests(data: dict[str, Any], now: int) -> list[dict[str, Any]]:
+    rows = data.get("device_requests")
+    if not isinstance(rows, list):
+        rows = []
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        expires_at = int(row.get("expires_at") or 0)
+        # Keep a short post-expiry audit tail, then remove stale requests automatically.
+        if expires_at + 3600 < now:
+            continue
+        kept.append(row)
+    data["device_requests"] = kept[-100:]
+    return data["device_requests"]
+
+
+def create_device_pairing_request(device_name: str, ttl_seconds: int = 600) -> tuple[str, str, int]:
+    """Create an approval-gated code that the desktop can display automatically."""
+    ttl_seconds = max(120, min(int(ttl_seconds), 900))
+    now = int(time.time())
+    expires_at = now + ttl_seconds
+    request_id = secrets.token_urlsafe(24)
+
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        existing_hashes = {str(row.get("code_hash") or "") for row in requests}
+        code = _new_device_code()
+        while _digest(_normalize_code(code)) in existing_hashes:
+            code = _new_device_code()
+        requests.append(
+            {
+                "request_hash": _digest(request_id),
+                "code_hash": _digest(_normalize_code(code)),
+                "device_name": _clean_device_name(device_name),
+                "created_at": now,
+                "expires_at": expires_at,
+                "approved": False,
+            }
+        )
+        _write_store(data)
+    return request_id, code, expires_at
+
+
+def approve_device_pairing_request(code: str) -> dict[str, Any]:
+    """Approve a desktop-displayed code. This is intended for local/admin CLI use."""
+    normalized = _normalize_code(code)
+    if len(normalized) != 8:
+        raise ValueError("Device connection code format is invalid")
+    code_hash = _digest(normalized)
+    now = int(time.time())
+
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        for row in reversed(requests):
+            if not secrets.compare_digest(str(row.get("code_hash") or ""), code_hash):
+                continue
+            if int(row.get("expires_at") or 0) < now:
+                raise ValueError("This device connection code has expired")
+            row["approved"] = True
+            row["approved_at"] = now
+            _write_store(data)
+            return {
+                "device_name": row.get("device_name") or "Tony desktop",
+                "expires_at": int(row.get("expires_at") or 0),
+                "already_paired": bool(row.get("device_id")),
+            }
+    raise ValueError("Device connection code is incorrect")
+
+
+def claim_device_pairing_request(request_id: str) -> tuple[str, str | None, str | None]:
+    """Return pending/approved/expired. Approved replies are safely retryable until expiry."""
+    request_id = request_id.strip()
+    if len(request_id) < 24:
+        raise ValueError("Pairing request is invalid")
+    target = _digest(request_id)
+    now = int(time.time())
+
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        for row in requests:
+            if not secrets.compare_digest(str(row.get("request_hash") or ""), target):
+                continue
+            if int(row.get("expires_at") or 0) < now:
+                return "expired", None, None
+            if not bool(row.get("approved")):
+                return "pending", None, None
+
+            token = _device_token_for_request(request_id)
+            device_id = str(row.get("device_id") or "")
+            if not device_id:
+                _, device_id = _append_device_with_token(
+                    data,
+                    _clean_device_name(str(row.get("device_name") or "Tony desktop")),
+                    now,
+                    "device_code",
+                    token,
+                )
+                row["device_id"] = device_id
+                row["claimed_at"] = now
+                _write_store(data)
+            return "approved", token, device_id
+    raise ValueError("Pairing request was not found")
+
+
+def list_device_pairing_requests() -> list[dict[str, Any]]:
+    now = int(time.time())
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        rows = [
+            {
+                "device_name": row.get("device_name"),
+                "created_at": row.get("created_at"),
+                "expires_at": row.get("expires_at"),
+                "approved": bool(row.get("approved")),
+                "paired": bool(row.get("device_id")),
+            }
+            for row in requests
+            if int(row.get("expires_at") or 0) >= now
+        ]
+    return rows
+
+
 def issue_pairing_code(ttl_seconds: int = 600) -> tuple[str, int]:
     """Issue a legacy one-time code. The reusable friend code is separate."""
     ttl_seconds = max(60, min(int(ttl_seconds), 3600))
@@ -105,8 +251,9 @@ def issue_pairing_code(ttl_seconds: int = 600) -> tuple[str, int]:
     return code, expires_at
 
 
-def _append_device(data: dict[str, Any], clean_name: str, now: int, paired_via: str) -> tuple[str, str]:
-    token = secrets.token_urlsafe(36)
+def _append_device_with_token(
+    data: dict[str, Any], clean_name: str, now: int, paired_via: str, token: str
+) -> tuple[str, str]:
     device_id = secrets.token_hex(8)
     devices = data.setdefault("devices", [])
     if not isinstance(devices, list):
@@ -125,11 +272,16 @@ def _append_device(data: dict[str, Any], clean_name: str, now: int, paired_via: 
     return token, device_id
 
 
+def _append_device(data: dict[str, Any], clean_name: str, now: int, paired_via: str) -> tuple[str, str]:
+    token = secrets.token_urlsafe(36)
+    return _append_device_with_token(data, clean_name, now, paired_via, token)
+
+
 def consume_pairing_code(code: str, device_name: str) -> tuple[str, str]:
     normalized = _normalize_code(code)
     if len(normalized) != 12:
         raise ValueError("Pairing code format is invalid")
-    clean_name = " ".join(device_name.split()).strip()[:80] or "Tony desktop"
+    clean_name = _clean_device_name(device_name)
     now = int(time.time())
 
     with _LOCK:
