@@ -7,7 +7,7 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-hpath = Path("bear_agent_pet/client/src/PetWindow.h")
+hpath = Path("teddy_agent_pet/client/src/PetWindow.h")
 h = hpath.read_text(encoding="utf-8")
 h = replace_once(h, "#include <QPixmap>\n", "#include <QPixmap>\n#include <QScreen>\n", "QScreen include")
 h = replace_once(
@@ -37,7 +37,7 @@ h = replace_once(
 )
 hpath.write_text(h, encoding="utf-8")
 
-cpppath = Path("bear_agent_pet/client/src/PetWindowV7.cpp")
+cpppath = Path("teddy_agent_pet/client/src/PetWindowV7.cpp")
 cpp = cpppath.read_text(encoding="utf-8")
 cpp = replace_once(cpp, "#include <QtMath>\n", "#include <QtMath>\n#include <limits>\n", "limits include")
 cpp = replace_once(
@@ -424,12 +424,12 @@ void PetWindow::savePosition(){
 )
 cpppath.write_text(cpp, encoding="utf-8")
 
-cmake = Path("bear_agent_pet/client/CMakeLists.txt")
+cmake = Path("teddy_agent_pet/client/CMakeLists.txt")
 text = cmake.read_text(encoding="utf-8")
 text = replace_once(text, "project(TonyDesktopPet VERSION 0.8.0 LANGUAGES CXX)", "project(TonyDesktopPet VERSION 0.8.1 LANGUAGES CXX)", "version")
 cmake.write_text(text, encoding="utf-8")
 
-doc = Path("bear_agent_pet/docs/TONY_DESKTOP_BEHAVIOR.md")
+doc = Path("teddy_agent_pet/docs/TONY_DESKTOP_BEHAVIOR.md")
 doc.write_text(
     """# Tony Desktop Behavior V0.8.1
 

@@ -21,12 +21,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--source",
-        default="bear_agent_pet/training/source/tony_persona_en_v1.json",
+        default="teddy_agent_pet/training/source/tony_persona_en_v1.json",
         help="High-weight hand-curated persona seed JSON.",
     )
     parser.add_argument(
         "--output-dir",
-        default="bear_agent_pet/training/processed/tony_persona_en_v2",
+        default="teddy_agent_pet/training/processed/tony_persona_en_v2",
     )
     parser.add_argument(
         "--no-expansion",

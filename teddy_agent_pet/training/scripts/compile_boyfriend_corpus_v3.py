@@ -10,7 +10,7 @@ from pathlib import Path
 
 from boyfriend_expansion_v3 import build_examples
 
-ROOT = Path('bear_agent_pet/training')
+ROOT = Path('teddy_agent_pet/training')
 SOURCE = ROOT / 'source/tony_boyfriend_en_v3.json'
 OUTPUT = ROOT / 'processed/tony_boyfriend_en_v3'
 

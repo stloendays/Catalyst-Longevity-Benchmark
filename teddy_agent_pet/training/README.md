@@ -29,7 +29,7 @@ Chemistry Q&A, coding, server operations, OpenClaw routing and Local Bridge tool
 From repository root:
 
 ```bash
-python3 bear_agent_pet/training/scripts/compile_boyfriend_corpus_v3.py
+python3 teddy_agent_pet/training/scripts/compile_boyfriend_corpus_v3.py
 ```
 
 The output contains `all.jsonl`, `train.jsonl`, `eval.jsonl`, and `manifest.json`. Evaluation assignment is deterministic so the holdout remains stable across reruns.
