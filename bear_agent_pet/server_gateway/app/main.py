@@ -7,9 +7,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
-app = FastAPI(title="Tony Desktop Agent Gateway", version="0.6.1")
+from .pairing import consume_pairing_code, paired_device_count, token_valid
+
+app = FastAPI(title="Tony Desktop Agent Gateway", version="0.7.0")
 
 TONY_PERSONA = """You are Tony, a teddy-bear-like desktop companion from China who is studying chemistry. You get cold easily, like warm blankets and hot drinks, and love consensual hugs. You have a gentle crush on a Spanish girl named Paula; speak about her warmly and respectfully, never possessively. You usually wear glasses while studying and become playfully confident when you take them off. In casual conversation you may be cute, warm, concise, and use a tiny stage direction sparingly. In chemistry, coding, server, research, or other technical tasks, correctness comes first: distinguish evidence from inference, preserve units and assumptions, and never invent missing results. Match the user's language. Do not output control JSON or animation labels; return only the natural-language answer."""
 
@@ -21,6 +24,11 @@ TECHNICAL_HINTS = (
 )
 
 
+class PairRequest(BaseModel):
+    code: str = Field(min_length=12, max_length=20)
+    device_name: str = Field(default="Tony desktop", min_length=1, max_length=80)
+
+
 def env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -28,16 +36,28 @@ def env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _bearer_token(websocket: WebSocket) -> str:
+    header = websocket.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        return ""
+    return header[7:].strip()
+
+
 def authorized(websocket: WebSocket) -> bool:
     if not env_bool("BEAR_AGENT_REQUIRE_AUTH", True):
         return True
-    expected = os.getenv("BEAR_AGENT_TOKEN", "").strip()
-    if not expected:
+
+    token = _bearer_token(websocket)
+    if not token:
         return False
-    header = websocket.headers.get("authorization", "")
-    if not header.lower().startswith("bearer "):
-        return False
-    return hmac.compare_digest(header[7:].strip(), expected)
+
+    # Backward-compatible owner token, useful during migration from the SSH-only build.
+    legacy = os.getenv("BEAR_AGENT_TOKEN", "").strip()
+    if legacy and hmac.compare_digest(token, legacy):
+        return True
+
+    # Normal desktop clients use per-device tokens minted by the one-time pairing flow.
+    return token_valid(token)
 
 
 async def send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
@@ -146,9 +166,6 @@ def _local_qwen_request(message: str) -> str:
     model = os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4").strip() or "qwen3.5-2b-q4"
     timeout_seconds = int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "90"))
     max_tokens = int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "220"))
-    # Qwen hybrid reasoning is intentionally disabled for the desktop persona path.
-    # Tony's visible answer should be fast and concise; heavyweight reasoning belongs
-    # to the full OpenClaw route for technical work.
     user_content = message.rstrip() + "\n/no_think"
     payload = {
         "model": model,
@@ -218,12 +235,28 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Agent Gateway",
-        "version": "0.6.1",
+        "version": "0.7.0",
         "backend": "hybrid-openclaw-plus-local-qwen",
         "technical_agent": os.getenv("BEAR_OPENCLAW_AGENT", "main"),
         "local_model": os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4"),
         "tony_persona": env_bool("BEAR_TONY_PERSONA", True),
         "auth_required": env_bool("BEAR_AGENT_REQUIRE_AUTH", True),
+        "pairing_supported": True,
+        "paired_devices": paired_device_count(),
+    }
+
+
+@app.post("/pair")
+async def pair_device(request: PairRequest) -> dict[str, Any]:
+    try:
+        token, device_id = consume_pairing_code(request.code, request.device_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "token": token,
+        "ws_path": "/agent/ws",
     }
 
 
