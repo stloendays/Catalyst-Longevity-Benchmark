@@ -1018,8 +1018,8 @@ void PetWindow::moveToRestCorner(){
     const int rightDistance=qAbs(cursor.x()-(rightX+width()/2));
     const int x=leftDistance>rightDistance ? leftX : rightX;
 
-    perchOnActiveWindow_=false;
-    QSettings().setValue("desktop/perch_on_active_window",false);
+    // Keep the user's active-window preference. Sleep blocks perching by itself;
+    // after Tony wakes, the preference can resume naturally.
     dockMode_=DockMode::Bottom;
     dockScreenName_=screen->name();
     move(x,y);
@@ -1398,6 +1398,12 @@ void PetWindow::leaveEvent(QEvent*){
 
 void PetWindow::mousePressEvent(QMouseEvent *e){
     if(e->button()!=Qt::LeftButton) return;
+    // Tony can be grabbed again while he is falling; user input always wins over physics.
+    if(falling_) {
+        falling_=false;
+        pendingDizzyAfterFall_=false;
+        physicsTimer_.stop();
+    }
     mouseDown_=true;
     dragging_=false;
     dragTravel_=0;
