@@ -1,0 +1,86 @@
+name: Tony Agent end-to-end smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bear-agent-e2e.yml
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Send a real message through Tony Gateway to OpenClaw
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          VENV='/home/ubuntu/.local/share/bear-agent/venv'
+          test -x "$VENV/bin/python"
+          curl -fsS http://127.0.0.1:18790/health
+          echo
+
+          "$VENV/bin/python" - <<'PY'
+          import asyncio
+          import json
+          import websockets
+
+          async def main():
+              events=[]
+              final=None
+              async with websockets.connect('ws://127.0.0.1:18790/agent/ws', ping_interval=20, ping_timeout=20) as ws:
+                  # consume initial idle + wave
+                  for _ in range(2):
+                      events.append(json.loads(await asyncio.wait_for(ws.recv(), 10)))
+                  await ws.send(json.dumps({
+                      'type':'message',
+                      'id':'github-actions-e2e',
+                      'content':'In one short sentence, introduce yourself as Tony.'
+                  }))
+                  deadline=asyncio.get_running_loop().time()+260
+                  while asyncio.get_running_loop().time() < deadline:
+                      msg=json.loads(await asyncio.wait_for(ws.recv(), 270))
+                      events.append(msg)
+                      if msg.get('type') == 'error':
+                          raise RuntimeError(msg.get('message','Tony Gateway error'))
+                      if msg.get('type') == 'final':
+                          final=msg
+                          break
+
+              assert final is not None, events[-10:]
+              text=str(final.get('content','')).strip()
+              assert text, final
+              assert 'tony' in text.casefold(), text
+              assert final.get('action'), final
+              assert final.get('emotion'), final
+              kinds=[e.get('type') for e in events]
+              assert 'agent_state' in kinds, kinds
+              assert 'avatar_action' in kinds, kinds
+              assert 'text_delta' in kinds, kinds
+              print('TONY_E2E=PASS')
+              print('EVENT_TYPES=', kinds)
+              print('FINAL_ACTION=', final.get('action'))
+              print('FINAL_EMOTION=', final.get('emotion'))
+              print('FINAL_TEXT=', text[:500].replace('\n',' '))
+
+          asyncio.run(main())
+          PY
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
