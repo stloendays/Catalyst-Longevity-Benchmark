@@ -127,7 +127,9 @@ def _clean_visible_answer(text: str) -> str:
 def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = local_model_id()
-    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "35")), 20), 80)
+    # Fast mode normally uses 35 s. The retained 2B quality profile is intentionally
+    # slower on this CPU-only server and may request up to 180 s through the env file.
+    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "35")), 20), 180)
     max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "48")), 24), 48)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
