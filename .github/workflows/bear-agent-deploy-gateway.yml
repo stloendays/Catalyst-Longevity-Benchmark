@@ -110,7 +110,7 @@ jobs:
           User=ubuntu
           WorkingDirectory=/home/ubuntu/.local/share/bear-agent/app
           EnvironmentFile=/home/ubuntu/.local/share/bear-agent/bear-agent.env
-          ExecStart=/home/ubuntu/.local/share/bear-agent/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 18790
+          ExecStart=/home/ubuntu/.local/share/bear-agent/venv/bin/uvicorn app.main_v08:app --host 127.0.0.1 --port 18790
           Restart=on-failure
           RestartSec=3
           NoNewPrivileges=true
@@ -142,11 +142,14 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.7.0', d
+          assert d['version'] == '0.8.0', d
           assert d['tony_persona'] is True, d
           assert d['technical_agent'] == 'main', d
           assert d['local_model'] == 'qwen3.5-2b-q4', d
           assert d['pairing_supported'] is True, d
+          assert d['local_tool_protocol'] == '1', d
+          assert d['arbitrary_shell'] is False, d
+          assert 'capture_screen' in d['local_tools'], d
           print('TONY_GATEWAY_HEALTH=PASS')
           PY
 
@@ -168,15 +171,21 @@ jobs:
           print('TONY_PAIRING_CONTRACT=PASS')
           PY
 
-          echo '=== ROUTER CONTRACT ==='
+          echo '=== ROUTER AND LOCAL TOOL PLANNER CONTRACT ==='
           "$VENV/bin/python" - <<'PY'
           from app.main import action_for_text, route_backends
+          from app.local_tools import plan_local_tool
           assert route_backends('Can I have a hug?')[0] == 'local-qwen'
           assert route_backends('Check my VASP server job')[0] == 'openclaw-main'
           assert action_for_text('Paula is here')[0] == 'blush_wave'
           assert action_for_text('It is freezing')[0] == 'shiver'
           assert action_for_text('Can I have a hug?')[0] == 'ask_hug'
+          assert plan_local_tool('Tony, take a screenshot')['tool'] == 'capture_screen'
+          assert plan_local_tool('Tony, read my clipboard')['tool'] == 'read_clipboard'
+          assert plan_local_tool('Tony, open https://example.com')['tool'] == 'open_url'
+          assert plan_local_tool('Tony, run PowerShell') is None
           print('TONY_ROUTER_CONTRACT=PASS')
+          print('TONY_LOCAL_TOOL_PLANNER=PASS')
           PY
 
           echo '=== LOCAL QWEN NO-THINK COMPLETION ==='
@@ -215,19 +224,57 @@ jobs:
           print('TONY_OPENCLAW_CONTROL_PLANE=PASS')
           PY
 
-          echo '=== WEBSOCKET CONTRACT ==='
+          echo '=== WEBSOCKET LOCAL BRIDGE CONTRACT ==='
           "$VENV/bin/python" - <<'PY'
           import asyncio, json
           import websockets
 
+          async def recv_json(ws, timeout=5):
+              return json.loads(await asyncio.wait_for(ws.recv(), timeout))
+
           async def main():
               async with websockets.connect('ws://127.0.0.1:18790/agent/ws') as ws:
-                  first=json.loads(await asyncio.wait_for(ws.recv(), 5))
-                  second=json.loads(await asyncio.wait_for(ws.recv(), 5))
+                  first=await recv_json(ws)
+                  second=await recv_json(ws)
                   assert first == {'type':'agent_state','state':'idle'}, first
                   assert second.get('type') == 'avatar_action', second
-                  assert second.get('action') == 'wave', second
-                  print('TONY_WEBSOCKET_CONTRACT=PASS')
+
+                  await ws.send(json.dumps({
+                      'type':'client_hello',
+                      'protocol_version':'1',
+                      'client':'ci',
+                      'client_version':'0',
+                      'capabilities':['capture_screen']
+                  }))
+                  ack=await recv_json(ws)
+                  assert ack.get('type') == 'client_hello_ack', ack
+                  assert 'capture_screen' in ack.get('accepted_capabilities', []), ack
+
+                  await ws.send(json.dumps({'type':'message','content':'Tony, take a screenshot'}))
+                  request=None
+                  for _ in range(8):
+                      event=await recv_json(ws)
+                      if event.get('type') == 'tool_request':
+                          request=event
+                          break
+                  assert request is not None, 'tool_request not received'
+                  assert request.get('tool') == 'capture_screen', request
+                  await ws.send(json.dumps({
+                      'type':'tool_result',
+                      'request_id':request['request_id'],
+                      'tool':'capture_screen',
+                      'ok':True,
+                      'result':{'path':'C:\\Users\\ci\\Pictures\\Tony\\shot.png','width':1920,'height':1080,'uploaded':False}
+                  }))
+                  final=None
+                  for _ in range(12):
+                      event=await recv_json(ws)
+                      if event.get('type') == 'final':
+                          final=event
+                          break
+                  assert final is not None, 'final not received after tool_result'
+                  assert 'shot.png' in final.get('content',''), final
+                  print('TONY_WEBSOCKET_LOCAL_BRIDGE=PASS')
           asyncio.run(main())
           PY
 
