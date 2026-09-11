@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tony-gateway-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -60,6 +64,7 @@ jobs:
             cat > "$ENVFILE" <<'ENV'
           BEAR_AGENT_REQUIRE_AUTH=false
           BEAR_OPENCLAW_AGENT=main
+          BEAR_LOCAL_AGENT=local2b
           BEAR_OPENCLAW_TIMEOUT=240
           BEAR_TONY_PERSONA=true
           OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
@@ -67,6 +72,7 @@ jobs:
             chmod 600 "$ENVFILE"
           fi
           grep -q '^BEAR_TONY_PERSONA=' "$ENVFILE" || printf '%s\n' 'BEAR_TONY_PERSONA=true' >> "$ENVFILE"
+          grep -q '^BEAR_LOCAL_AGENT=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_AGENT=local2b' >> "$ENVFILE"
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
@@ -111,9 +117,23 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.4.0', d
+          assert d['version'] == '0.5.0', d
           assert d['tony_persona'] is True, d
+          assert d['technical_agent'] == 'main', d
+          assert d['local_agent'] == 'local2b', d
           print('TONY_GATEWAY_HEALTH=PASS')
+          PY
+
+          echo '=== ROUTER CONTRACT ==='
+          cd "$APP"
+          "$VENV/bin/python" - <<'PY'
+          from app.main import action_for_text, route_agents
+          assert route_agents('Can I have a hug?')[0] == 'local2b'
+          assert route_agents('Check my VASP server job')[0] == 'main'
+          assert action_for_text('Paula is here')[0] == 'blush_wave'
+          assert action_for_text('It is freezing')[0] == 'shiver'
+          assert action_for_text('Can I have a hug?')[0] == 'ask_hug'
+          print('TONY_ROUTER_CONTRACT=PASS')
           PY
 
           echo '=== OPENCLAW BACKEND ==='
