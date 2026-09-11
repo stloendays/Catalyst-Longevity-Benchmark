@@ -77,7 +77,7 @@ QString uiText(const QString &en, const QString &zh) {
 }
 
 QString defaultPublicEndpoint() {
-    return QStringLiteral("wss://150-158-27-206.sslip.io/agent/ws");
+    return QStringLiteral("wss://150.158.27.206/agent/ws");
 }
 }
 
