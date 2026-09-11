@@ -8,7 +8,7 @@
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
-#include <QFileInfo>
+#include <QFont>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -16,6 +16,7 @@
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSettings>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -35,7 +36,6 @@ SettingsDialog::SettingsDialog(UpdateManager *updater, QWidget *parent)
     auto *tabs = new QTabWidget(this);
     root->addWidget(tabs, 1);
 
-    // General
     auto *general = new QWidget(tabs);
     auto *generalLayout = new QVBoxLayout(general);
     generalLayout->setContentsMargins(18, 18, 18, 18);
@@ -72,20 +72,19 @@ SettingsDialog::SettingsDialog(UpdateManager *updater, QWidget *parent)
     });
     connect(reconnectButton, &QPushButton::clicked, this, &SettingsDialog::reconnectRequested);
 
-    // Automatic updates
     auto *updates = new QWidget(tabs);
     auto *updatesLayout = new QVBoxLayout(updates);
     updatesLayout->setContentsMargins(18, 18, 18, 18);
     updatesLayout->setSpacing(14);
 
     automaticUpdates_ = new QCheckBox(
-        trUi("Automatically check, download, verify and install Tony updates", "自动检查、下载、校验并安装 Tony 更新"), updates);
+        trUi("Automatically check for and download Tony updates", "自动检查并下载 Tony 更新"), updates);
     automaticUpdates_->setChecked(updater_ && updater_->automaticUpdatesEnabled());
     updatesLayout->addWidget(automaticUpdates_);
 
     auto *updateHint = new QLabel(
-        trUi("When enabled, Tony checks at most twice per day. Update packages are verified with SHA-256 before installation, then Tony restarts automatically.",
-             "开启后，Tony 最多每天检查两次更新。安装前会进行 SHA-256 完整性校验，完成后 Tony 会自动重启。"), updates);
+        trUi("When enabled, Tony checks at most twice per day. Update packages are verified with SHA-256 before installation. A verified update can then restart Tony and install itself with one click.",
+             "开启后，Tony 最多每天检查两次更新。更新包会先进行 SHA-256 完整性校验，校验通过后可一键重启并自动安装。"), updates);
     updateHint->setWordWrap(true);
     updatesLayout->addWidget(updateHint);
 
@@ -165,7 +164,6 @@ SettingsDialog::SettingsDialog(UpdateManager *updater, QWidget *parent)
         });
     }
 
-    // Logs
     auto *logsTab = new QWidget(tabs);
     auto *logsLayout = new QVBoxLayout(logsTab);
     logsLayout->setContentsMargins(18, 18, 18, 18);
