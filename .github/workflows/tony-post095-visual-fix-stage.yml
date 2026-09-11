@@ -1,0 +1,122 @@
+name: Stage Tony post-0.9.5 visual fixes
+
+on:
+  push:
+    branches:
+      - fix/tony-post095-visual-regressions
+    paths:
+      - '.github/workflows/tony-post095-visual-fix-stage.yml'
+      - '.github/scripts/fix_tony_post095_visual_regressions.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-visual:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-post095-visual-regressions
+          fetch-depth: 0
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Apply guarded visual patch
+        shell: pwsh
+        run: |
+          python .github/scripts/fix_tony_post095_visual_regressions.py
+          git diff --check
+          git diff -- bear_agent_pet/client/src/PetWindowV7.cpp
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S bear_agent_pet/client -B build/tony-visual-fix -G "Visual Studio 17 2022" -A x64
+          cmake --build build/tony-visual-fix --config Release --parallel
+          if (-not (Test-Path build/tony-visual-fix/Release/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing' }
+
+      - name: Capture idle blink regression sequence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path visual-proof/idle | Out-Null
+          $env:TONY_VISUAL_ACTION='idle'
+          $exe=(Resolve-Path build/tony-visual-fix/Release/TonyDesktopPet.exe).Path
+          $proc=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            for($i=0; $i -lt 50; $i++) {
+              if($proc.HasExited){ throw "Tony exited during idle QA: $($proc.ExitCode)" }
+              $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+              $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+              $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+              try {
+                $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+                $name=('visual-proof/idle/frame_{0:D2}.png' -f $i)
+                $bmp.Save((Join-Path $PWD $name),[System.Drawing.Imaging.ImageFormat]::Png)
+              } finally { $gfx.Dispose(); $bmp.Dispose() }
+              Start-Sleep -Milliseconds 200
+            }
+          } finally {
+            if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+            Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+          }
+
+      - name: Capture delayed first-run hint window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path visual-proof/first-run | Out-Null
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+          Remove-Item 'HKCU:\Software\TonyAgent' -Recurse -Force -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path build/tony-visual-fix/Release/TonyDesktopPet.exe).Path
+          $proc=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          try {
+            for($i=1; $i -le 10; $i++) {
+              Start-Sleep -Seconds 1
+              if($proc.HasExited){ throw "Tony exited during first-run QA: $($proc.ExitCode)" }
+              $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+              $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+              $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+              try {
+                $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+                $name=('visual-proof/first-run/second_{0:D2}.png' -f $i)
+                $bmp.Save((Join-Path $PWD $name),[System.Drawing.Imaging.ImageFormat]::Png)
+              } finally { $gfx.Dispose(); $bmp.Dispose() }
+            }
+          } finally {
+            if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-post095-visual-proof
+          path: visual-proof/**/*.png
+          if-no-files-found: error
+
+      - name: Commit Windows-tested source patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          if (git diff --cached --quiet) { throw 'Visual patch produced no source changes.' }
+          git commit -m "Fix Tony idle visual regression and startup hint"
+          git pull --rebase origin fix/tony-post095-visual-regressions
+          git push origin HEAD:fix/tony-post095-visual-regressions
