@@ -9,6 +9,7 @@
 #include "AgentClient.h"
 #include "SshTunnel.h"
 #include "SpeechBubble.h"
+#include "ChatComposer.h"
 
 class QEnterEvent;
 
@@ -45,6 +46,7 @@ private:
     void scheduleIdleMoment();
     void runIdleMoment();
     void askTony();
+    void submitTonyPrompt(const QString &text);
     void hugTony();
     void configureConnection();
     void useLocalSshConnection();
@@ -63,6 +65,7 @@ private:
     AgentClient agent_;
     QSystemTrayIcon tray_;
     SpeechBubble bubble_;
+    ChatComposer composer_;
     Action action_{Action::Idle};
     QPoint dragOffset_;
     QPoint basePos_;
