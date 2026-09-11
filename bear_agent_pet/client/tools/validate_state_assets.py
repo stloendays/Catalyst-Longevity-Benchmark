@@ -15,7 +15,6 @@ EXPECTED = (
     "ask_hug", "hug", "blush", "blush_wave", "study", "adjust_glasses",
     "remove_glasses", "wave",
 )
-ANIMATED = ("idle", "ask_hug", "shiver", "walk")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -31,12 +30,12 @@ def inspect_png(path: Path) -> tuple[int, int, int, str]:
     return width, height, color_type, digest
 
 
-def validate_png(path: Path, failures: list[str], *, min_size: int = 180) -> None:
+def validate_png(path: Path, failures: list[str], *, min_size: int = 180) -> tuple[int, int] | None:
     try:
         w, h, color_type, digest = inspect_png(path)
     except Exception as exc:
         failures.append(f"{path}: {exc}")
-        return
+        return None
     if w != h:
         failures.append(f"{path}: canvas must be square, got {w}x{h}")
     if w < min_size:
@@ -44,6 +43,7 @@ def validate_png(path: Path, failures: list[str], *, min_size: int = 180) -> Non
     if color_type not in {3, 4, 6}:
         failures.append(f"{path}: expected transparency-capable PNG color type, got {color_type}")
     print(f"OK       {path.relative_to(ROOT)!s:48s} {w}x{h} type={color_type} sha256={digest}")
+    return w, h
 
 
 def main() -> int:
@@ -58,10 +58,10 @@ def main() -> int:
         validate_png(path, failures)
 
     animated_present = 0
-    for key in ANIMATED:
+    for key in EXPECTED:
         folder = ANIMATION_DIR / key
         if not folder.exists():
-            print(f"MISSING  animations/{key}/  (legal: state image is used)")
+            print(f"MISSING  animations/{key}/  (legal: static state image is used)")
             continue
         frames = sorted(folder.glob("frame_*.png"))
         if not frames:
@@ -73,12 +73,28 @@ def main() -> int:
             failures.append(f"{folder}: frames must be contiguous: {expected_names}, got {actual_names}")
         if not 2 <= len(frames) <= 12:
             failures.append(f"{folder}: expected 2-12 frames, got {len(frames)}")
+
+        geometry = None
         for frame in frames:
-            validate_png(frame, failures)
+            current = validate_png(frame, failures)
+            if current is None:
+                continue
+            if geometry is None:
+                geometry = current
+            elif current != geometry:
+                failures.append(f"{folder}: frame geometry must stay constant; expected {geometry}, got {current} in {frame.name}")
         animated_present += 1
 
+    unknown = []
+    if ANIMATION_DIR.exists():
+        for child in ANIMATION_DIR.iterdir():
+            if child.is_dir() and child.name not in EXPECTED:
+                unknown.append(child.name)
+    if unknown:
+        failures.append(f"unknown animation state directories: {', '.join(sorted(unknown))}")
+
     print(f"TONY_STATE_ASSETS_PRESENT={present}/{len(EXPECTED)}")
-    print(f"TONY_ANIMATIONS_PRESENT={animated_present}/{len(ANIMATED)}")
+    print(f"TONY_ANIMATIONS_PRESENT={animated_present}/{len(EXPECTED)}")
     if failures:
         for item in failures:
             print("ERROR   ", item)
