@@ -4,18 +4,47 @@
 #include <QUuid>
 
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
-    connect(&socket_, &QWebSocket::connected, this, [this]{ emit connectionChanged(true); });
-    connect(&socket_, &QWebSocket::disconnected, this, [this]{ emit connectionChanged(false); });
+    reconnectTimer_.setInterval(3000);
+    reconnectTimer_.setSingleShot(false);
+    connect(&reconnectTimer_, &QTimer::timeout, this, &AgentClient::reconnect);
+
+    connect(&socket_, &QWebSocket::connected, this, [this]{
+        reconnectTimer_.stop();
+        emit connectionChanged(true);
+    });
+    connect(&socket_, &QWebSocket::disconnected, this, [this]{
+        emit connectionChanged(false);
+        if(endpoint_.isValid() && !reconnectTimer_.isActive()) reconnectTimer_.start();
+    });
     connect(&socket_, &QWebSocket::textMessageReceived, this, &AgentClient::onText);
-    connect(&socket_, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError){ emit errorMessage(socket_.errorString()); });
+    connect(&socket_, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError){
+        emit errorMessage(socket_.errorString());
+        if(endpoint_.isValid() && socket_.state()==QAbstractSocket::UnconnectedState && !reconnectTimer_.isActive())
+            reconnectTimer_.start();
+    });
 }
 
-void AgentClient::connectTo(const QUrl &url) { socket_.open(url); }
+void AgentClient::connectTo(const QUrl &url) {
+    endpoint_=url;
+    reconnect();
+}
+
+void AgentClient::reconnect() {
+    if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
+    socket_.open(endpoint_);
+}
+
 bool AgentClient::connected() const { return socket_.state() == QAbstractSocket::ConnectedState; }
+
 void AgentClient::sendMessage(const QString &text) {
+    if(!connected()) {
+        emit errorMessage("Tony Agent is not connected yet.");
+        return;
+    }
     QJsonObject o{{"type","message"},{"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"content",text}};
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
+
 void AgentClient::onText(const QString &message) {
     auto doc=QJsonDocument::fromJson(message.toUtf8());
     if(!doc.isObject()) return;
