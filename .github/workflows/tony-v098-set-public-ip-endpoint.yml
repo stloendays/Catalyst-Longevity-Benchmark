@@ -1,0 +1,60 @@
+name: Tony v0.9.8 set trusted public endpoint
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-set-public-ip-endpoint.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-endpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-v098-icon-connection
+          fetch-depth: 0
+
+      - name: Replace blocked sslip endpoint with trusted IP endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('bear_agent_pet/client/src/PetWindowV7.cpp')
+          text = p.read_text(encoding='utf-8')
+          old = 'wss://150-158-27-206.sslip.io/agent/ws'
+          new = 'wss://150.158.27.206/agent/ws'
+          if old in text:
+              text = text.replace(old, new)
+              p.write_text(text, encoding='utf-8')
+          elif new not in text:
+              raise SystemExit('Neither old nor expected new Tony public endpoint found')
+          print('TONY_DEFAULT_ENDPOINT=' + new)
+          PY
+          grep -F 'wss://150.158.27.206/agent/ws' bear_agent_pet/client/src/PetWindowV7.cpp
+          if grep -Fq '150-158-27-206.sslip.io' bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'Blocked sslip endpoint still present' >&2
+            exit 1
+          fi
+
+      - name: Commit endpoint update
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'ENDPOINT_ALREADY_CURRENT=PASS'
+            exit 0
+          fi
+          git config user.name 'Tony CI'
+          git config user.email '157110190+stloendays@users.noreply.github.com'
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          git commit -m 'Use trusted public IP endpoint for Tony v0.9.8'
+          git push origin HEAD:fix/tony-v098-icon-connection
+          echo 'TONY_DEFAULT_ENDPOINT_UPDATE=PASS'
