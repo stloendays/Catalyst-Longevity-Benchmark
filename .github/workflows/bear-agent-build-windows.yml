@@ -56,7 +56,8 @@ jobs:
           foreach ($required in @('TonyDesktopPet.exe', 'assets/states', 'assets/animations')) {
             if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
           }
-          Add-Type -AssemblyName System.Drawing
+          # validate_state_assets.py already performs the PNG-format checks. Here we
+          # verify that every source asset was packaged byte-for-byte unchanged.
           foreach ($file in Get-ChildItem $source -File -Recurse) {
             $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
             $deployed = Join-Path "$package/assets" $relative
@@ -64,17 +65,8 @@ jobs:
             if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $deployed).Hash) {
               throw "Packaged artwork differs: $relative"
             }
-            # Formal state/animation PNGs are validated above and again here. The old
-            # tony.png compatibility fallback is not part of the active state contract.
-            if ($file.Extension -eq '.png' -and $relative -ne 'tony.png') {
-              $bitmap = [Drawing.Bitmap]::new($deployed)
-              try {
-                if ($bitmap.Width -lt 1 -or $bitmap.Height -lt 1) { throw "Invalid PNG: $relative" }
-                $null = $bitmap.GetPixel($bitmap.Width - 1, $bitmap.Height - 1)
-              } finally { $bitmap.Dispose() }
-            }
           }
-          Write-Host 'TONY_PACKAGE_ASSETS=PASS (formal state/animation assets match SHA256)'
+          Write-Host 'TONY_PACKAGE_ASSETS=PASS (formal assets validated and all packaged bytes match SHA256)'
           $originalPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
