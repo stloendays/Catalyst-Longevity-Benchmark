@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate optional Tony desktop-pet state PNGs without external packages."""
+"""Validate optional Tony desktop-pet state PNGs and frame sequences."""
 
 from __future__ import annotations
 
@@ -9,10 +9,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "assets" / "states"
+ANIMATION_DIR = ROOT / "assets" / "animations"
 EXPECTED = (
     "idle", "working", "walk", "thinking", "celebrate", "sleep", "shiver",
-    "ask_hug", "hug", "blush", "study", "adjust_glasses", "remove_glasses", "wave",
+    "ask_hug", "hug", "blush", "blush_wave", "study", "adjust_glasses",
+    "remove_glasses", "wave",
 )
+ANIMATED = ("idle", "ask_hug", "shiver", "walk")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -28,31 +31,54 @@ def inspect_png(path: Path) -> tuple[int, int, int, str]:
     return width, height, color_type, digest
 
 
+def validate_png(path: Path, failures: list[str], *, min_size: int = 180) -> None:
+    try:
+        w, h, color_type, digest = inspect_png(path)
+    except Exception as exc:
+        failures.append(f"{path}: {exc}")
+        return
+    if w != h:
+        failures.append(f"{path}: canvas must be square, got {w}x{h}")
+    if w < min_size:
+        failures.append(f"{path}: runtime artwork is too small ({w}px)")
+    if color_type not in {3, 4, 6}:
+        failures.append(f"{path}: expected transparency-capable PNG color type, got {color_type}")
+    print(f"OK       {path.relative_to(ROOT)!s:48s} {w}x{h} type={color_type} sha256={digest}")
+
+
 def main() -> int:
     failures: list[str] = []
     present = 0
     for key in EXPECTED:
         path = STATE_DIR / f"{key}.png"
         if not path.exists():
-            print(f"MISSING  {key}.png  (legal: runtime falls back)")
+            print(f"MISSING  states/{key}.png  (legal: runtime falls back)")
             continue
         present += 1
-        try:
-            w, h, color_type, digest = inspect_png(path)
-        except Exception as exc:
-            failures.append(f"{path.name}: {exc}")
+        validate_png(path, failures)
+
+    animated_present = 0
+    for key in ANIMATED:
+        folder = ANIMATION_DIR / key
+        if not folder.exists():
+            print(f"MISSING  animations/{key}/  (legal: state image is used)")
             continue
-        if w != h:
-            failures.append(f"{path.name}: canvas must be square, got {w}x{h}")
-        if w < 180:
-            failures.append(f"{path.name}: runtime artwork is too small ({w}px)")
-        # PNG color types 4 and 6 have an alpha channel. Type 3 may use tRNS,
-        # which is also acceptable for optimized palette sprites.
-        if color_type not in {3, 4, 6}:
-            failures.append(f"{path.name}: expected transparency-capable PNG color type, got {color_type}")
-        print(f"OK       {path.name:22s} {w}x{h} type={color_type} sha256={digest}")
+        frames = sorted(folder.glob("frame_*.png"))
+        if not frames:
+            failures.append(f"{folder}: animation directory exists but contains no frames")
+            continue
+        expected_names = [f"frame_{i:02d}.png" for i in range(1, len(frames) + 1)]
+        actual_names = [p.name for p in frames]
+        if actual_names != expected_names:
+            failures.append(f"{folder}: frames must be contiguous: {expected_names}, got {actual_names}")
+        if not 2 <= len(frames) <= 12:
+            failures.append(f"{folder}: expected 2-12 frames, got {len(frames)}")
+        for frame in frames:
+            validate_png(frame, failures)
+        animated_present += 1
 
     print(f"TONY_STATE_ASSETS_PRESENT={present}/{len(EXPECTED)}")
+    print(f"TONY_ANIMATIONS_PRESENT={animated_present}/{len(ANIMATED)}")
     if failures:
         for item in failures:
             print("ERROR   ", item)
