@@ -1,0 +1,41 @@
+name: Apply Tony V0.8.2 desktop behavior
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/scripts/patch_tony_desktop_v082.py'
+      - '.github/workflows/_temporary-tony-desktop-v082.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+      - name: Apply desktop behavior patch
+        run: python3 .github/scripts/patch_tony_desktop_v082.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -q 'VERSION 0.8.2' teddy_agent_pet/client/CMakeLists.txt
+          grep -q 'foregroundWindowInfo' teddy_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'startCursorWalk' teddy_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'hide_for_fullscreen' teddy_agent_pet/client/src/PetWindowV7.cpp
+      - name: Commit patched client
+        run: |
+          git config user.name 'Tony Desktop Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add teddy_agent_pet/client/CMakeLists.txt teddy_agent_pet/client/src/PetWindow.h teddy_agent_pet/client/src/PetWindowV7.cpp
+          if git diff --cached --quiet; then
+            echo 'No desktop patch changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Add Windows-aware desktop behavior to Tony'
+          git push origin HEAD:feature/teddy-agent-pet
