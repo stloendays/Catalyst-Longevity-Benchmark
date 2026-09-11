@@ -1,0 +1,74 @@
+name: Probe Tony secure edge
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bear-agent-edge-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Inspect reverse proxy and TLS availability
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          echo '=== EDGE BINARIES ==='
+          for x in nginx caddy certbot traefik; do
+            if command -v "$x" >/dev/null 2>&1; then
+              echo "$x=$(command -v "$x")"
+            else
+              echo "$x=missing"
+            fi
+          done
+
+          echo '=== PORTS 80/443 ==='
+          sudo ss -lntp | grep -E ':(80|443) ' || true
+
+          echo '=== REVERSE PROXY SERVICES ==='
+          for svc in nginx caddy traefik; do
+            printf '%s=' "$svc"
+            systemctl is-active "$svc" 2>/dev/null || true
+          done
+
+          echo '=== DOCKER EDGE PORTS ==='
+          if command -v docker >/dev/null 2>&1; then
+            sudo docker ps --format '{{.Names}} | {{.Ports}}' | grep -E '80|443|nginx|caddy|traefik' || true
+          fi
+
+          echo '=== NGINX SITE SUMMARY ==='
+          if [ -d /etc/nginx/sites-enabled ]; then
+            sudo find /etc/nginx/sites-enabled -maxdepth 1 -type f -printf '%f\n' | sort || true
+            sudo grep -RHE '^[[:space:]]*(listen|server_name|proxy_pass)[[:space:]]' /etc/nginx/sites-enabled 2>/dev/null || true
+          fi
+
+          echo '=== CADDY SUMMARY ==='
+          if [ -f /etc/caddy/Caddyfile ]; then
+            sudo grep -Ev '^[[:space:]]*(#|$)' /etc/caddy/Caddyfile | sed -E 's/(token|password|secret|key)[[:space:]]+[^[:space:]]+/\1 <redacted>/Ig' || true
+          fi
+
+          echo '=== CERTBOT CERTIFICATES ==='
+          if command -v certbot >/dev/null 2>&1; then
+            sudo certbot certificates 2>/dev/null | grep -E 'Certificate Name:|Domains:|Expiry Date:' || true
+          fi
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
