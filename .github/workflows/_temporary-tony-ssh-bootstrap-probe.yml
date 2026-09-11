@@ -1,0 +1,70 @@
+name: Verify Tony SSH bootstrap pairing boundary
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_temporary-tony-ssh-bootstrap-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Public reverse proxy must reject SSH bootstrap
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o /tmp/public.json -w '%{http_code}' \
+            -X POST 'https://150-158-27-206.sslip.io/pair/ssh-bootstrap' \
+            -H 'Content-Type: application/json' \
+            --data '{"device_name":"public-security-probe"}')
+          cat /tmp/public.json
+          test "$code" = '403'
+          echo 'TONY_PUBLIC_SSH_BOOTSTRAP=BLOCKED'
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Direct loopback over SSH must allow bootstrap and token must validate
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+          response=$(curl -fsS -X POST 'http://127.0.0.1:18790/pair/ssh-bootstrap' \
+            -H 'Host: 127.0.0.1:18790' \
+            -H 'Content-Type: application/json' \
+            --data '{"device_name":"ssh-bootstrap-ci-probe"}')
+          printf '%s\n' "$response" > /tmp/tony-bootstrap-probe.json
+          cd "$APP"
+          "$VENV/bin/python" - <<'PY'
+          import json
+          from app.pairing import token_valid, revoke_device
+          data=json.load(open('/tmp/tony-bootstrap-probe.json'))
+          assert data.get('ok') is True, data
+          token=data.get('token','')
+          device_id=data.get('device_id','')
+          assert token and device_id, data
+          assert token_valid(token), data
+          assert revoke_device(device_id), device_id
+          print('TONY_SSH_BOOTSTRAP_DIRECT=PASS')
+          print('TONY_SSH_BOOTSTRAP_TOKEN_REVOKED=PASS')
+          PY
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
