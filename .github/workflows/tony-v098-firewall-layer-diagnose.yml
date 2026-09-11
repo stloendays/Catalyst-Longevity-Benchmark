@@ -1,0 +1,40 @@
+name: Tony v0.9.8 firewall layer diagnose
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-firewall-layer-diagnose.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-firewall-layer:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    env:
+      TONY_SERVER_IP: 150.158.27.206
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $keyPath = Join-Path $env:RUNNER_TEMP 'tony_server_key'
+          $keyText = $env:SERVER_SSH_KEY.Replace("`r", '')
+          [IO.File]::WriteAllText($keyPath, $keyText + "`n", [Text.UTF8Encoding]::new($false))
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+          "TONY_SSH_KEY=$keyPath" >> $env:GITHUB_ENV
+
+      - name: Inspect host firewall chains and route
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $cmd = "echo ===INPUT===; sudo iptables -S INPUT; echo ===YJ===; sudo iptables -S YJ-FIREWALL-INPUT 2>&1 || true; echo ===YJ_COUNTERS===; sudo iptables -L YJ-FIREWALL-INPUT -n -v --line-numbers 2>&1 || true; echo ===NFT===; sudo nft list ruleset 2>&1 || true; echo ===ADDR===; ip -br addr; echo ===ROUTE===; ip route; echo ===CADDY===; sudo ss -lntp '( sport = :80 or sport = :443 )'; echo ===SYSCTL===; sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter 2>&1 || true"
+          & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $cmd
+          exit 0
