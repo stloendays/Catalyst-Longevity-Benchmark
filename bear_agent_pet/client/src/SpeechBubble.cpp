@@ -3,6 +3,7 @@
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QPainter>
+#include <QPainterPath>
 #include <QScreen>
 
 namespace {
