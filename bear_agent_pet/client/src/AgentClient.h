@@ -25,4 +25,5 @@ private:
     QWebSocket socket_;
     QUrl endpoint_;
     QTimer reconnectTimer_;
+    bool outageReported_{false};
 };
