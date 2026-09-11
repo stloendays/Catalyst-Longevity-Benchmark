@@ -1,6 +1,6 @@
 # Local2B MCP LoRA — Data, Training, and Benchmark Contract
 
-Status: **Step 1 and Step 2 frozen; Step 3A verified complete; Step 3B server continuation in progress**
+Status: **Step 1–3 verified complete; Step 4 frozen Base-vs-LoRA evaluation in progress**
 
 ## Goal
 
@@ -96,11 +96,11 @@ Verified results:
 - strict inference smoke: final assistant content exactly `STAGE3A_SMOKE_OK`
 - base inference service restored healthy after smoke
 
-A separate 4-record continuation smoke then verified that QVAC can train an existing LoRA with `--lora`. It logged `Finetuning existing LoRA adapters` / `Found 1 existing LoRA adapters to train`, consumed the exact Stage-3A SHA above, produced a new 837408-byte adapter, and ended with `STAGE3B_CONTINUATION_SMOKE=PASS` while restoring the base service.
+A separate 4-record continuation smoke verified that QVAC can train an existing LoRA with `--lora`. It logged `Finetuning existing LoRA adapters` / `Found 1 existing LoRA adapters to train`, consumed the exact Stage-3A SHA above, produced a new 837408-byte adapter, and ended with `STAGE3B_CONTINUATION_SMOKE=PASS` while restoring the base service.
 
-### Step 3B — formal continuation in progress
+### Step 3B — verified complete
 
-The frozen Stage-3B curriculum contains 64 targeted records and has SHA256:
+The frozen Stage-3B curriculum contains 64 targeted records with SHA256:
 
 `0ea19f7143ebcf2de083a4c62ea076050032c49cd6d6e3e6073bf5b0bfc3528c`
 
@@ -118,10 +118,33 @@ Formal continuation configuration:
 - seed: `20260908`
 - checkpoint interval: 10 steps
 - serialized with GitHub Actions concurrency plus server `flock`
-- intended output: `/home/ubuntu/local2b-training/step3b/local2b-mcp-step3b-r4-qv.gguf`
-- intended installed adapter: `/opt/rhocodec-llm/adapters/local2b-mcp-step3b-r4-qv.gguf`
 
-The final Stage-3B adapter SHA and losses are intentionally not recorded until the formal run completes and is verified.
+Verified formal Stage-3B results:
+
+- GitHub Actions run: `34341047994` — success
+- train data progress: 4320 / 4320 tokens reported by QVAC progress meter
+- final train loss: `0.02288 ± 0.00214`
+- final train token accuracy: `96.04 ± 0.34%`
+- final validation loss: `0.02203 ± 0.00783`
+- final validation token accuracy: `95.38 ± 1.60%`
+- elapsed wall time recorded by wrapper: `12195 s`
+- adapter bytes: `837408`
+- adapter SHA256: `177dafa0114e5f41f7bb4fe518be8a6e2dfbc998ca86687287bb7d2f0dd72502`
+- training output: `/home/ubuntu/local2b-training/step3b/local2b-mcp-step3b-r4-qv.gguf`
+- installed adapter: `/opt/rhocodec-llm/adapters/local2b-mcp-step3b-r4-qv.gguf`
+- result artifact: `local2b-mcp-step3b-server-result`
+- artifact ID: `10107897617`
+- artifact digest: `sha256:de69cf56d7f6c117711c998c7e6c26c4426430d7fc949244166389cae5e4e51c`
+
+The Stage-3B `result.txt` also verifies the base model SHA, Stage-2/3B data SHA, Stage-3A initialization SHA, final adapter SHA, and installed adapter path. The deployed base Q4 file remains unchanged.
+
+## Step 4 — frozen adapter A/B evaluation
+
+Step 4 uses the exact same deterministic Step-2 test generator and the same first 80 records / 105 assistant decisions as the frozen base benchmark. Before evaluation, the workflow asserts all three dataset hashes plus the base-model and Stage-3B adapter hashes. The base service is stopped temporarily only to fit the LoRA endpoint in server memory; an EXIT/INT/TERM trap restores `rhocodec-llm.service` even on failure.
+
+The promotion gate requires zero API/parse errors; non-regression in tool-gate accuracy, exact call+arguments, and no-tool accuracy; non-regression in false-tool-call rate; and at least one strict primary improvement. A regression is recorded rather than hidden or automatically promoted.
+
+Workflow: `.github/workflows/local2b-mcp-step4-ab.yml`.
 
 ## Generalization guard
 
@@ -148,17 +171,17 @@ Create the schema, generator, validator and CI artifact.
 ### Step 2 — dataset expansion + base-model benchmark **DONE**
 Expand to 19.2k bilingual/distractor/multi-step examples and freeze the pre-LoRA baseline.
 
-### Step 3 — LoRA training **IN PROGRESS**
-Stage 3A is complete and verified. Stage 3B continues from the Stage-3A adapter on the server-native QVAC route.
+### Step 3 — LoRA training **DONE**
+Train Stage 3A on the server-native QVAC route, verify adapter inference, verify existing-LoRA continuation, and finish the targeted Stage-3B continuation.
 
-### Step 4 — adapter evaluation + deployment export
-Evaluate the final adapter on the same frozen benchmark, verify load/merge behavior, and prepare the llama.cpp/OpenClaw deployment while preserving the base model for rollback.
+### Step 4 — adapter evaluation + deployment export **IN PROGRESS**
+Evaluate Stage-3B LoRA on the exact frozen pre-LoRA benchmark, preserve base rollback, and decide whether the adapter qualifies for promotion.
 
 ### Step 5 — OpenClaw MCP agent integration
 Attach a narrow MCP tool inventory to a dedicated OpenClaw agent and run live end-to-end MCP tasks.
 
 ### Step 6 — A/B deployment
-Compare base vs LoRA on the frozen test set and real project tasks, then promote only if reliability improves without unacceptable language regression.
+Compare base vs promoted LoRA on real project tasks and language-quality checks, then promote only if reliability improves without unacceptable regression.
 
 ## Key files
 
@@ -173,3 +196,4 @@ Compare base vs LoRA on the frozen test set and real project tasks, then promote
 - `.github/workflows/local2b-mcp-step3a-finalize.yml` — strict Stage-3A adapter installation/inference verification
 - `.github/workflows/local2b-mcp-step3b-continuation-smoke.yml` — existing-LoRA continuation verification
 - `.github/workflows/local2b-mcp-step3b-server.yml` — formal serialized Stage-3B continuation
+- `.github/workflows/local2b-mcp-step4-ab.yml` — frozen Base Q4 vs Stage-3B LoRA benchmark
