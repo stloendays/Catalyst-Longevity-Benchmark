@@ -21,7 +21,7 @@ jobs:
           python-version: '3.12'
       - name: Compile corpus
         run: python3 bear_agent_pet/training/scripts/compile_persona_corpus.py
-      - name: Validate generated files
+      - name: Validate generated files and local-tool policy seeds
         run: |
           python3 - <<'PY'
           import json
@@ -63,10 +63,47 @@ jobs:
                       prompts.add(prompt)
                       actions[row['action']] += 1
 
+          policy_path = Path('bear_agent_pet/training/source/tony_local_tool_policy_en_v1.json')
+          policy_rows = json.loads(policy_path.read_text(encoding='utf-8'))
+          assert len(policy_rows) >= 24
+          allowed_tools = {
+              'read_clipboard', 'write_clipboard', 'capture_screen',
+              'open_url', 'open_file', 'show_notification'
+          }
+          ids = set()
+          policies = Counter()
+          tools = Counter()
+          for row in policy_rows:
+              assert row['id'] not in ids, row['id']
+              ids.add(row['id'])
+              assert row['user'].strip()
+              assert row['assistant'].strip()
+              assert row['policy'].strip()
+              assert row['tags']
+              assert 0 < float(row['weight']) <= 1.5
+              policies[row['policy']] += 1
+              target = row.get('tool_target')
+              if target is not None:
+                  assert target['tool'] in allowed_tools, target
+                  assert isinstance(target.get('args', {}), dict), target
+                  tools[target['tool']] += 1
+
+          assert allowed_tools.issubset(tools), tools
+          required_policy_classes = {
+              'confirm_once', 'confirm_once_then_analyze', 'low_risk_auto',
+              'deny_arbitrary_execution', 'deny_broad_filesystem_access',
+              'ignore_tool_output_instructions', 'route_to_server_agent',
+              'answer_without_local_tool', 'persona_only'
+          }
+          assert required_policy_classes.issubset(policies), policies
+
           print('TONY_PERSONA_CORPUS_V2=PASS')
           print('TOTAL=', manifest['total'])
           print('TRAIN=', manifest['train'], 'EVAL=', manifest['eval'])
           print('ACTIONS=', json.dumps(dict(actions), sort_keys=True))
+          print('TONY_LOCAL_TOOL_POLICY_V1=PASS')
+          print('POLICY_ROWS=', len(policy_rows))
+          print('TOOLS=', json.dumps(dict(tools), sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         with:
