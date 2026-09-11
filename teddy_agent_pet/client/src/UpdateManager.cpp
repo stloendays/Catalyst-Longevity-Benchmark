@@ -1,10 +1,11 @@
 #include "UpdateManager.h"
 
-#include <QApplication>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -26,6 +27,7 @@ namespace {
 constexpr auto kReleaseApi = "https://api.github.com/repos/stloendays/Catalyst-Longevity-Benchmark/releases?per_page=20";
 constexpr auto kTagPrefix = "tony-v";
 constexpr auto kMarkerFile = "tony-install-root.marker";
+constexpr auto kManagedFileList = "tony-file-list.txt";
 
 QNetworkRequest githubRequest(const QUrl &url) {
     QNetworkRequest request(url);
@@ -95,18 +97,20 @@ void UpdateManager::checkForUpdates(bool manual) {
     auto *nam = new QNetworkAccessManager(this);
     auto *reply = nam->get(githubRequest(QUrl(QString::fromLatin1(kReleaseApi))));
     connect(reply, &QNetworkReply::finished, this, [this, reply, nam, manual] {
-        const auto guard = std::unique_ptr<QNetworkReply, QScopedPointerDeleteLater>(reply);
         nam->deleteLater();
         busy_ = false;
 
         if(reply->error() != QNetworkReply::NoError) {
             if(manual) QMessageBox::warning(parentWidget_, QStringLiteral("Tony Update"),
                                              QStringLiteral("检查更新失败：%1").arg(reply->errorString()));
+            reply->deleteLater();
             return;
         }
 
+        const QByteArray data = reply->readAll();
+        reply->deleteLater();
         QSettings().setValue(QStringLiteral("updater/last_check_utc"), QDateTime::currentDateTimeUtc());
-        handleReleaseList(reply->readAll(), manual);
+        handleReleaseList(data, manual);
     });
 }
 
@@ -122,6 +126,7 @@ void UpdateManager::handleReleaseList(const QByteArray &data, bool manual) {
     const QVersionNumber current = QVersionNumber::fromString(QCoreApplication::applicationVersion());
     QVersionNumber bestVersion;
     ReleaseInfo best;
+    const int prefixLength = QString::fromLatin1(kTagPrefix).size();
 
     for(const auto &value : doc.array()) {
         const auto release = value.toObject();
@@ -129,10 +134,10 @@ void UpdateManager::handleReleaseList(const QByteArray &data, bool manual) {
         const QString tag = release.value(QStringLiteral("tag_name")).toString();
         if(!tag.startsWith(QString::fromLatin1(kTagPrefix), Qt::CaseInsensitive)) continue;
 
-        const QString versionText = tag.mid(int(strlen(kTagPrefix)));
+        const QString versionText = tag.mid(prefixLength);
         const QVersionNumber version = QVersionNumber::fromString(versionText);
-        if(version.isNull() || QVersionNumber::compare(version, current) <= 0 ||
-           (!bestVersion.isNull() && QVersionNumber::compare(version, bestVersion) <= 0)) continue;
+        if(version.segmentCount() == 0 || QVersionNumber::compare(version, current) <= 0 ||
+           (bestVersion.segmentCount() > 0 && QVersionNumber::compare(version, bestVersion) <= 0)) continue;
 
         QUrl zipUrl;
         QUrl shaUrl;
@@ -258,9 +263,9 @@ void UpdateManager::downloadAndApply(const ReleaseInfo &release, const QString &
             return;
         }
 
-        QString error;
-        if(!stageApplyScript(zipPath, release.version, &error)) {
-            QMessageBox::critical(parentWidget_, QStringLiteral("Tony Update"), error);
+        QString stageError;
+        if(!stageApplyScript(zipPath, release.version, &stageError)) {
+            QMessageBox::critical(parentWidget_, QStringLiteral("Tony Update"), stageError);
             cleanupOwnedUpdateArtifacts();
         }
     });
@@ -268,8 +273,9 @@ void UpdateManager::downloadAndApply(const ReleaseInfo &release, const QString &
 
 bool UpdateManager::stageApplyScript(const QString &zipPath, const QString &targetVersion, QString *error) {
     const QString installDir = QCoreApplication::applicationDirPath();
-    if(!QFileInfo::exists(QDir(installDir).filePath(QString::fromLatin1(kMarkerFile)))) {
-        if(error) *error = QStringLiteral("当前 Tony 不是由正式安装包/更新包部署，缺少安装目录标记。为避免误删其他文件，本次自动更新已取消。请使用新的 Tony 安装包覆盖安装一次。 ");
+    if(!QFileInfo::exists(QDir(installDir).filePath(QString::fromLatin1(kMarkerFile))) ||
+       !QFileInfo::exists(QDir(installDir).filePath(QString::fromLatin1(kManagedFileList)))) {
+        if(error) *error = QStringLiteral("当前 Tony 不是由正式 V0.8.4+ 安装包部署。为避免误删其他文件，本次自动更新已取消。请先使用新的 Tony 安装包覆盖安装一次。 ");
         return false;
     }
 
@@ -286,7 +292,10 @@ bool UpdateManager::stageApplyScript(const QString &zipPath, const QString &targ
 )
 $ErrorActionPreference = 'Stop'
 $marker = Join-Path $InstallDir 'tony-install-root.marker'
-if (-not (Test-Path -LiteralPath $marker)) { throw 'Tony install marker missing; refusing destructive update.' }
+$managedList = Join-Path $InstallDir 'tony-file-list.txt'
+if (-not (Test-Path -LiteralPath $marker) -or -not (Test-Path -LiteralPath $managedList)) {
+    throw 'Tony install metadata missing; refusing destructive update.'
+}
 
 try {
     Wait-Process -Id $TonyPid -ErrorAction SilentlyContinue
@@ -297,13 +306,23 @@ try {
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Expand-Archive -LiteralPath $ZipPath -DestinationPath $stage -Force
 
-    if (-not (Test-Path -LiteralPath (Join-Path $stage 'tony-install-root.marker'))) {
-        throw 'Downloaded package does not contain the Tony install marker.'
+    if (-not (Test-Path -LiteralPath (Join-Path $stage 'tony-install-root.marker')) -or
+        -not (Test-Path -LiteralPath (Join-Path $stage 'tony-file-list.txt'))) {
+        throw 'Downloaded package does not contain Tony install metadata.'
     }
 
-    Get-ChildItem -LiteralPath $InstallDir -Force | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    # Delete only files that the previous Tony package explicitly owned. Inno Setup
+    # uninstaller files and any unrelated files in a custom install directory are preserved.
+    Get-Content -LiteralPath $managedList -ErrorAction Stop | ForEach-Object {
+        $relative = $_.Trim()
+        if ($relative -and -not [System.IO.Path]::IsPathRooted($relative) -and -not $relative.Contains('..')) {
+            $oldPath = Join-Path $InstallDir $relative
+            if (Test-Path -LiteralPath $oldPath -PathType Leaf) {
+                Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
+
     Copy-Item -Path (Join-Path $stage '*') -Destination $InstallDir -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $stage 'tony-install-root.marker') -Destination $InstallDir -Force
 
@@ -316,6 +335,8 @@ try {
         $_.Name -like '*.part' -or $_.Name -like '*.tmp'
     } | Remove-Item -Force -ErrorAction SilentlyContinue
 
+    # The user explicitly requested cleanup of old Tony installers. Restrict deletion
+    # to Tony's exact package naming pattern inside Downloads, never arbitrary files.
     $downloads = Join-Path $env:USERPROFILE 'Downloads'
     if (Test-Path -LiteralPath $downloads) {
         Get-ChildItem -LiteralPath $downloads -File -ErrorAction SilentlyContinue | Where-Object {
