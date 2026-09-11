@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -87,11 +91,31 @@ jobs:
               print(key, json.dumps(safe, ensure_ascii=False))
           PY
 
+          echo '=== TONY MODEL SELECTOR ==='
+          cat /opt/rhocodec-llm/active-model.env 2>/dev/null || true
+          echo '--- systemd metadata ---'
+          systemctl show rhocodec-llm.service \
+            -p FragmentPath -p DropInPaths -p EnvironmentFiles -p ExecStart -p MainPID --no-pager || true
+          echo '--- effective unit ---'
+          systemctl cat rhocodec-llm.service --no-pager || true
+          echo '--- running command line ---'
+          PID=$(systemctl show rhocodec-llm.service -p MainPID --value 2>/dev/null || true)
+          if [ -n "$PID" ] && [ "$PID" != 0 ] && [ -r "/proc/$PID/cmdline" ]; then
+            tr '\0' ' ' < "/proc/$PID/cmdline"
+            echo
+          fi
+          echo '--- retained model files ---'
+          ls -lh /opt/rhocodec-llm/models/Qwen3.5-0.8B-Q4_0.gguf \
+                 /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf 2>/dev/null || true
+
           echo '=== LOCAL MODEL API ==='
           curl -fsS --max-time 8 http://127.0.0.1:18080/v1/models | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d, ensure_ascii=False)[:3000])" || true
 
+          echo '=== TONY GATEWAY ==='
+          curl -fsS --max-time 8 http://127.0.0.1:18790/health | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False))" || true
+
           echo '=== RELEVANT PORTS ==='
-          sudo ss -lntp | grep -E '(:18080|:18789|:8000|:8080|:11931)' || true
+          sudo ss -lntp | grep -E '(:18080|:18789|:18790|:8000|:8080|:11931)' || true
 
           echo '=== RELEVANT SERVICES ==='
           systemctl --no-pager --type=service --state=running | grep -Ei 'openclaw|rhocodec|llama|bear' || true
