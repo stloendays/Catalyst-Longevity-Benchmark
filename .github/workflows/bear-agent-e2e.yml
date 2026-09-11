@@ -9,10 +9,6 @@ on:
 permissions:
   contents: read
 
-# All workflows that restart the Tony gateway or local model share this lock.
-# Do not cancel an in-flight server mutation: a half-finished model/service switch
-# is worse than waiting for the previous job to finish.
-# This suite runs only after the selected runtime profile is fully active.
 concurrency:
   group: tony-server-runtime
   cancel-in-progress: false
@@ -33,100 +29,97 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Exercise real Tony boyfriend conversations
+      - name: Exercise Tony persona core and real streaming model
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           VENV='/home/ubuntu/.local/share/bear-agent/venv'
-          test -x "$VENV/bin/python"
           curl -fsS http://127.0.0.1:18790/health >/tmp/tony-e2e-health.json
           cat /tmp/tony-e2e-health.json
           echo
 
           "$VENV/bin/python" - <<'PY'
-          import asyncio
-          import json
-          import time
-          import websockets
+          import asyncio, json, time, websockets
 
           health=json.load(open('/tmp/tony-e2e-health.json'))
-          expected_model=str(health.get('local_model','')).strip()
-          assert expected_model, health
+          model=str(health.get('local_model','')).strip()
           assert health.get('chat_only') is True, health
           assert health.get('language') == 'English', health
           assert health.get('persona') == 'Paula-boyfriend', health
+          assert health.get('streaming') is True, health
+          assert health.get('persona_core') is True, health
           assert health.get('local_tools_enabled') is False, health
           assert health.get('openclaw_enabled') is False, health
+          assert model, health
 
           async def recv_json(ws, timeout=90):
               return json.loads(await asyncio.wait_for(ws.recv(), timeout))
 
           async def ask(ws, content, label):
               started=time.monotonic()
-              await ws.send(json.dumps({
-                  'type':'message',
-                  'id':f'github-actions-e2e-{label}',
-                  'content':content,
-              }))
+              first_delta=None
+              await ws.send(json.dumps({'type':'message','id':f'e2e-{label}','content':content}))
               events=[]
               while True:
                   msg=await recv_json(ws)
                   events.append(msg)
+                  if msg.get('type') == 'text_delta' and first_delta is None:
+                      first_delta=time.monotonic()-started
                   if msg.get('type') == 'error':
-                      raise RuntimeError(f"{label}: {msg.get('message','Tony Gateway error')}")
+                      raise RuntimeError(f"{label}: {msg.get('message')}")
                   if msg.get('type') == 'final':
                       final=msg
                       break
               elapsed=time.monotonic()-started
               text=str(final.get('content','')).strip()
-              assert text, (label, final)
-              agent=str(final.get('agent',''))
-              assert agent == f'local-tony-chat:{expected_model}', (label, final, expected_model)
-              assert final.get('fallback') is False, (label, final)
-              assert final.get('action'), (label, final)
-              assert final.get('emotion'), (label, final)
-              assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), (label, text)
-              assert len(text.split()) <= 55, (label, text)
-              kinds=[e.get('type') for e in events]
-              assert 'agent_state' in kinds, (label, kinds)
-              assert 'text_delta' in kinds, (label, kinds)
-              print(f'{label}_LATENCY_SEC=', round(elapsed,2))
-              print(f'{label}_TEXT=', text[:500].replace('\n',' '))
-              return text, elapsed
+              assert text, (label,final)
+              assert first_delta is not None, (label,events)
+              assert final.get('fallback') is False, (label,final)
+              assert final.get('action'), (label,final)
+              assert final.get('emotion'), (label,final)
+              assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), (label,text)
+              assert len(text.split()) <= 30, (label,text)
+              print(f'{label}_AGENT=',final.get('agent'))
+              print(f'{label}_TTFT_SEC=',round(first_delta,2))
+              print(f'{label}_FINAL_SEC=',round(elapsed,2))
+              print(f'{label}_TEXT=',text.replace('\n',' ')[:300])
+              return final, first_delta, elapsed
 
           async def main():
-              async with websockets.connect(
-                  'ws://127.0.0.1:18790/agent/ws', ping_interval=20, ping_timeout=20
-              ) as ws:
-                  first=await recv_json(ws, 10)
-                  second=await recv_json(ws, 10)
-                  assert first == {'type':'agent_state','state':'idle'}, first
-                  assert second.get('type') == 'avatar_action', second
+              async with websockets.connect('ws://127.0.0.1:18790/agent/ws',ping_interval=20,ping_timeout=20) as ws:
+                  assert await recv_json(ws,10) == {'type':'agent_state','state':'idle'}
+                  assert (await recv_json(ws,10)).get('type') == 'avatar_action'
 
-                  intro,intro_latency=await ask(ws, 'Hi Tony. Tell me who you are in one short sentence.', 'INTRO')
-                  low=intro.casefold()
-                  assert ('boyfriend' in low) or ('paula' in low) or ('teddy' in low), intro
+                  intro,_,intro_total=await ask(ws,'Hi Tony. Tell me who you are in one short sentence.','IDENTITY')
+                  assert intro.get('agent') == 'tony-persona-core', intro
+                  low=intro['content'].casefold()
+                  assert 'tony' in low and 'boyfriend' in low, intro
+                  assert intro_total < 3, intro_total
 
-                  paula,_=await ask(ws, 'Who am I to you?', 'PAULA_RELATIONSHIP')
-                  low=paula.casefold()
-                  assert ('paula' in low) or ('girlfriend' in low), paula
-                  assert ('boyfriend' in low) or ('girlfriend' in low) or ('love' in low), paula
+                  relation,_,relation_total=await ask(ws,'Who am I to you?','RELATIONSHIP')
+                  assert relation.get('agent') == 'tony-persona-core', relation
+                  low=relation['content'].casefold()
+                  assert 'paula' in low and 'girlfriend' in low, relation
+                  assert relation_total < 3, relation_total
+
+                  casual,ttft,total=await ask(ws,'I missed you today. Say something sweet.','CASUAL_MODEL')
+                  assert casual.get('agent') == f'local-tony-chat:{model}', casual
+                  assert ttft < 45, ttft
+                  assert total < 65, total
 
                   marker='TEDDY-417'
-                  await ask(ws, f'Remember this little secret for my next message: {marker}.', 'MEMORY_SET')
-                  recalled,_=await ask(ws, 'What was the little secret I just asked you to remember?', 'MEMORY_GET')
-                  assert marker.casefold() in recalled.casefold(), recalled
+                  stored,_,_=await ask(ws,f'Remember this little secret for my next message: {marker}.','MEMORY_SET')
+                  assert stored.get('agent') == 'tony-persona-core', stored
+                  recalled,_,_=await ask(ws,'What was the little secret I just asked you to remember?','MEMORY_GET')
+                  assert recalled.get('agent') == 'tony-persona-core', recalled
+                  assert marker.casefold() in recalled['content'].casefold(), recalled
 
-                  if health.get('model_profile') == 'fast':
-                      # Fast mode is the desktop default. Keep a generous CI ceiling so
-                      # temporary CPU contention does not cause flakiness, while still
-                      # catching a regression back to minute-long replies.
-                      assert intro_latency < 45, ('fast-mode latency regression', intro_latency)
-                      print('TONY_FAST_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
-                  else:
-                      print('TONY_QUALITY_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
-                  print('TONY_ACTIVE_MODEL=', expected_model)
-                  print('TONY_ENGLISH_BOYFRIEND_CHAT=PASS')
+                  boundary,_,_=await ask(ws,'Not now, please give me space.','BOUNDARY')
+                  assert boundary.get('agent') == 'tony-persona-core', boundary
+                  assert 'space' in boundary['content'].casefold(), boundary
+
+                  print('TONY_ACTIVE_MODEL=',model)
+                  print('TONY_STREAMING_BOYFRIEND_CHAT=PASS')
 
           asyncio.run(main())
           PY
