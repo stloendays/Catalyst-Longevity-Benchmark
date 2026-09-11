@@ -1,20 +1,67 @@
 #include "PetWindow.h"
-#include <QPainter>
-#include <QMouseEvent>
-#include <QContextMenuEvent>
-#include <QMenu>
-#include <QInputDialog>
-#include <QSettings>
-#include <QScreen>
-#include <QGuiApplication>
+
 #include <QApplication>
-#include <QRandomGenerator>
-#include <QToolTip>
-#include <QFileInfo>
-#include <QDir>
+#include <QContextMenuEvent>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QGuiApplication>
+#include <QInputDialog>
 #include <QLineEdit>
+#include <QMenu>
+#include <QMessageBox>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QRandomGenerator>
+#include <QScreen>
+#include <QSettings>
+#include <QSysInfo>
+#include <QToolTip>
 #include <QtMath>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <wincrypt.h>
+#endif
+
+namespace {
+QString protectSecret(const QString &plain) {
+    if(plain.isEmpty()) return {};
+#ifdef Q_OS_WIN
+    const QByteArray inputBytes=plain.toUtf8();
+    DATA_BLOB input{};
+    input.pbData=reinterpret_cast<BYTE*>(const_cast<char*>(inputBytes.constData()));
+    input.cbData=static_cast<DWORD>(inputBytes.size());
+    DATA_BLOB output{};
+    if(CryptProtectData(&input,L"Tony Desktop Pet",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output)) {
+        const QByteArray encrypted(reinterpret_cast<const char*>(output.pbData),static_cast<int>(output.cbData));
+        LocalFree(output.pbData);
+        return QStringLiteral("dpapi:")+QString::fromLatin1(encrypted.toBase64());
+    }
+#endif
+    return plain;
+}
+
+QString unprotectSecret(const QString &stored) {
+    if(stored.isEmpty()) return {};
+#ifdef Q_OS_WIN
+    if(stored.startsWith(QStringLiteral("dpapi:"))) {
+        const QByteArray encrypted=QByteArray::fromBase64(stored.mid(6).toLatin1());
+        DATA_BLOB input{};
+        input.pbData=reinterpret_cast<BYTE*>(const_cast<char*>(encrypted.constData()));
+        input.cbData=static_cast<DWORD>(encrypted.size());
+        DATA_BLOB output{};
+        if(CryptUnprotectData(&input,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output)) {
+            const QByteArray plain(reinterpret_cast<const char*>(output.pbData),static_cast<int>(output.cbData));
+            LocalFree(output.pbData);
+            return QString::fromUtf8(plain);
+        }
+        return {};
+    }
+#endif
+    return stored;
+}
+}
 
 PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     setWindowTitle("Tony");
@@ -22,14 +69,13 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     setWindowFlags(Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint|Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
-    loadAsset();
+    loadAssets();
     restorePosition();
 
     animTimer_.setInterval(40);
     connect(&animTimer_, &QTimer::timeout, this, &PetWindow::tickAnimation);
     animTimer_.start();
 
-    // Passive personality should feel alive without interrupting the user constantly.
     idleTimer_.setInterval(22000);
     connect(&idleTimer_, &QTimer::timeout, this, [this]{
         if(action_!=Action::Idle || dragging_ || agentState_!="idle") return;
@@ -55,9 +101,6 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
 
     connect(&agent_, &AgentClient::stateChanged, this, [this](const QString &s){
         agentState_=s.trimmed().toLower();
-        // Temporary persona actions (hug, shiver, blush, etc.) take precedence.
-        // Once their timer expires, restoreAgentAction() returns Tony to the
-        // correct long-lived Agent phase instead of incorrectly dropping to idle.
         if(!actionTimer_.isActive()) restoreAgentAction();
     });
     connect(&agent_, &AgentClient::avatarAction, this,
@@ -77,6 +120,20 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
         if(!connected) agentState_="idle";
         tray_.setToolTip(connected ? "Tony · connected" : "Tony · waiting for server");
     });
+    connect(&agent_, &AgentClient::paired, this,
+            [this](const QString &token, const QString &deviceId, const QUrl &endpoint){
+        QSettings s;
+        s.setValue("agent/url",endpoint);
+        s.setValue("agent/token",protectSecret(token));
+        s.setValue("agent/device_id",deviceId);
+        if(endpoint.host()!="127.0.0.1" && endpoint.host()!="localhost") tunnel_.stop();
+        tray_.setToolTip("Tony · paired · connecting");
+        showBubble("配对成功。以后这台电脑可以直接连接 Tony，不需要保存服务器 SSH 私钥。");
+    });
+    connect(&agent_, &AgentClient::pairingFailed, this, [this](const QString &text){
+        tray_.setToolTip("Tony · pairing failed");
+        showBubble(text);
+    });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
         agentState_="error";
         emotion_="worried";
@@ -85,6 +142,8 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     });
     connect(&tunnel_, &SshTunnel::statusChanged, this, [this](const QString &status){
         if(!agent_.connected()) tray_.setToolTip("Tony · "+status);
+        if(status.contains("unavailable",Qt::CaseInsensitive) || status.contains("waiting",Qt::CaseInsensitive))
+            showBubble("SSH 连接没有准备好。你也可以右键 Tony → “连接 / 配对新设备…” 使用 WSS 配对。");
     });
 
     tray_.setToolTip("Tony · Desktop Agent");
@@ -95,24 +154,72 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
 
     QSettings s;
     const auto endpoint=s.value("agent/url","ws://127.0.0.1:18790/agent/ws").toUrl();
-    // The gateway intentionally stays bound to server loopback. When Tony uses
-    // the default localhost endpoint, open a local SSH forward using the user's
-    // existing Windows OpenSSH key/agent. No private key is embedded in the app.
+    const auto token=unprotectSecret(s.value("agent/token","").toString());
     if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();
-    agent_.connectTo(endpoint);
+    agent_.connectTo(endpoint,token);
 }
 
 PetWindow::~PetWindow() {
     tunnel_.stop();
 }
 
-void PetWindow::loadAsset() {
-    QStringList candidates{
-        QCoreApplication::applicationDirPath()+"/assets/tony.png",
-        QCoreApplication::applicationDirPath()+"/tony.png",
+void PetWindow::loadAssets() {
+    const QString appDir=QCoreApplication::applicationDirPath();
+    const QStringList fallbackCandidates{
+        appDir+"/assets/tony.png",
+        appDir+"/tony.png",
         QDir::currentPath()+"/assets/tony.png"
     };
-    for(const auto &p:candidates) if(QFileInfo::exists(p) && pet_.load(p)) return;
+    for(const auto &p:fallbackCandidates) {
+        if(QFileInfo::exists(p) && pet_.load(p)) break;
+    }
+
+    const QStringList stateRoots{
+        appDir+"/assets/states",
+        QDir::currentPath()+"/assets/states"
+    };
+    const QStringList keys{
+        "idle","working","walk","thinking","celebrate","sleep","shiver",
+        "ask_hug","hug","blush","study","adjust_glasses","remove_glasses","wave"
+    };
+    for(const auto &key:keys) {
+        for(const auto &root:stateRoots) {
+            QPixmap sprite;
+            const QString path=root+"/"+key+".png";
+            if(QFileInfo::exists(path) && sprite.load(path)) {
+                stateAssets_.insert(key,sprite);
+                break;
+            }
+        }
+    }
+}
+
+QString PetWindow::assetKeyForAction(Action action) const {
+    switch(action){
+    case Action::Idle:return "idle";
+    case Action::Bob:return "working";
+    case Action::Walk:return "walk";
+    case Action::Think:return "thinking";
+    case Action::Celebrate:return "celebrate";
+    case Action::Sleep:return "sleep";
+    case Action::Shiver:return "shiver";
+    case Action::AskHug:return "ask_hug";
+    case Action::Hug:return "hug";
+    case Action::Blush:return "blush";
+    case Action::Study:return "study";
+    case Action::AdjustGlasses:return "adjust_glasses";
+    case Action::RemoveGlasses:return "remove_glasses";
+    case Action::Wave:return "wave";
+    }
+    return "idle";
+}
+
+const QPixmap *PetWindow::pixmapForAction(Action action) const {
+    auto it=stateAssets_.constFind(assetKeyForAction(action));
+    if(it!=stateAssets_.constEnd()) return &it.value();
+    it=stateAssets_.constFind("idle");
+    if(it!=stateAssets_.constEnd()) return &it.value();
+    return pet_.isNull() ? nullptr : &pet_;
 }
 
 void PetWindow::paintEvent(QPaintEvent*) {
@@ -198,8 +305,8 @@ void PetWindow::paintEvent(QPaintEvent*) {
     p.save();
     p.translate(center);
     p.rotate(rotation);
-    if(!pet_.isNull()) {
-        p.drawPixmap(target.toRect(),pet_);
+    if(const QPixmap *sprite=pixmapForAction(action_)) {
+        p.drawPixmap(target.toRect(),*sprite);
     } else {
         p.setBrush(QColor(246,220,181));
         p.setPen(QPen(QColor(70,45,35),3));
@@ -325,6 +432,9 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto ask=m.addAction("问 Tony…");
     auto hug=m.addAction("抱抱 Tony");
     m.addSeparator();
+    auto pair=m.addAction("连接 / 配对新设备…");
+    auto localSsh=m.addAction("使用本机 SSH 连接");
+    m.addSeparator();
     auto idle=m.addAction("坐好");
     auto walk=m.addAction("散步");
     auto think=m.addAction("思考");
@@ -340,6 +450,8 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto chosen=m.exec(e->globalPos());
     if(chosen==ask) askTony();
     else if(chosen==hug) hugTony();
+    else if(chosen==pair) configureConnection();
+    else if(chosen==localSsh) useLocalSshConnection();
     else if(chosen==idle) setAction(Action::Idle);
     else if(chosen==walk) setAction(Action::Walk,6000);
     else if(chosen==think) setAction(Action::Think,4000);
@@ -360,13 +472,53 @@ void PetWindow::askTony(){
     agentState_="thinking";
     restoreAgentAction();
     if(agent_.connected()) agent_.sendMessage(text);
-    else showBubble("服务器还没连接好，我先在这里等你。\n\n"+text);
+    else showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\n\n"+text);
 }
 
 void PetWindow::hugTony(){
     emotion_="happy";
     setAction(Action::Hug,3000);
     showBubble("抱到啦。*Tony 开心地蹭了蹭* ");
+}
+
+void PetWindow::configureConnection(){
+    QSettings s;
+    bool ok=false;
+    const QString current=s.value("agent/url","wss://tony.example.com/agent/ws").toUrl().toString();
+    const QString endpointText=QInputDialog::getText(
+        this,"连接 Tony","服务器地址（WSS）：",QLineEdit::Normal,current,&ok);
+    if(!ok) return;
+
+    const QUrl endpoint(endpointText.trimmed());
+    const auto scheme=endpoint.scheme().toLower();
+    if(!endpoint.isValid() || endpoint.host().isEmpty() || (scheme!="ws" && scheme!="wss")) {
+        QMessageBox::warning(this,"Tony","地址格式不正确。示例：wss://example.com/agent/ws");
+        return;
+    }
+
+    const QString code=QInputDialog::getText(
+        this,"配对 Tony","输入服务器生成的一次性配对码：",QLineEdit::Normal,{},&ok);
+    if(!ok || code.trimmed().isEmpty()) return;
+
+    const QString defaultName=QSysInfo::machineHostName().isEmpty() ? QString("Tony desktop") : QSysInfo::machineHostName();
+    const QString deviceName=QInputDialog::getText(
+        this,"设备名称","给这台电脑起个名字：",QLineEdit::Normal,defaultName,&ok);
+    if(!ok) return;
+
+    tray_.setToolTip("Tony · pairing…");
+    showBubble("正在安全配对这台电脑…");
+    agent_.pairAndConnect(endpoint,code,deviceName);
+}
+
+void PetWindow::useLocalSshConnection(){
+    QSettings s;
+    const QUrl endpoint("ws://127.0.0.1:18790/agent/ws");
+    s.setValue("agent/url",endpoint);
+    s.remove("agent/token");
+    s.remove("agent/device_id");
+    tunnel_.start();
+    agent_.connectTo(endpoint,{});
+    showBubble("已切回本机 SSH 隧道模式。Tony 不会在程序里保存 SSH 私钥。");
 }
 
 void PetWindow::showBubble(const QString &text){
