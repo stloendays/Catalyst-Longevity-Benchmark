@@ -34,6 +34,12 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
     });
 }
 
+void AgentClient::setLanguage(const QString &language) {
+    const QString n=language.trimmed().toLower();
+    language_=(n.startsWith("zh") || n=="cn") ? "zh" : "en";
+    if(connected()) sendClientHello();
+}
+
 void AgentClient::connectTo(const QUrl &url, const QString &bearerToken) {
     const bool changed = endpoint_ != url || bearerToken_ != bearerToken;
     endpoint_=url;
@@ -62,13 +68,13 @@ QUrl AgentClient::pairingUrlFor(const QUrl &wsUrl) {
 void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, const QString &deviceName) {
     const QUrl pairUrl=pairingUrlFor(wsUrl);
     if(!pairUrl.isValid() || pairUrl.host().isEmpty()) {
-        emit pairingFailed("连接地址不正确，请使用 ws:// 或 wss:// 地址。");
+        emit pairingFailed(language_=="zh" ? "连接地址不正确。" : "The Tony server address is invalid.");
         return;
     }
 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.7");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -83,7 +89,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
         if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300) {
             QString detail=obj.value("detail").toString();
             if(detail.isEmpty()) detail=reply->errorString();
-            emit pairingFailed(QString("配对失败：%1").arg(detail));
+            emit pairingFailed((language_=="zh" ? QString("配对失败：") : QString("Pairing failed: "))+detail);
             reply->deleteLater();
             return;
         }
@@ -91,7 +97,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
         const QString token=obj.value("token").toString().trimmed();
         const QString deviceId=obj.value("device_id").toString().trimmed();
         if(token.isEmpty()) {
-            emit pairingFailed("配对响应里没有设备令牌。");
+            emit pairingFailed(language_=="zh" ? "配对响应中没有设备令牌。" : "The pairing response did not contain a device token.");
             reply->deleteLater();
             return;
         }
@@ -105,7 +111,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.7");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
@@ -115,20 +121,15 @@ bool AgentClient::connected() const { return socket_.state() == QAbstractSocket:
 
 void AgentClient::sendClientHello() {
     if(!connected()) return;
-    QJsonArray capabilities;
-    for(const char *name : {
-            "read_clipboard", "write_clipboard", "capture_screen",
-            "open_url", "open_file", "show_notification"}) {
-        capabilities.append(QString::fromLatin1(name));
-    }
     QJsonObject o{
         {"type","client_hello"},
         {"protocol_version","1"},
         {"client","TonyDesktopPet"},
-        {"client_version","0.7.0"},
+        {"client_version","0.8.0"},
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
-        {"capabilities",capabilities}
+        {"language",language_},
+        {"capabilities",QJsonArray{}}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
@@ -137,11 +138,16 @@ void AgentClient::sendMessage(const QString &text) {
     if(!connected()) {
         if(!outageReported_){
             outageReported_=true;
-            emit errorMessage("Tony Agent is not connected yet.");
+            emit errorMessage(language_=="zh" ? "Tony 还没有连接。" : "Tony is not connected yet.");
         }
         return;
     }
-    QJsonObject o{{"type","message"},{"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"content",text}};
+    QJsonObject o{
+        {"type","message"},
+        {"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        {"content",text},
+        {"language",language_}
+    };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
@@ -181,7 +187,7 @@ void AgentClient::onText(const QString &message) {
         const QString tool=o.value("tool").toString();
         const QJsonObject args=o.value("args").toObject();
         if(requestId.isEmpty() || tool.isEmpty()) {
-            emit errorMessage("Tony 收到了不完整的本地工具请求。");
+            emit errorMessage(language_=="zh" ? "Tony 收到了不完整的本地工具请求。" : "Tony received an incomplete local tool request.");
         } else {
             emit toolRequest(requestId,tool,args);
         }
