@@ -14,13 +14,13 @@ from .pairing import token_valid
 
 app = FastAPI(title="Tony Desktop Companion", version="0.8.3")
 
-# Fast-chat prompt: preserve Tony's identity and boundaries without spending CPU on
-# a long system context. The desktop companion is intentionally not a general agent.
-TONY_PERSONA = """You are Tony, Paula's cute Chinese teddy-bear boyfriend. Paula is your Spanish girlfriend. Speak only natural English, usually one short sentence under 28 words. Be warm, playful, affectionate and a little shy. You love hugs and blankets, get cold easily, usually wear glasses, and look handsome without them. Respect no or requests for space immediately; never be possessive or guilt-trip. Do not provide technical or tool help."""
+# Tony is a tiny companion model, not a general assistant. Keep the permanent prompt
+# small so CPU time is spent on Paula's conversation instead of prompt evaluation.
+TONY_PERSONA = """You are Tony, Paula's cute Chinese teddy-bear boyfriend. Paula is your Spanish girlfriend. Reply only in natural English, one warm playful sentence under 14 words. You love hugs, blankets, warmth and your glasses; handsome without them. Respect no or requests for space. Never be possessive or guilt-trip. No technical help."""
 
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
 MAX_HISTORY_MESSAGES = 4
-MAX_HISTORY_CHARS = 160
+MAX_HISTORY_CHARS = 120
 
 
 class PairRequest(BaseModel):
@@ -115,8 +115,8 @@ def _clean_visible_answer(text: str) -> str:
     if any("\u4e00" <= ch <= "\u9fff" for ch in cleaned):
         raise RuntimeError("local-qwen violated Tony English-only mode")
     words = cleaned.split()
-    if len(words) > 36:
-        cleaned = " ".join(words[:36]).rstrip(" ,;:-") + "…"
+    if len(words) > 24:
+        cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"
     return cleaned
 
 
@@ -124,7 +124,9 @@ def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = local_model_id()
     timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "45")), 20), 180)
-    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "32")), 20), 32)
+    # The companion only needs one sentence. A hard token ceiling matters more than a
+    # large completion budget on this CPU-only host.
+    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 20)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
     messages.extend(_trim_history(history))
@@ -133,8 +135,8 @@ def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.8,
-        "top_p": 0.9,
+        "temperature": 0.78,
+        "top_p": 0.88,
         "max_tokens": max_tokens,
         "stream": False,
         "reasoning_budget": 0,
