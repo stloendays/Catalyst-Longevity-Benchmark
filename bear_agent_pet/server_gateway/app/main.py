@@ -7,9 +7,16 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-app = FastAPI(title="Tony Desktop Agent Gateway", version="0.4.0")
+app = FastAPI(title="Tony Desktop Agent Gateway", version="0.5.0")
 
 TONY_PERSONA = """You are Tony, a teddy-bear-like desktop companion from China who is studying chemistry. You get cold easily, like warm blankets and hot drinks, and love consensual hugs. You have a gentle crush on a Spanish girl named Paula; speak about her warmly and respectfully, never possessively. You usually wear glasses while studying and become playfully confident when you take them off. In casual conversation you may be cute, warm, concise, and use a tiny stage direction sparingly. In chemistry, coding, server, research, or other technical tasks, correctness comes first: distinguish evidence from inference, preserve units and assumptions, and never invent missing results. Match the user's language. Do not output control JSON or animation labels; return only the natural-language answer."""
+
+TECHNICAL_HINTS = (
+    "chemistry", "chemical", "reaction", "catalyst", "molecule", "vasp", "dft", "lammps",
+    "server", "github", "code", "coding", "debug", "deploy", "openclaw", "ssh", "slurm",
+    "python", "c++", "qt", "paper", "dataset", "analysis", "calculate", "calculation",
+    "化学", "反应", "催化", "分子", "计算", "服务器", "代码", "调试", "部署", "论文", "数据",
+)
 
 
 def env_bool(name: str, default: bool) -> bool:
@@ -95,9 +102,18 @@ def build_agent_message(message: str) -> str:
     return f"{TONY_PERSONA}\n\nUser message:\n{message}"
 
 
-async def call_openclaw(message: str, session_key: str) -> str:
+def route_agents(message: str) -> list[str]:
+    """Use cheap local Qwen for character chat; keep the full Agent first for technical work."""
+    text = message.casefold()
+    main_agent = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
+    local_agent = os.getenv("BEAR_LOCAL_AGENT", "local2b").strip() or "local2b"
+    technical = any(hint in text for hint in TECHNICAL_HINTS)
+    ordered = [main_agent, local_agent] if technical else [local_agent, main_agent]
+    return list(dict.fromkeys(agent for agent in ordered if agent))
+
+
+async def call_openclaw_once(message: str, session_key: str, agent: str) -> str:
     oc = os.getenv("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw")
-    agent = os.getenv("BEAR_OPENCLAW_AGENT", "main")
     timeout_seconds = int(os.getenv("BEAR_OPENCLAW_TIMEOUT", "240"))
 
     proc = await asyncio.create_subprocess_exec(
@@ -121,14 +137,14 @@ async def call_openclaw(message: str, session_key: str) -> str:
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise RuntimeError("OpenClaw request timed out")
+        raise RuntimeError(f"{agent}: request timed out")
 
     out = stdout.decode("utf-8", errors="replace").strip()
     err = stderr.decode("utf-8", errors="replace").strip()
     if proc.returncode != 0:
-        raise RuntimeError(err[-1500:] or out[-1500:] or f"OpenClaw exited {proc.returncode}")
+        raise RuntimeError(f"{agent}: {err[-1200:] or out[-1200:] or f'OpenClaw exited {proc.returncode}'}")
     if not out:
-        raise RuntimeError("OpenClaw returned empty output")
+        raise RuntimeError(f"{agent}: OpenClaw returned empty output")
 
     try:
         payload = json.loads(out)
@@ -140,14 +156,27 @@ async def call_openclaw(message: str, session_key: str) -> str:
     return out
 
 
+async def call_openclaw(message: str, session_key: str) -> tuple[str, str, bool]:
+    errors: list[str] = []
+    agents = route_agents(message)
+    for index, agent in enumerate(agents):
+        try:
+            answer = await call_openclaw_once(message, f"{session_key}-{agent}", agent)
+            return answer, agent, index > 0
+        except Exception as exc:
+            errors.append(str(exc))
+    raise RuntimeError(" | ".join(errors)[-2400:] or "No OpenClaw route available")
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Agent Gateway",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "backend": "openclaw-cli",
-        "agent": os.getenv("BEAR_OPENCLAW_AGENT", "main"),
+        "technical_agent": os.getenv("BEAR_OPENCLAW_AGENT", "main"),
+        "local_agent": os.getenv("BEAR_LOCAL_AGENT", "local2b"),
         "tony_persona": env_bool("BEAR_TONY_PERSONA", True),
         "auth_required": env_bool("BEAR_AGENT_REQUIRE_AUTH", True),
     }
@@ -174,7 +203,6 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {"type": "error", "message": "消息不是合法 JSON"})
                 continue
 
-            # Accept the current protocol and the old prototype spelling for compatibility.
             if payload.get("type") not in {"message", "user_message"}:
                 await send_json(ws, {"type": "error", "message": "不支持的消息类型"})
                 continue
@@ -186,8 +214,8 @@ async def agent_ws(ws: WebSocket) -> None:
             await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
             try:
-                answer = await call_openclaw(content, session_key)
-                await send_json(ws, {"type": "agent_state", "state": "working"})
+                answer, used_agent, fallback_used = await call_openclaw(content, session_key)
+                await send_json(ws, {"type": "agent_state", "state": "working", "agent": used_agent, "fallback": fallback_used})
                 for i in range(0, len(answer), 24):
                     await send_json(ws, {"type": "text_delta", "content": answer[i:i + 24]})
                     await asyncio.sleep(0.005)
@@ -198,6 +226,8 @@ async def agent_ws(ws: WebSocket) -> None:
                     "content": answer,
                     "action": final_action,
                     "emotion": final_emotion,
+                    "agent": used_agent,
+                    "fallback": fallback_used,
                 })
                 await send_json(ws, {"type": "agent_state", "state": "idle"})
                 await send_json(ws, {
