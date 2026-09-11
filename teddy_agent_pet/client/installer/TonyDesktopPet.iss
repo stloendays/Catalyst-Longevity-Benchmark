@@ -1,5 +1,5 @@
 #define MyAppName "Tony Desktop Pet"
-#define MyAppVersion "0.8.4"
+#define MyAppVersion "0.8.5"
 #define MyAppPublisher "TonyAgent"
 #define MyAppExeName "TonyDesktopPet.exe"
 
