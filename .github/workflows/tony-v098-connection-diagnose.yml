@@ -22,17 +22,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Probe public DNS TLS and pairing API
+      - name: Probe public ports DNS TLS and pairing API
         continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           HOST='150-158-27-206.sslip.io'
+          IP='150.158.27.206'
           BASE="https://${HOST}"
           echo '=== DNS ==='
           getent ahostsv4 "$HOST" | head -n 3
+          echo '=== public TCP reachability ==='
+          for port in 22 80 443; do
+            if timeout 6 bash -c "</dev/tcp/${IP}/${port}" 2>/dev/null; then
+              echo "PUBLIC_TCP_${port}=OPEN"
+            else
+              echo "PUBLIC_TCP_${port}=BLOCKED_OR_TIMEOUT"
+            fi
+          done
           echo '=== TLS / health ==='
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 "$BASE/health" -o /tmp/public-health.json
+          if ! curl --fail --silent --show-error --connect-timeout 10 --max-time 20 "$BASE/health" -o /tmp/public-health.json; then
+            echo 'PUBLIC_HEALTH=FAIL'
+            exit 0
+          fi
           python3 - <<'PY'
           import json
           d=json.load(open('/tmp/public-health.json', encoding='utf-8'))
@@ -59,11 +71,6 @@ jobs:
           assert int(d.get('expires_at',0)) > int(time.time()), d
           print('PUBLIC_PAIR_REQUEST=PASS')
           print('poll_after_ms=', d.get('poll_after_ms'))
-          PY
-
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/pair-request.json', encoding='utf-8'))
           open('/tmp/status-body.json','w',encoding='utf-8').write(json.dumps({'request_id':d['request_id']}))
           PY
           curl --fail --silent --show-error --connect-timeout 10 --max-time 20 \
@@ -88,7 +95,7 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Inspect gateway and reverse proxy on server
+      - name: Inspect gateway reverse proxy and certificate state
         shell: bash
         run: |
           set -euo pipefail
@@ -97,6 +104,7 @@ jobs:
           ROOT='/home/ubuntu/.local/share/bear-agent'
           APP="$ROOT/app"
           VENV="$ROOT/venv"
+          HOST='150-158-27-206.sslip.io'
           echo '=== services ==='
           systemctl is-active bear-agent-gateway.service
           systemctl is-active rhocodec-llm.service
@@ -107,6 +115,10 @@ jobs:
           if systemctl is-active --quiet caddy; then
             echo 'REVERSE_PROXY=caddy'
             sudo grep -R -n -E '150-158-27-206\.sslip\.io|18790|reverse_proxy' /etc/caddy 2>/dev/null | head -n 40 || true
+            echo '=== caddy recent certificate/network log ==='
+            sudo journalctl -u caddy --no-pager -n 120 | grep -E -i 'certificate|acme|challenge|tls|error|sslip|timeout|dial|connect' | tail -n 80 || true
+            echo '=== caddy certificate files ==='
+            sudo find /var/lib/caddy/.local/share/caddy -maxdepth 8 -type f \( -name '*.crt' -o -name '*.key' \) -printf '%p\n' 2>/dev/null | grep -F "$HOST" | head -n 20 || true
           elif systemctl is-active --quiet nginx; then
             echo 'REVERSE_PROXY=nginx'
             sudo nginx -T 2>/dev/null | grep -n -E '150-158-27-206\.sslip\.io|18790|proxy_pass' | head -n 60 || true
@@ -124,9 +136,10 @@ jobs:
           print('paired_devices=', d.get('paired_devices'))
           PY
 
-          echo '=== local TLS reverse proxy probe ==='
-          curl -kfsS --resolve 150-158-27-206.sslip.io:443:127.0.0.1 --max-time 10 \
-            https://150-158-27-206.sslip.io/health >/tmp/tony-v098-local-public-health.json || true
+          echo '=== local reverse proxy probes ==='
+          curl -sS -D /tmp/http-head -o /dev/null -H "Host: $HOST" --max-time 10 http://127.0.0.1/ || true
+          head -n 8 /tmp/http-head 2>/dev/null || true
+          curl -kfsS --resolve "$HOST:443:127.0.0.1" --max-time 10 "https://$HOST/health" >/tmp/tony-v098-local-public-health.json || true
           if test -s /tmp/tony-v098-local-public-health.json; then
             echo 'LOCAL_TLS_PROXY=PASS'
           else
