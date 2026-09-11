@@ -10,6 +10,7 @@
 #include "SshTunnel.h"
 #include "SpeechBubble.h"
 #include "ChatComposer.h"
+#include "LocalBridge.h"
 
 class QEnterEvent;
 
@@ -64,6 +65,7 @@ private:
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
+    LocalBridge localBridge_;
     SpeechBubble bubble_;
     ChatComposer composer_;
     Action action_{Action::Idle};
