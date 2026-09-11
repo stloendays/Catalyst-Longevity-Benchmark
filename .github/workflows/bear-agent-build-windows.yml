@@ -1,5 +1,4 @@
 name: Build Tony desktop pet
-# Rebuild marker: v0.7.1 calm idle + intermittent blink behavior.
 
 on:
   workflow_dispatch:
@@ -9,7 +8,7 @@ on:
       - '.github/workflows/bear-agent-build-windows.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: tony-windows-${{ github.ref }}
@@ -18,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: jurplel/install-qt-action@v4
@@ -56,8 +55,6 @@ jobs:
           foreach ($required in @('TonyDesktopPet.exe', 'assets/states', 'assets/animations')) {
             if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
           }
-          # validate_state_assets.py already performs the PNG-format checks. Here we
-          # verify that every source asset was packaged byte-for-byte unchanged.
           foreach ($file in Get-ChildItem $source -File -Recurse) {
             $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
             $deployed = Join-Path "$package/assets" $relative
@@ -84,3 +81,57 @@ jobs:
           name: TonyDesktopPet-windows-x64
           path: bear_agent_pet/client/package
           if-no-files-found: error
+
+      - name: Build signed-by-hash update manifest
+        if: github.ref == 'refs/heads/feature/bear-agent-pet'
+        id: update_package
+        shell: pwsh
+        run: |
+          $projectLine = Get-Content bear_agent_pet/client/CMakeLists.txt | Select-String 'project\(TonyDesktopPet VERSION ([0-9.]+)'
+          $version = $projectLine.Matches[0].Groups[1].Value
+          $zip = Join-Path $PWD 'TonyDesktopPet-windows-x64.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path bear_agent_pet/client/package/* -DestinationPath $zip -CompressionLevel Optimal
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item $zip).Length
+          $download = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/tony-desktop-latest/TonyDesktopPet-windows-x64.zip?run=$env:GITHUB_RUN_ID"
+          $manifest = [ordered]@{
+            schema = 1
+            product = 'Tony Desktop Pet'
+            platform = 'windows-x64'
+            version = $version
+            url = $download
+            sha256 = $sha
+            size = $size
+            published_at = (Get-Date).ToUniversalTime().ToString('o')
+            commit = $env:GITHUB_SHA
+            minimum_updater_version = '0.9.0'
+          } | ConvertTo-Json
+          Set-Content -LiteralPath latest.json -Value $manifest -Encoding utf8
+          Write-Host "TONY_UPDATE_MANIFEST=PASS version=$version sha256=$sha size=$size"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Tony automatic update source
+        if: github.ref == 'refs/heads/feature/bear-agent-pet'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release view tony-desktop-latest --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create tony-desktop-latest `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --prerelease `
+              --title 'Tony Desktop Pet automatic update channel' `
+              --notes 'Managed automatically by the Tony Windows build. latest.json is the updater manifest.'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create Tony update release.' }
+          }
+          gh release upload tony-desktop-latest `
+            TonyDesktopPet-windows-x64.zip latest.json `
+            --repo $env:GITHUB_REPOSITORY `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish Tony update assets.' }
+          Write-Host "TONY_UPDATE_PUBLISH=PASS version=${{ steps.update_package.outputs.version }} sha256=${{ steps.update_package.outputs.sha256 }}"
