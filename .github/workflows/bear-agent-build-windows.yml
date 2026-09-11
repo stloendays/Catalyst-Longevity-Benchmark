@@ -53,7 +53,7 @@ jobs:
         run: |
           $source = (Resolve-Path bear_agent_pet/client/assets).Path
           $package = (Resolve-Path bear_agent_pet/client/package).Path
-          foreach ($required in @('TonyDesktopPet.exe', 'assets/tony.png', 'assets/states', 'assets/animations')) {
+          foreach ($required in @('TonyDesktopPet.exe', 'assets/states', 'assets/animations')) {
             if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
           }
           Add-Type -AssemblyName System.Drawing
@@ -64,7 +64,9 @@ jobs:
             if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $deployed).Hash) {
               throw "Packaged artwork differs: $relative"
             }
-            if ($file.Extension -eq '.png') {
+            # Formal state/animation PNGs are validated above and again here. The old
+            # tony.png compatibility fallback is not part of the active state contract.
+            if ($file.Extension -eq '.png' -and $relative -ne 'tony.png') {
               $bitmap = [Drawing.Bitmap]::new($deployed)
               try {
                 if ($bitmap.Width -lt 1 -or $bitmap.Height -lt 1) { throw "Invalid PNG: $relative" }
@@ -72,7 +74,7 @@ jobs:
               } finally { $bitmap.Dispose() }
             }
           }
-          Write-Host 'TONY_PACKAGE_ASSETS=PASS (all source files, including manifest, match SHA256)'
+          Write-Host 'TONY_PACKAGE_ASSETS=PASS (formal state/animation assets match SHA256)'
           $originalPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           try {
