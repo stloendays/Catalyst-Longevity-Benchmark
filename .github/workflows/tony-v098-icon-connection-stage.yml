@@ -105,14 +105,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- \
-            bear_agent_pet/client/src/TonyVersion.rc.in \
-            bear_agent_pet/client/src/main.cpp \
-            bear_agent_pet/client/src/PetWindowV7.cpp \
-            bear_agent_pet/client/src/SettingsDialog.cpp \
-            bear_agent_pet/client/src/AgentClient.h \
-            bear_agent_pet/client/src/AgentClient.cpp \
-            bear_agent_pet/client/installer/TonyDesktopPet.iss
+          git add -- bear_agent_pet/client/src/TonyVersion.rc.in bear_agent_pet/client/src/main.cpp bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/SettingsDialog.cpp bear_agent_pet/client/src/AgentClient.h bear_agent_pet/client/src/AgentClient.cpp bear_agent_pet/client/installer/TonyDesktopPet.iss
           if (git diff --cached --quiet) {
             Write-Host 'No staged source changes; guarded patch was already committed.'
             exit 0
