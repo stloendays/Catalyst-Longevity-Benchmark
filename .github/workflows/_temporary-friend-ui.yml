@@ -1,0 +1,84 @@
+name: Patch Tony friend UI
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_temporary-friend-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+      - name: Patch English-first friend experience
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('bear_agent_pet/client/src/PetWindowV7.cpp')
+          s=p.read_text()
+
+          marker='''QString unprotectSecret(const QString &stored) {'''
+          # Add localization helpers just before the namespace closes.
+          old='''    return stored;\n}\n}\n\nPetWindow::PetWindow(QWidget *parent)'''
+          new='''    return stored;\n}\n\nQString uiLanguage() {\n    const QString n=QSettings().value("ui/language","en").toString().trimmed().toLower();\n    return (n.startsWith("zh") || n=="cn") ? QStringLiteral("zh") : QStringLiteral("en");\n}\n\nQString uiText(const QString &en, const QString &zh) {\n    return uiLanguage()=="zh" ? zh : en;\n}\n\nQString defaultPublicEndpoint() {\n    return QStringLiteral("wss://150-158-27-206.sslip.io/agent/ws");\n}\n}\n\nPetWindow::PetWindow(QWidget *parent)'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          old='''    loadAssets();\n    restorePosition();\n\n    // Calm desktop-companion cadence'''
+          new='''    loadAssets();\n    restorePosition();\n\n    QSettings initialSettings;\n    if(!initialSettings.contains("ui/language")) initialSettings.setValue("ui/language","en");\n    agent_.setLanguage(uiLanguage());\n    composer_.setLanguage(uiLanguage());\n\n    // Calm desktop-companion cadence'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          s=s.replace('''        if(!answer_.isEmpty()) showBubble(answer_,8000);\n        if(!actionTimer_.isActive()) setAction(Action::Celebrate,1800);''', '''        if(!answer_.isEmpty()) showBubble(answer_,8000);\n        if(!actionTimer_.isActive()) restoreAgentAction();''',1)
+
+          s=s.replace('''            setAction(Action::Wave,1500);''','''            setAction(Action::Wave,900);''',1)
+
+          s=s.replace('''        setAction(Action::Celebrate,2400);\n        tray_.setToolTip("Tony · paired · connecting");\n        showBubble("配对成功。这台电脑现在可以安全连接 Tony。",5200);''','''        setAction(Action::Celebrate,1400);\n        tray_.setToolTip("Tony · paired · connecting");\n        showBubble(uiText("Paired. Tony will remember this computer.","配对成功。Tony 会记住这台电脑。"),5200);''',1)
+
+          s=s.replace('''            showBubble("SSH 连接没有准备好。也可以右键 Tony → “连接 / 配对新设备…” 使用 WSS 配对。",6500);''','''            QSettings cs;\n            const auto active=cs.value("agent/url",defaultPublicEndpoint()).toUrl();\n            if(active.host()=="127.0.0.1" || active.host()=="localhost")\n                showBubble(uiText("Local SSH tunnel is not ready. Open Settings → Connection to return to the public server.","本机 SSH 隧道尚未就绪。可在设置 → 连接中切回公网服务器。"),6500);''',1)
+
+          old='''    QSettings s;\n    const auto endpoint=s.value("agent/url","ws://127.0.0.1:18790/agent/ws").toUrl();\n    const auto token=unprotectSecret(s.value("agent/token","").toString());\n    if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();\n    agent_.connectTo(endpoint,token);'''
+          new='''    QSettings s;\n    QUrl endpoint=s.value("agent/url",defaultPublicEndpoint()).toUrl();\n    const auto token=unprotectSecret(s.value("agent/token","").toString());\n    const bool preferLocal=s.value("connection/prefer_local_ssh",false).toBool();\n    if((endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") && !preferLocal) {\n        endpoint=QUrl(s.value("agent/public_url",defaultPublicEndpoint()).toString());\n        s.setValue("agent/url",endpoint);\n    }\n    if(!token.isEmpty()) {\n        if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();\n        agent_.connectTo(endpoint,token);\n    } else {\n        tray_.setToolTip("Tony · not paired");\n        showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);\n    }'''
+          assert old in s
+          s=s.replace(old,new,1)
+
+          start=s.index('void PetWindow::contextMenuEvent(QContextMenuEvent *e){')
+          end=s.index('\nvoid PetWindow::askTony(){', start)
+          context='''void PetWindow::contextMenuEvent(QContextMenuEvent *e){\n    QMenu m;\n    auto ask=m.addAction(uiText("Chat with Tony…","和 Tony 聊天…"));\n    auto hug=m.addAction(uiText("Hug Tony","抱抱 Tony"));\n    auto paula=m.addAction(uiText("Paula is here","Paula 来了"));\n    m.addSeparator();\n    auto pair=m.addAction(agent_.connected() ? uiText("Reconnect / pair another computer…","重新连接 / 配对其他电脑…") : uiText("Connect to Tony…","连接 Tony…"));\n\n    auto *settings=m.addMenu(uiText("Settings","设置"));\n    auto *languageMenu=settings->addMenu(uiText("Language","语言"));\n    auto english=languageMenu->addAction("English");\n    auto chinese=languageMenu->addAction("简体中文");\n    english->setCheckable(true); chinese->setCheckable(true);\n    english->setChecked(uiLanguage()=="en"); chinese->setChecked(uiLanguage()=="zh");\n\n    auto *connectionMenu=settings->addMenu(uiText("Connection","连接"));\n    auto serverAddress=connectionMenu->addAction(uiText("Server address…","服务器地址…"));\n    auto localSsh=connectionMenu->addAction(uiText("Use local SSH tunnel (advanced)","使用本机 SSH 隧道（高级）"));\n\n    auto *actions=m.addMenu(uiText("Tony actions","Tony 动作"));\n    auto idle=actions->addAction(uiText("Sit quietly","安静坐好"));\n    auto walk=actions->addAction(uiText("Take a short walk","散一小会儿步"));\n    auto glasses=actions->addAction(uiText("Adjust glasses","扶一下眼镜"));\n    auto noGlasses=actions->addAction(uiText("Take off glasses","摘掉眼镜"));\n    auto cold=actions->addAction(uiText("Feeling cold","有点冷"));\n    auto sleep=actions->addAction(uiText("Sleep","睡觉"));\n\n    m.addSeparator();\n    auto quit=m.addAction(uiText("Quit Tony","退出 Tony"));\n\n    auto chosen=m.exec(e->globalPos());\n    if(chosen==ask) askTony();\n    else if(chosen==hug) hugTony();\n    else if(chosen==paula) { emotion_="bashful"; setAction(Action::BlushWave,2600); showBubble(uiText("Paula? Wait—do I look okay?","Paula？等等——我看起来还好吗？"),4200); }\n    else if(chosen==pair) configureConnection();\n    else if(chosen==english || chosen==chinese) {\n        const QString lang=(chosen==chinese) ? "zh" : "en";\n        QSettings().setValue("ui/language",lang);\n        agent_.setLanguage(lang);\n        composer_.setLanguage(lang);\n        showBubble(lang=="zh" ? "语言已切换为简体中文。" : "Language changed to English.",3200);\n    }\n    else if(chosen==serverAddress) {\n        QSettings s; bool ok=false;\n        const QString current=s.value("agent/public_url",defaultPublicEndpoint()).toString();\n        const QString value=QInputDialog::getText(this,uiText("Tony server","Tony 服务器"),uiText("WSS server address:","WSS 服务器地址："),QLineEdit::Normal,current,&ok).trimmed();\n        if(ok && !value.isEmpty()) {\n            const QUrl u(value);\n            if(u.isValid() && u.scheme().toLower()=="wss" && !u.host().isEmpty()) {\n                s.setValue("agent/public_url",u.toString());\n                s.setValue("agent/url",u);\n                s.setValue("connection/prefer_local_ssh",false);\n                const QString token=unprotectSecret(s.value("agent/token","").toString());\n                if(!token.isEmpty()) agent_.connectTo(u,token);\n                showBubble(uiText("Server address saved.","服务器地址已保存。"),3200);\n            } else QMessageBox::warning(this,"Tony",uiText("Please enter a valid wss:// address.","请输入有效的 wss:// 地址。"));\n        }\n    }\n    else if(chosen==localSsh) useLocalSshConnection();\n    else if(chosen==idle) setAction(Action::Idle);\n    else if(chosen==walk) setAction(Action::Walk,3000);\n    else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);\n    else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);\n    else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }\n    else if(chosen==sleep) setAction(Action::Sleep);\n    else if(chosen==quit) qApp->quit();\n}\n'''
+          s=s[:start]+context+s[end:]
+
+          s=s.replace('''        showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\\n\\n"+prompt,6500);''','''        showBubble(uiText("Tony is not connected yet. Right-click me and choose Connect to Tony.\\n\\n", "Tony 还没有连接。右键点我并选择“连接 Tony”。\\n\\n")+prompt,6500);''',1)
+
+          s=s.replace('''void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,3000); showBubble("抱到啦。Tony 开心地蹭了蹭。",4300); }''','''void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }''',1)
+
+          start=s.index('void PetWindow::configureConnection(){')
+          end=s.index('\nvoid PetWindow::useLocalSshConnection(){', start)
+          configure='''void PetWindow::configureConnection(){\n    QSettings s; bool ok=false;\n    const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());\n    if(!endpoint.isValid() || endpoint.scheme().toLower()!="wss" || endpoint.host().isEmpty()) {\n        QMessageBox::warning(this,"Tony",uiText("The server address in Settings is invalid.","设置中的服务器地址无效。"));\n        return;\n    }\n    const QString code=QInputDialog::getText(this,uiText("Connect to Tony","连接 Tony"),uiText("Friend code:","好友码："),QLineEdit::Normal,{},&ok);\n    if(!ok || code.trimmed().isEmpty()) return;\n    const QString deviceName=QSysInfo::machineHostName().isEmpty() ? QString("Tony desktop") : QSysInfo::machineHostName();\n    s.setValue("connection/prefer_local_ssh",false);\n    emotion_="curious"; setAction(Action::Think,0); tray_.setToolTip("Tony · pairing…");\n    showBubble(uiText("Connecting securely…","正在安全连接…"),0);\n    agent_.pairAndConnect(endpoint,code,deviceName);\n}\n'''
+          s=s[:start]+configure+s[end:]
+
+          start=s.index('void PetWindow::useLocalSshConnection(){')
+          end=s.index('\nvoid PetWindow::showBubble', start)
+          local='''void PetWindow::useLocalSshConnection(){\n    QSettings s; const QUrl endpoint("ws://127.0.0.1:18790/agent/ws");\n    s.setValue("agent/url",endpoint);\n    s.setValue("connection/prefer_local_ssh",true);\n    const QString token=unprotectSecret(s.value("agent/token","").toString());\n    if(token.isEmpty()) {\n        showBubble(uiText("Pair this computer first, then local SSH can reuse the same device token.","请先配对这台电脑，本机 SSH 会复用同一个设备令牌。"),5200);\n        return;\n    }\n    tunnel_.start(); agent_.connectTo(endpoint,token); emotion_="friendly";\n    showBubble(uiText("Using the local SSH tunnel. Keep the tunnel available while Tony is running.","已切换到本机 SSH 隧道。使用 Tony 时请保持隧道可用。"),5200);\n}\n'''
+          s=s[:start]+local+s[end:]
+
+          p.write_text(s)
+
+          cm=Path('bear_agent_pet/client/CMakeLists.txt')
+          c=cm.read_text()
+          c=c.replace('project(TonyDesktopPet VERSION 0.7.0 LANGUAGES CXX)','project(TonyDesktopPet VERSION 0.8.0 LANGUAGES CXX)')
+          cm.write_text(c)
+          PY
+
+      - name: Commit friend mode UI
+        run: |
+          git config user.name Tony
+          git config user.email 157110190+stloendays@users.noreply.github.com
+          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/CMakeLists.txt
+          git commit -m "Add English-first one-code friend connection UI"
+          git push origin HEAD:feature/bear-agent-pet
