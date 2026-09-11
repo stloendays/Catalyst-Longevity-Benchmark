@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(TonyDesktopPet VERSION 0.7.1 LANGUAGES CXX)
+project(TonyDesktopPet VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -16,6 +16,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/AgentClient.h
     src/LocalBridge.cpp
     src/LocalBridge.h
+    src/TonyBehaviorEngine.cpp
+    src/TonyBehaviorEngine.h
     src/SshTunnel.cpp
     src/SshTunnel.h
 )

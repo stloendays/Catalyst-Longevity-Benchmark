@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QCoreApplication>
+#include <QCursor>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
@@ -89,6 +90,11 @@ PetWindow::PetWindow(QWidget *parent)
 
     QSettings initialSettings;
     if(!initialSettings.contains("ui/language")) initialSettings.setValue("ui/language","en");
+    behavior_.restore(initialSettings);
+    lifeClock_.start();
+    activityClock_.start();
+    pressClock_.invalidate();
+    rapidClickClock_.invalidate();
     agent_.setLanguage(uiLanguage());
     composer_.setLanguage(uiLanguage());
 
@@ -116,6 +122,18 @@ PetWindow::PetWindow(QWidget *parent)
 
     actionTimer_.setSingleShot(true);
     connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);
+
+    hoverTimer_.setSingleShot(true);
+    connect(&hoverTimer_, &QTimer::timeout, this, [this]{
+        if(hovered_ && !dragging_ && action_==Action::Idle && agentState_=="idle" && !composer_.isVisible()) {
+            emotion_="curious";
+            setAction(Action::Curious,1100);
+        }
+    });
+
+    lifeTimer_.setInterval(5000);
+    connect(&lifeTimer_, &QTimer::timeout, this, &PetWindow::tickLife);
+    lifeTimer_.start();
 
     connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){
         submitTonyPrompt(text);
@@ -224,6 +242,8 @@ PetWindow::PetWindow(QWidget *parent)
 }
 
 PetWindow::~PetWindow() {
+    QSettings lifeSettings;
+    behavior_.save(lifeSettings);
     composer_.dismiss();
     bubble_.dismiss();
     tunnel_.stop();
@@ -241,7 +261,8 @@ void PetWindow::loadAssets() {
     }
 
     const QStringList keys{
-        "idle","working","walk","thinking","celebrate","sleep","shiver",
+        "idle","curious","pet","carried","land","dizzy","stretch","yawn",
+        "working","walk","thinking","celebrate","sleep","shiver",
         "ask_hug","hug","blush","blush_wave","study","adjust_glasses","remove_glasses","wave"
     };
 
@@ -286,6 +307,13 @@ void PetWindow::loadAssets() {
 QString PetWindow::assetKeyForAction(Action action) const {
     switch(action){
     case Action::Idle:return "idle";
+    case Action::Curious:return "curious";
+    case Action::Pet:return "pet";
+    case Action::Carried:return "carried";
+    case Action::Land:return "land";
+    case Action::Dizzy:return "dizzy";
+    case Action::Stretch:return "stretch";
+    case Action::Yawn:return "yawn";
     case Action::Bob:return "working";
     case Action::Walk:return "walk";
     case Action::Think:return "thinking";
@@ -306,6 +334,13 @@ QString PetWindow::assetKeyForAction(Action action) const {
 
 int PetWindow::frameStrideForAction(Action action) const {
     switch(action) {
+    case Action::Carried:return 3;
+    case Action::Land:return 3;
+    case Action::Dizzy:return 2;
+    case Action::Curious:return 5;
+    case Action::Pet:return 4;
+    case Action::Stretch:return 5;
+    case Action::Yawn:return 7;
     case Action::Shiver:return 2;
     case Action::Walk:return 3;
     case Action::Celebrate:return 3;
@@ -370,6 +405,13 @@ void PetWindow::paintEvent(QPaintEvent*) {
         // Normal desktop state is intentionally motionless. The face sprite
         // handles the occasional blink; no perpetual bobbing or breathing zoom.
         break;
+    case Action::Curious: dy=-1; rotation=1.4*qSin(t*.45); scale=1.008; break;
+    case Action::Pet: dy=2; scale=1.018+0.006*qSin(t*.75); rotation=1.0*qSin(t*.5); break;
+    case Action::Carried: dy=-7; scale=.985; rotation=2.2*qSin(t*.9); break;
+    case Action::Land: dy=-qAbs(int(5*qSin(t*1.55))); scale=1.0+0.012*qSin(t*1.55); break;
+    case Action::Dizzy: dx=int(3*qSin(t*2.2)); rotation=4.5*qSin(t*1.7); scale=.985; break;
+    case Action::Stretch: dy=-qAbs(int(3*qSin(t*.8))); scale=1.02+0.012*qSin(t*.65); break;
+    case Action::Yawn: dy=2; rotation=-2.0; scale=.992+0.006*qSin(t*.35); break;
     case Action::Bob: dy=int(2*qSin(t*.65)); scale=1.0+0.003*qSin(t*.45); break;
     case Action::Walk: dy=-qAbs(int(qSin(t*1.25))); rotation=.7*qSin(t*1.25); break;
     case Action::Think: rotation=-.7+.35*qSin(t*.45); scale=1.0+0.003*qSin(t*.4); break;
@@ -386,10 +428,22 @@ void PetWindow::paintEvent(QPaintEvent*) {
     case Action::Wave: dy=-qAbs(int(3*qSin(t*1.6))); rotation=3.0*qSin(t*1.8); break;
     }
 
+    // Tony notices the cursor even while idle. With no dedicated eye sprite yet,
+    // a tiny body lean gives the impression that he is following the user.
+    if(!dragging_ && (action_==Action::Idle || action_==Action::Curious)) {
+        const QPoint cursorLocal=mapFromGlobal(QCursor::pos());
+        const QRect interest(-70,-70,width()+140,height()+140);
+        if(interest.contains(cursorLocal)) {
+            const qreal nx=qBound(-1.0,(cursorLocal.x()-width()/2.0)/(width()/2.0),1.0);
+            dx += qRound(nx*3.0);
+            rotation += nx*1.5;
+        }
+    }
+
     p.save();
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(0,0,0,38));
-    const qreal shadowScale=(action_==Action::Celebrate ? .78 : action_==Action::Walk ? .9 : 1.0);
+    const qreal shadowScale=(action_==Action::Celebrate ? .78 : action_==Action::Carried ? .62 : action_==Action::Walk ? .9 : 1.0);
     const qreal sw=112*shadowScale;
     p.drawEllipse(QRectF(width()/2.0-sw/2.0,196,sw,13));
     p.restore();
@@ -450,6 +504,11 @@ void PetWindow::restoreAgentAction(){
 
 PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
     const auto n=name.trimmed().toLower();
+    if(n=="curious" || n=="look_mouse") return Action::Curious;
+    if(n=="pet" || n=="petted") return Action::Pet;
+    if(n=="dizzy") return Action::Dizzy;
+    if(n=="stretch") return Action::Stretch;
+    if(n=="yawn") return Action::Yawn;
     if(n=="working") return Action::Bob;
     if(n=="walk" || n=="walking") return Action::Walk;
     if(n=="thinking" || n=="think" || n=="pose_tough" || n=="scratch_head" || n=="embarrassed") return Action::Think;
@@ -501,30 +560,135 @@ void PetWindow::scheduleBlink(){
 }
 
 void PetWindow::scheduleIdleMoment(){
-    // Autonomous gestures are now rare; the usual state is simply sitting and blinking.
-    idleTimer_.start(QRandomGenerator::global()->bounded(90000,210001));
+    // Check often enough to feel alive, but the behavior engine returns None most of the time.
+    idleTimer_.start(QRandomGenerator::global()->bounded(22000,55001));
 }
 
 void PetWindow::runIdleMoment(){
     if(action_!=Action::Idle || dragging_ || agentState_!="idle" || composer_.isVisible()) {
         scheduleIdleMoment(); return;
     }
-    const int hour=QTime::currentTime().hour();
-    const bool night=(hour>=23 || hour<7);
-    const int r=QRandomGenerator::global()->bounded(100);
-    // Most checks intentionally do nothing. Tony should feel present, not restless.
-    if(night && r<10) { emotion_="sleepy"; setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,9501)); }
-    else if(r<4) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble("Brrr... stay warm with me?",3600); }
-    else if(r<8) { emotion_="hopeful"; setAction(Action::AskHug,2600); showBubble("Can I have a tiny hug?",3600); }
-    else if(r<12) { emotion_="friendly"; setAction(Action::Wave,1400); }
-    else if(r<15) { emotion_="focused"; setAction(Action::AdjustGlasses,1600); }
-    else if(r<17) { emotion_="playful"; setAction(Action::Walk,3200); }
+
+    using Impulse=TonyBehaviorEngine::Impulse;
+    const auto impulse=behavior_.chooseIdleImpulse(QTime::currentTime().hour());
+    switch(impulse) {
+    case Impulse::None:
+        break;
+    case Impulse::Sleep:
+        emotion_="sleepy";
+        setAction(Action::Sleep,QRandomGenerator::global()->bounded(7000,12001));
+        break;
+    case Impulse::Shiver:
+        emotion_="cold";
+        setAction(Action::Shiver,2300);
+        if(QRandomGenerator::global()->bounded(100)<55)
+  showBubble(uiText("Brrr... could I borrow a little warmth?","有点冷……可以借我一点温度吗？"),3600);
+        break;
+    case Impulse::AskHug:
+        emotion_="hopeful";
+        setAction(Action::AskHug,2800);
+        if(QRandomGenerator::global()->bounded(100)<65)
+  showBubble(uiText("Can I have a tiny hug?","可以抱我一下吗？就一下。"),3600);
+        break;
+    case Impulse::Wave:
+        emotion_="friendly"; setAction(Action::Wave,1300); break;
+    case Impulse::Walk:
+        emotion_="playful"; setAction(Action::Walk,3200); break;
+    case Impulse::Study:
+        emotion_="focused"; setAction(Action::Study,3000); break;
+    case Impulse::AdjustGlasses:
+        emotion_="focused"; setAction(Action::AdjustGlasses,1500); break;
+    case Impulse::Stretch:
+        emotion_="content"; setAction(Action::Stretch,1800); break;
+    case Impulse::Yawn:
+        emotion_="sleepy"; setAction(Action::Yawn,2200); break;
+    case Impulse::RemoveGlasses:
+        emotion_="confident"; setAction(Action::RemoveGlasses,2400); break;
+    }
     scheduleIdleMoment();
+}
+
+void PetWindow::tickLife(){
+    if(!lifeClock_.isValid()) lifeClock_.start();
+    const qint64 elapsed=qMin<qint64>(lifeClock_.restart(),60000);
+    const QPoint cursorLocal=mapFromGlobal(QCursor::pos());
+    const QRect nearbyArea(-90,-90,width()+180,height()+180);
+    const bool recentInteraction=activityClock_.isValid() && activityClock_.elapsed()<60000;
+    const bool userNearby=nearbyArea.contains(cursorLocal) || recentInteraction;
+    behavior_.tick(elapsed,agentState_!="idle",userNearby,QTime::currentTime().hour());
+
+    if(++lifeSaveTicks_>=12) {
+        QSettings s;
+        behavior_.save(s);
+        lifeSaveTicks_=0;
+    }
+    if((action_==Action::Idle || action_==Action::Curious) && nearbyArea.contains(cursorLocal)) update();
+}
+
+void PetWindow::markInteraction(){
+    if(activityClock_.isValid()) activityClock_.restart();
+    else activityClock_.start();
+}
+
+bool PetWindow::isHeadHit(const QPoint &localPos) const {
+    return QRect(width()/2-72,18,144,118).contains(localPos);
+}
+
+void PetWindow::handleTap(const QPoint &localPos){
+    markInteraction();
+    if(!rapidClickClock_.isValid() || rapidClickClock_.elapsed()>850) rapidClicks_=0;
+    rapidClickClock_.restart();
+    ++rapidClicks_;
+
+    if(rapidClicks_>=4) {
+        rapidClicks_=0;
+        emotion_="dizzy";
+        setAction(Action::Dizzy,1450);
+        showBubble(uiText("Whoa... tiny paws need a second.","晕乎乎的……让我缓一下。"),2800);
+        return;
+    }
+
+    if(isHeadHit(localPos)) {
+        behavior_.onPetted();
+        emotion_="happy";
+        setAction(Action::Pet,900);
+        if(QRandomGenerator::global()->bounded(100)<24)
+  showBubble(uiText("Hehe. Head pats accepted.","嘿嘿，摸头批准。"),2400);
+    } else {
+        emotion_="curious";
+        setAction(Action::Curious,850);
+    }
+}
+
+void PetWindow::showLifeStatus(){
+    const auto s=behavior_.snapshot();
+    if(s.mood=="cold") {
+        emotion_="cold"; setAction(Action::Shiver,1900);
+        showBubble(uiText("I'm a little cold. A hug would fix that.","我有一点冷。抱一下大概就好了。"),4200);
+    } else if(s.mood=="sleepy") {
+        emotion_="sleepy"; setAction(Action::Yawn,1900);
+        showBubble(uiText("A little sleepy... but I'm still here.","有一点困……不过我还在陪你。"),4200);
+    } else if(s.mood=="cuddly") {
+        emotion_="hopeful"; setAction(Action::AskHug,2200);
+        showBubble(uiText("I may be in hug-request mode.","我现在可能处于求抱抱模式。"),4200);
+    } else if(s.mood=="curious") {
+        emotion_="curious"; setAction(Action::Curious,1600);
+        showBubble(uiText("Curious. What are we working on?","有点好奇。我们今天在研究什么？"),4200);
+    } else if(s.mood=="happy") {
+        emotion_="happy"; setAction(Action::Wave,1400);
+        showBubble(uiText("Pretty happy. Staying close.","挺开心的。就在你旁边待着。"),4200);
+    } else {
+        emotion_="content"; setAction(Action::Stretch,1500);
+        showBubble(uiText("I'm good. Just keeping you company.","我挺好的，就在桌面上陪你。"),4200);
+    }
 }
 
 QString PetWindow::actionName() const {
     switch(action_){
-    case Action::Idle:return "idle"; case Action::Bob:return "working"; case Action::Walk:return "walking";
+    case Action::Idle:return "idle"; case Action::Curious:return "curious"; case Action::Pet:return "being petted";
+    case Action::Carried:return "being carried"; case Action::Land:return "landing"; case Action::Dizzy:return "dizzy";
+    case Action::Stretch:return "stretching"; case Action::Yawn:return "yawning";
+    case Action::Bob:return "working"; case Action::Walk:return "walking";
     case Action::Think:return "thinking"; case Action::Celebrate:return "celebrating"; case Action::Sleep:return "sleeping";
     case Action::Shiver:return "shivering"; case Action::AskHug:return "asking for a hug"; case Action::Hug:return "hugging";
     case Action::Blush:return "blushing"; case Action::BlushWave:return "blushing for Paula"; case Action::Study:return "studying";
@@ -534,31 +698,87 @@ QString PetWindow::actionName() const {
 }
 
 void PetWindow::enterEvent(QEnterEvent*){
-    // Hovering should not make Tony constantly wave. Stay calm and let the blink timer work.
-    if(agentState_=="idle" && action_==Action::Idle && !blinkTimer_.isActive()) scheduleBlink();
+    hovered_=true;
+    if(agentState_=="idle" && action_==Action::Idle) {
+        if(!blinkTimer_.isActive()) scheduleBlink();
+        hoverTimer_.start(700);
+    }
+    update();
 }
-void PetWindow::leaveEvent(QEvent*){}
+
+void PetWindow::leaveEvent(QEvent*){
+    hovered_=false;
+    hoverTimer_.stop();
+    update();
+}
 
 void PetWindow::mousePressEvent(QMouseEvent *e){
-    if(e->button()==Qt::LeftButton){ dragging_=true; dragOffset_=e->globalPosition().toPoint()-frameGeometry().topLeft(); }
+    if(e->button()!=Qt::LeftButton) return;
+    mouseDown_=true;
+    dragging_=false;
+    dragTravel_=0;
+    pressGlobal_=e->globalPosition().toPoint();
+    lastDragGlobal_=pressGlobal_;
+    dragOffset_=pressGlobal_-frameGeometry().topLeft();
+    pressClock_.restart();
+    markInteraction();
 }
+
 void PetWindow::mouseMoveEvent(QMouseEvent *e){
-    if(dragging_ && (e->buttons()&Qt::LeftButton)){
-        move(e->globalPosition().toPoint()-dragOffset_);
-        action_=Action::Bob; frame_=0;
-        const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
-        bubble_.follow(anchor); composer_.follow(anchor); update();
+    const QPoint global=e->globalPosition().toPoint();
+    if(mouseDown_ && (e->buttons()&Qt::LeftButton)) {
+        if(!dragging_ && (global-pressGlobal_).manhattanLength()>=QApplication::startDragDistance()) {
+  dragging_=true;
+  actionTimer_.stop();
+  action_=Action::Carried;
+  frame_=0;
+  lastDragGlobal_=global;
+        }
+        if(dragging_) {
+  dragTravel_ += (global-lastDragGlobal_).manhattanLength();
+  lastDragGlobal_=global;
+  move(global-dragOffset_);
+  const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+  bubble_.follow(anchor);
+  composer_.follow(anchor);
+        }
+    }
+    update();
+}
+
+void PetWindow::mouseReleaseEvent(QMouseEvent *e){
+    if(e->button()!=Qt::LeftButton || !mouseDown_) return;
+    mouseDown_=false;
+    if(dragging_) {
+        const bool rough=dragTravel_>850 || (pressClock_.isValid() && pressClock_.elapsed()<450 && dragTravel_>360);
+        behavior_.onDragged(rough);
+        dragging_=false;
+        savePosition();
+        if(rough) {
+  emotion_="dizzy";
+  setAction(Action::Dizzy,1500);
+  showBubble(uiText("Fast trip. My curls are still catching up.","飞得有点快，我的卷毛还没反应过来。"),3200);
+        } else {
+  emotion_="playful";
+  setAction(Action::Land,650);
+        }
+    } else {
+        handleTap(e->position().toPoint());
     }
 }
-void PetWindow::mouseReleaseEvent(QMouseEvent *e){
-    if(e->button()==Qt::LeftButton){ dragging_=false; savePosition(); restoreAgentAction(); }
+
+void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){
+    if(e->button()==Qt::LeftButton) {
+        rapidClicks_=0;
+        askTony();
+    }
 }
-void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){ if(e->button()==Qt::LeftButton) askTony(); }
 
 void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     QMenu m;
     auto ask=m.addAction(uiText("Chat with Tony…","和 Tony 聊天…"));
     auto hug=m.addAction(uiText("Hug Tony","抱抱 Tony"));
+    auto feeling=m.addAction(uiText("How are you feeling?","Tony 现在怎么样？"));
     auto paula=m.addAction(uiText("Paula is here","Paula 来了"));
     m.addSeparator();
     auto pair=m.addAction(agent_.connected() ? uiText("Reconnect / pair another computer…","重新连接 / 配对其他电脑…") : uiText("Connect to Tony…","连接 Tony…"));
@@ -588,7 +808,8 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto chosen=m.exec(e->globalPos());
     if(chosen==ask) askTony();
     else if(chosen==hug) hugTony();
-    else if(chosen==paula) { emotion_="bashful"; setAction(Action::BlushWave,2600); showBubble(uiText("Paula? Wait—do I look okay?","Paula？等等——我看起来还好吗？"),4200); }
+    else if(chosen==feeling) showLifeStatus();
+    else if(chosen==paula) { behavior_.onPaulaMention(); markInteraction(); emotion_="bashful"; setAction(Action::BlushWave,2600); showBubble(uiText("Paula? Wait—do I look okay?","Paula？等等——我看起来还好吗？"),4200); }
     else if(chosen==pair) configureConnection();
     else if(chosen==english || chosen==chinese) {
         const QString lang=(chosen==chinese) ? "zh" : "en";
@@ -624,6 +845,7 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
 }
 
 void PetWindow::askTony(){
+    markInteraction();
     bubble_.dismiss(); emotion_="curious";
     if(agentState_=="idle") setAction(Action::Think,0);
     composer_.openAt(mapToGlobal(QPoint(width()/2,40)));
@@ -632,6 +854,9 @@ void PetWindow::askTony(){
 void PetWindow::submitTonyPrompt(const QString &text){
     const QString prompt=text.trimmed();
     if(prompt.isEmpty()) return;
+    markInteraction();
+    behavior_.onConversation();
+    if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
     answer_.clear(); emotion_="curious"; agentState_="thinking"; restoreAgentAction();
     if(agent_.connected()) agent_.sendMessage(prompt);
     else {
@@ -640,7 +865,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
     }
 }
 
-void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
+void PetWindow::hugTony(){ markInteraction(); behavior_.onHugged(); emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
 
 void PetWindow::configureConnection(){
     QSettings s; bool ok=false;

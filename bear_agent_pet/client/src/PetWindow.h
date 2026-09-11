@@ -1,16 +1,18 @@
 #pragma once
-#include <QWidget>
+#include <QElapsedTimer>
+#include <QHash>
 #include <QPixmap>
-#include <QTimer>
 #include <QPoint>
 #include <QSystemTrayIcon>
-#include <QHash>
+#include <QTimer>
 #include <QVector>
+#include <QWidget>
 #include "AgentClient.h"
-#include "SshTunnel.h"
-#include "SpeechBubble.h"
 #include "ChatComposer.h"
 #include "LocalBridge.h"
+#include "SpeechBubble.h"
+#include "SshTunnel.h"
+#include "TonyBehaviorEngine.h"
 
 class QEnterEvent;
 
@@ -30,7 +32,8 @@ protected:
     void leaveEvent(QEvent*) override;
 private:
     enum class Action {
-        Idle, Bob, Walk, Think, Celebrate, Sleep,
+        Idle, Curious, Pet, Carried, Land, Dizzy, Stretch, Yawn,
+        Bob, Walk, Think, Celebrate, Sleep,
         Shiver, AskHug, Hug, Blush, BlushWave, Study,
         AdjustGlasses, RemoveGlasses, Wave
     };
@@ -44,9 +47,14 @@ private:
     Action baseActionForAgentState() const;
     void restoreAgentAction();
     void tickAnimation();
+    void tickLife();
     void scheduleBlink();
     void scheduleIdleMoment();
     void runIdleMoment();
+    void markInteraction();
+    void handleTap(const QPoint &localPos);
+    bool isHeadHit(const QPoint &localPos) const;
+    void showLifeStatus();
     void askTony();
     void submitTonyPrompt(const QString &text);
     void hugTony();
@@ -64,20 +72,34 @@ private:
     QTimer blinkTimer_;
     QTimer idleTimer_;
     QTimer actionTimer_;
+    QTimer lifeTimer_;
+    QTimer hoverTimer_;
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
     LocalBridge localBridge_;
     SpeechBubble bubble_;
     ChatComposer composer_;
+    TonyBehaviorEngine behavior_;
     Action action_{Action::Idle};
     QPoint dragOffset_;
     QPoint basePos_;
+    QPoint pressGlobal_;
+    QPoint lastDragGlobal_;
+    QElapsedTimer lifeClock_;
+    QElapsedTimer activityClock_;
+    QElapsedTimer pressClock_;
+    QElapsedTimer rapidClickClock_;
     bool dragging_{false};
+    bool mouseDown_{false};
+    bool hovered_{false};
     bool idleBlinking_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
+    int dragTravel_{0};
+    int rapidClicks_{0};
+    int lifeSaveTicks_{0};
     QString answer_;
     QString emotion_{"neutral"};
     QString agentState_{"idle"};
