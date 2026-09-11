@@ -11,6 +11,7 @@ class AgentClient : public QObject {
 public:
     explicit AgentClient(QObject *parent=nullptr);
     void connectTo(const QUrl &url, const QString &bearerToken={});
+    void requestDevicePairing(const QUrl &wsUrl, const QString &deviceName);
     void pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, const QString &deviceName);
     void sendMessage(const QString &text);
     bool sendOperatorLogBatch(const QString &batchId,
@@ -31,6 +32,7 @@ signals:
     void textDelta(const QString &text);
     void answerFinished();
     void connectionChanged(bool connected);
+    void pairingCodeReady(const QString &code, qint64 expiresAtEpochSeconds);
     void paired(const QString &token, const QString &deviceId, const QUrl &endpoint);
     void pairingFailed(const QString &text);
     void toolRequest(const QString &requestId, const QString &tool, const QJsonObject &args);
@@ -38,14 +40,22 @@ signals:
 private slots:
     void onText(const QString &message);
     void reconnect();
+    void pollDevicePairing();
 private:
     static QUrl pairingUrlFor(const QUrl &wsUrl);
+    static QUrl pairingRequestUrlFor(const QUrl &wsUrl);
+    static QUrl pairingStatusUrlFor(const QUrl &wsUrl);
     void sendClientHello();
 
     QWebSocket socket_;
     QNetworkAccessManager network_;
     QUrl endpoint_;
     QTimer reconnectTimer_;
+    QTimer pairingPollTimer_;
+    QUrl pairingWsUrl_;
+    QString pairingRequestId_;
+    qint64 pairingExpiresAt_{0};
+    bool pairingPollInFlight_{false};
     QString bearerToken_;
     QString language_{"en"};
     bool outageReported_{false};
