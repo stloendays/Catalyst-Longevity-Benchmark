@@ -6,10 +6,10 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
-from .main import PairRequest, action_for_text, authorized, call_backend, send_json
+from .main import PairRequest, action_for_text, authorized, call_backend, local_model_id, send_json
 from .pairing import consume_pairing_code, paired_device_count
 
-app = FastAPI(title="Tony Desktop Companion", version="0.8.1")
+app = FastAPI(title="Tony Desktop Companion", version="0.8.2")
 
 
 async def stream_answer(ws: WebSocket, answer: str, used_agent: str, fallback_used: bool) -> None:
@@ -43,12 +43,14 @@ async def stream_answer(ws: WebSocket, answer: str, used_agent: str, fallback_us
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    model = local_model_id()
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "0.8.1",
+        "version": "0.8.2",
         "backend": "local-qwen-chat-only",
-        "local_model": "qwen3.5-2b-q4",
+        "local_model": model,
+        "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
         "language": "English",
         "persona": "Paula-boyfriend",
         "chat_only": True,
@@ -106,9 +108,10 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "0.8.1",
+                    "server_version": "0.8.2",
                     "accepted_capabilities": [],
                     "chat_only": True,
+                    "local_model": local_model_id(),
                 })
                 continue
 
@@ -143,8 +146,6 @@ async def agent_ws(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     finally:
-        # Session history is process-memory only and is naturally short-lived. main.py
-        # also bounds it to six messages so it cannot grow without limit.
         try:
             from .main import SESSION_HISTORY
             SESSION_HISTORY.pop(session_key, None)
