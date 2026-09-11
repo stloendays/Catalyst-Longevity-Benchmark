@@ -1,0 +1,59 @@
+name: Tony v0.9.8 TLS recover
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - .github/workflows/tony-v098-tls-recover.yml
+
+permissions:
+  contents: read
+
+jobs:
+  recover-tls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TONY_SERVER_IP: 150.158.27.206
+      TONY_HOST: 150-158-27-206.sslip.io
+    steps:
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$RUNNER_TEMP/tony_server_key"
+          chmod 600 "$RUNNER_TEMP/tony_server_key"
+          echo "TONY_SSH_KEY=$RUNNER_TEMP/tony_server_key" >> "$GITHUB_ENV"
+
+      - name: Inspect Caddy TLS configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" \
+            "echo '=== CADDYFILE ==='; sudo cat /etc/caddy/Caddyfile; echo '=== SERVICE ENV ==='; sudo systemctl show caddy -p Environment --no-pager; echo '=== STAGING REFERENCES ==='; sudo grep -R -n -E 'acme-staging|CADDY_ACME_CA' /etc/caddy /etc/systemd/system /etc/default /etc/environment 2>/dev/null || true; echo '=== LISTENERS ==='; sudo ss -lntp | grep -E ':(80|443)\\b' || true"
+
+      - name: Restart Caddy and force certificate retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" \
+            "sudo systemctl restart caddy; sleep 12; sudo systemctl --no-pager --full status caddy | head -n 35; echo '=== RECENT TLS LOGS ==='; sudo journalctl -u caddy -n 100 --no-pager | grep -E 'certificate|obtaining|challenge|tls.obtain|error|serving|renew' || true"
+
+      - name: Verify public HTTP and HTTPS from outside server
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== TCP ==='
+          timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/80" && echo PUBLIC_TCP_80=OPEN
+          timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/443" && echo PUBLIC_TCP_443=OPEN
+          echo '=== HTTP ==='
+          curl -sS -D - --max-time 15 -o /dev/null "http://$TONY_HOST/health"
+          echo '=== HTTPS ==='
+          curl -fsS --max-time 20 "https://$TONY_HOST/health" | tee /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          echo PUBLIC_HTTPS_HEALTH=PASS
