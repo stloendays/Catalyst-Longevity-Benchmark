@@ -3,10 +3,8 @@
 #include <QEvent>
 #include <QKeySequence>
 #include <QMouseEvent>
-#include <QSettings>
 #include <QShortcut>
 #include <QTimer>
-#include <QToolButton>
 
 #include "AppLogger.h"
 #include "PetWindow.h"
@@ -101,41 +99,21 @@ int main(int argc, char *argv[]) {
     QObject::connect(&updater, &UpdateManager::updateDownloaded,
                      &pet, &PetWindow::syncOperatorLogsForUpdate);
 
-    // A small, quiet settings affordance on the pet itself. It avoids another
-    // tray icon and keeps the settings page discoverable without changing Tony's calm idle behavior.
-    QToolButton settingsButton(&pet);
-    settingsButton.setText(QStringLiteral("⚙"));
-    settingsButton.setToolTip(QStringLiteral("Settings"));
-    settingsButton.setFixedSize(26, 26);
-    settingsButton.move(pet.width() - settingsButton.width() - 5, 5);
-    settingsButton.setCursor(Qt::PointingHandCursor);
-    settingsButton.setStyleSheet(QStringLiteral(
-        "QToolButton { background: rgba(20,20,20,95); color: white; border: 0; border-radius: 13px; font-size: 14px; }"
-        "QToolButton:hover { background: rgba(20,20,20,150); }"));
-    settingsButton.show();
-
     const auto showSettings = [&settingsDialog]{
         AppLogger::recordOperatorEvent(QStringLiteral("settings_open"));
         settingsDialog.show();
         settingsDialog.raise();
         settingsDialog.activateWindow();
     };
-    QObject::connect(&settingsButton, &QToolButton::clicked, &app, showSettings);
-
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
 
     updater.scheduleStartupCheck();
 
-    // Trusted-friend flow:
-    // - first launch: automatically ask only for the reusable friend code;
-    // - after pairing: the per-device token is protected by Windows DPAPI;
-    // - later launches: PetWindow connects automatically and AgentClient reconnects on outages.
-    QSettings settings;
-    if(settings.value("agent/token").toString().trimmed().isEmpty()) {
-        QTimer::singleShot(700, &pet, &PetWindow::configureConnection);
-    }
+    // First launch stays non-modal. PetWindow already shows a short connection
+    // hint; the friend-code dialog opens only when the user explicitly chooses
+    // Connect to Tony. This keeps the pet visible instead of covering it at startup.
 
     const int result = app.exec();
     qInfo() << "Tony Desktop Pet exiting" << result;

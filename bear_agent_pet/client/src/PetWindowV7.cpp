@@ -379,15 +379,11 @@ void PetWindow::paintEvent(QPaintEvent*) {
     p.drawEllipse(QRectF(width()/2.0-sw/2.0,196,sw,13));
     p.restore();
 
-    const QPointF center(width()/2.0+dx,108+dy);
     p.save();
-    p.translate(center);
-    p.rotate(rotation);
     if(const QPixmap *sprite=pixmapForAction(action_); sprite && !sprite->isNull()) {
         // Fit the visible (alpha) subject, not the square PNG canvas. Different
         // source files can have different transparent padding; drawing every
-        // canvas into a hard-coded 200x200 box made the character jump in size
-        // and could push limbs outside the tiny desktop window.
+        // canvas into a hard-coded box made the character jump in size.
         const QImage image=sprite->toImage().convertToFormat(QImage::Format_ARGB32);
         int minX=image.width(), minY=image.height(), maxX=-1, maxY=-1;
         for(int y=0; y<image.height(); ++y) {
@@ -407,16 +403,30 @@ void PetWindow::paintEvent(QPaintEvent*) {
                        .intersected(QRect(0,0,image.width(),image.height()));
         }
 
-        const qreal safeMotionScale=qBound<qreal>(0.965,scale,1.02);
+        const qreal maxMotionScale=(action_==Action::Hug) ? 1.04 : 1.025;
+        const qreal safeMotionScale=qBound<qreal>(0.965,scale,maxMotionScale);
         const qreal maxW=184.0*safeMotionScale;
         const qreal maxH=194.0*safeMotionScale;
         const qreal fit=qMin(maxW/qMax(1,source.width()),
                              maxH/qMax(1,source.height()));
         const QSizeF drawSize(source.width()*fit,source.height()*fit);
+
+        // All poses share one desktop ground line. Wide/short poses such as
+        // sleep, study and working used to be vertically centered and appeared
+        // to float 10-22 px above their shadow.
+        const qreal groundY=205.0+dy;
+        const QPointF spriteCenter(width()/2.0+dx,
+                                   groundY-drawSize.height()/2.0);
+        p.translate(spriteCenter);
+        p.rotate(rotation);
+        if(action_==Action::Walk && walkDirection_<0) p.scale(-1.0,1.0);
+
         const QRectF target(-drawSize.width()/2.0,-drawSize.height()/2.0,
                             drawSize.width(),drawSize.height());
         p.drawPixmap(target,*sprite,QRectF(source));
     } else {
+        p.translate(QPointF(width()/2.0+dx,108+dy));
+        p.rotate(rotation);
         p.setBrush(QColor(246,220,181));
         p.setPen(QPen(QColor(70,45,35),3));
         p.drawEllipse(QRectF(-75,-75,150,150));
