@@ -9,6 +9,13 @@ on:
 permissions:
   contents: read
 
+# All workflows that restart the Tony gateway or local model share this lock.
+# Do not cancel an in-flight server mutation: a half-finished model/service switch
+# is worse than waiting for the previous job to finish.
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -110,6 +117,10 @@ jobs:
                   assert marker.casefold() in recalled.casefold(), recalled
 
                   if health.get('model_profile') == 'fast':
+                      # Fast mode is the desktop default. Keep a generous CI ceiling so
+                      # temporary CPU contention does not cause flakiness, while still
+                      # catching a regression back to minute-long replies.
+                      assert intro_latency < 45, ('fast-mode latency regression', intro_latency)
                       print('TONY_FAST_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
                   else:
                       print('TONY_QUALITY_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
