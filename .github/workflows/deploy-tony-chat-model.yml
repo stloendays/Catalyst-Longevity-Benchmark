@@ -1,0 +1,129 @@
+name: Deploy Tony fast chat model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/deploy-tony-chat-model.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-tony-fast-chat-model
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Download and activate Qwen3.5 0.8B Q4
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/opt/rhocodec-llm'
+          MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
+          TMP="$MODEL.part"
+          URL='https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
+          ALIAS='tony-qwen3.5-0.8b-q4'
+
+          mkdir -p "$ROOT/models"
+          if [ ! -s "$MODEL" ]; then
+            echo 'Downloading the official ggml-org Qwen3.5-0.8B Q4_0 GGUF...'
+            curl -fL -C - --retry 12 --retry-all-errors --retry-delay 4 \
+              --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
+              -o "$TMP" "$URL"
+            test "$(stat -c '%s' "$TMP")" -gt 500000000
+            mv -f "$TMP" "$MODEL"
+          fi
+
+          echo '=== MODEL FILE ==='
+          ls -lh "$MODEL"
+          sha256sum "$MODEL"
+
+          test -x "$ROOT/bin/llama-server"
+          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<UNIT
+          [Unit]
+          Description=Tony local Qwen3.5 0.8B Q4 chat server
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=$ROOT/bin
+          Environment=HOME=/home/ubuntu
+          Environment=LD_LIBRARY_PATH=$ROOT/bin
+          ExecStart=$ROOT/bin/llama-server -m $MODEL -a $ALIAS --host 127.0.0.1 --port 18080 -c 1024 -t 4 -b 64 -ub 64 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          Restart=on-failure
+          RestartSec=3
+          TimeoutStartSec=120
+          LimitNOFILE=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable rhocodec-llm.service
+          sudo systemctl restart rhocodec-llm.service
+
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-fast-models.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          cat /tmp/tony-fast-models.json
+          grep -q "$ALIAS" /tmp/tony-fast-models.json
+
+          echo '=== LATENCY SMOKE ==='
+          python3 - <<'PY'
+          import json, time, urllib.request
+          payload={
+            'model':'tony-qwen3.5-0.8b-q4',
+            'messages':[
+              {'role':'system','content':'You are Tony, Paula\'s cute teddy-bear-like boyfriend. Speak only short natural English.'},
+              {'role':'user','content':'Paula says: I missed you. Reply in one short sentence.\n/no_think'}
+            ],
+            'temperature':0.8,
+            'top_p':0.9,
+            'max_tokens':32,
+            'stream':False,
+            'reasoning_budget':0,
+            'chat_template_kwargs':{'enable_thinking':False},
+          }
+          req=urllib.request.Request('http://127.0.0.1:18080/v1/chat/completions',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST')
+          start=time.monotonic()
+          with urllib.request.urlopen(req,timeout=45) as r:
+              data=json.load(r)
+          elapsed=time.monotonic()-start
+          text=str(((data.get('choices') or [{}])[0].get('message') or {}).get('content') or '').strip()
+          assert text, data
+          assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), text
+          print('TONY_FAST_MODEL=PASS')
+          print('LATENCY_SEC=',round(elapsed,2))
+          print('SAMPLE=',text[:240].replace('\n',' '))
+          PY
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
