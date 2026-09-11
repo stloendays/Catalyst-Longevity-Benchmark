@@ -7,6 +7,9 @@
 #include <QHash>
 #include "AgentClient.h"
 #include "SshTunnel.h"
+#include "SpeechBubble.h"
+
+class QEnterEvent;
 
 class PetWindow : public QWidget {
     Q_OBJECT
@@ -20,6 +23,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent*) override;
     void mouseDoubleClickEvent(QMouseEvent*) override;
     void contextMenuEvent(QContextMenuEvent*) override;
+    void enterEvent(QEnterEvent*) override;
+    void leaveEvent(QEvent*) override;
 private:
     enum class Action {
         Idle, Bob, Walk, Think, Celebrate, Sleep,
@@ -35,11 +40,13 @@ private:
     Action baseActionForAgentState() const;
     void restoreAgentAction();
     void tickAnimation();
+    void scheduleIdleMoment();
+    void runIdleMoment();
     void askTony();
     void hugTony();
     void configureConnection();
     void useLocalSshConnection();
-    void showBubble(const QString &text);
+    void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
     void savePosition();
     QString actionName() const;
@@ -52,6 +59,7 @@ private:
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
+    SpeechBubble bubble_;
     Action action_{Action::Idle};
     QPoint dragOffset_;
     QPoint basePos_;
