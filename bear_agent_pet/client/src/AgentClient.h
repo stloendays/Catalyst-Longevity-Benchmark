@@ -13,6 +13,9 @@ public:
     void connectTo(const QUrl &url, const QString &bearerToken={});
     void pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, const QString &deviceName);
     void sendMessage(const QString &text);
+    bool sendOperatorLogBatch(const QString &batchId,
+                              const QString &targetVersion,
+                              const QByteArray &jsonl);
     void sendToolResult(const QString &requestId,
                         const QString &tool,
                         bool ok,

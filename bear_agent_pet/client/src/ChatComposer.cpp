@@ -1,7 +1,10 @@
 #include "ChatComposer.h"
 
+#include "AppLogger.h"
+
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -145,6 +148,10 @@ void ChatComposer::keyPressEvent(QKeyEvent *event) {
 void ChatComposer::submitCurrent() {
     const QString text=edit_->text().trimmed();
     if(text.isEmpty()) return;
+    AppLogger::recordOperatorEvent(
+        QStringLiteral("chat_submit"),
+        text,
+        QJsonObject{{QStringLiteral("language"), language_}});
     edit_->clear();
     hide();
     emit submitted(text);

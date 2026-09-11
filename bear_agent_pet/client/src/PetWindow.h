@@ -25,6 +25,7 @@ public slots:
     // so a trusted friend only has to enter the reusable friend code once.
     void configureConnection();
     void applyUiLanguage(const QString &language);
+    void syncOperatorLogsForUpdate(const QString &targetVersion);
 
 protected:
     void paintEvent(QPaintEvent*) override;

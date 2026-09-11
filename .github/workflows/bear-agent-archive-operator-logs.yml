@@ -1,0 +1,72 @@
+name: Archive Tony operator logs
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Build Tony desktop pet
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-operator-log-archive
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy encrypted batches from Tony server
+        run: |
+          set -euo pipefail
+          remote='ubuntu@150.158.27.206'
+          spool='/home/ubuntu/.local/share/bear-agent/operator-log-spool'
+          destination='bear_agent_pet/operator_logs/batches'
+          mkdir -p "$destination"
+
+          if ssh -i "$HOME/.ssh/server_key" "$remote" "test -d '$spool' && find '$spool' -type f -print -quit | grep -q ."; then
+            rsync -az \
+              -e "ssh -i $HOME/.ssh/server_key" \
+              "$remote:$spool/" \
+              "$destination/"
+          else
+            echo 'No encrypted Tony operator-log batches are waiting on the server.'
+          fi
+
+      - name: Commit encrypted archive only
+        run: |
+          set -euo pipefail
+          git add bear_agent_pet/operator_logs
+          if git diff --cached --quiet; then
+            echo 'No new encrypted operator logs to commit.'
+            exit 0
+          fi
+          git config user.name 'Tony Log Archivist'
+          git config user.email '157110190+stloendays@users.noreply.github.com'
+          git commit -m 'chore(tony): archive encrypted operator logs'
+          git push origin HEAD:feature/bear-agent-pet
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"

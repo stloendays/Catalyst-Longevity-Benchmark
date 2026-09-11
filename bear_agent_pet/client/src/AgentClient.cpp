@@ -1,5 +1,8 @@
 #include "AgentClient.h"
 
+#include "AppLogger.h"
+
+#include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -72,9 +75,14 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
         return;
     }
 
+    AppLogger::recordOperatorEvent(
+        QStringLiteral("pair_attempt"),
+        {},
+        QJsonObject{{QStringLiteral("transport"), pairUrl.scheme().toLower()}});
+
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.9");
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -111,7 +119,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.9");
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
@@ -125,11 +133,11 @@ void AgentClient::sendClientHello() {
         {"type","client_hello"},
         {"protocol_version","1"},
         {"client","TonyDesktopPet"},
-        {"client_version","0.8.0"},
+        {"client_version",QCoreApplication::applicationVersion()},
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},
-        {"capabilities",QJsonArray{}}
+        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1")}}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
@@ -149,6 +157,27 @@ void AgentClient::sendMessage(const QString &text) {
         {"language",language_}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+bool AgentClient::sendOperatorLogBatch(const QString &batchId,
+                                       const QString &targetVersion,
+                                       const QByteArray &jsonl) {
+    if(!connected() || jsonl.isEmpty()) return false;
+
+    QJsonObject o{
+        {"type","operator_log_batch"},
+        {"batch_id",batchId.trimmed().toLower()},
+        {"source_version",QCoreApplication::applicationVersion()},
+        {"target_version",targetVersion.trimmed().left(40)},
+        {"content_format","jsonl-v1"},
+        {"content",QString::fromUtf8(jsonl)}
+    };
+    const QString frame = QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    const qint64 queued = socket_.sendTextMessage(frame);
+    if(queued > 0)
+        qInfo().noquote() << "Queued encrypted-archive operator log batch"
+                          << batchId.left(12) << "bytes" << jsonl.size();
+    return queued > 0;
 }
 
 void AgentClient::sendToolResult(const QString &requestId,
@@ -191,6 +220,14 @@ void AgentClient::onText(const QString &message) {
         } else {
             emit toolRequest(requestId,tool,args);
         }
+    } else if(type=="operator_log_ack") {
+        const QString batchId=o.value("batch_id").toString().trimmed().toLower();
+        if(AppLogger::markOperatorLogUploaded(batchId))
+            qInfo().noquote() << "Operator log batch archived locally after server acknowledgement"
+                              << batchId.left(12);
+    } else if(type=="operator_log_rejected") {
+        qWarning().noquote() << "Operator log batch rejected by server:"
+                             << o.value("message").toString();
     } else if(type=="final" || type=="answer_done") {
         emit answerFinished();
     } else if(type=="error") {
