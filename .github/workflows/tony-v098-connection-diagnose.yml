@@ -20,8 +20,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 15
     env:
-      TONY_WSS_URL: wss://150-158-27-206.sslip.io/agent/ws
-      TONY_HTTPS_BASE: https://150-158-27-206.sslip.io
+      TONY_WSS_URL: wss://150.158.27.206/agent/ws
+      TONY_HTTPS_BASE: https://150.158.27.206
       TONY_SERVER_IP: 150.158.27.206
       TONY_E2E_DEVICE: Tony v0.9.8 Windows AgentClient E2E
     steps:
@@ -193,7 +193,7 @@ jobs:
               Start-Sleep -Milliseconds 500
               $out = if (Test-Path $stdout) { Get-Content $stdout -Raw } else { '' }
               if (-not $approved) {
-                $m = [regex]::Match($out, '(?m)^PAIRING_CODE=([A-Z2-9]{4}-[A-Z2-9]{4})\s*$')
+                $m = [regex]::Match($out, '(?m)^PAIRING_CODE=([A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4})\s*$')
                 if ($m.Success) {
                   $code = $m.Groups[1].Value
                   Write-Host "WINDOWS_HTTPS_PAIR_REQUEST=PASS code=$code"
@@ -242,5 +242,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          if (-not $env:TONY_SSH_KEY -or -not (Test-Path $env:TONY_SSH_KEY)) {
+            Write-Host 'SERVER_POSTCHECK=SKIPPED_NO_KEY'
+            exit 0
+          }
           $remote = "systemctl is-active bear-agent-gateway.service; systemctl is-active rhocodec-llm.service; curl -fsS http://127.0.0.1:18790/health"
           & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $remote
