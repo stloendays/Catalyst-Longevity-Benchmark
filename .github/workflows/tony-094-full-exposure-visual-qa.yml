@@ -1,0 +1,116 @@
+name: Tony 0.9.4 full-exposure visual QA
+
+on:
+  push:
+    branches:
+      - qa/tony-094-full-exposure-visual
+    paths:
+      - '.github/workflows/tony-094-full-exposure-visual-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-qa:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact Tony 0.9.4 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download tony-v0.9.4 `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern TonyDesktopPet-0.9.4-windows-x64.zip `
+            --clobber
+          Expand-Archive TonyDesktopPet-0.9.4-windows-x64.zip -DestinationPath runtime -Force
+          if (-not (Test-Path runtime/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing from 0.9.4 release' }
+          if (Test-Path runtime/VERSION.txt) {
+            $v = (Get-Content runtime/VERSION.txt -Raw).Trim()
+            if ($v -ne '0.9.4') { throw "Expected Tony 0.9.4, got $v" }
+          }
+
+      - name: Capture first-run and every major pose
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path visual-qa | Out-Null
+
+          function Save-Desktop([string]$path) {
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bmp.Save((Join-Path $PWD $path), [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              $gfx.Dispose()
+              $bmp.Dispose()
+            }
+            Write-Host "TONY_VISUAL_CAPTURE=$path size=$($bounds.Width)x$($bounds.Height)"
+          }
+
+          function Run-TonyCapture([string]$label, [string]$action = '') {
+            if ([string]::IsNullOrWhiteSpace($action)) {
+              Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+            } else {
+              $env:TONY_VISUAL_ACTION = $action
+            }
+
+            $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
+            $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+            try {
+              Start-Sleep -Milliseconds 2400
+              if ($proc.HasExited) { throw "Tony exited before capture '$label': $($proc.ExitCode)" }
+              Save-Desktop "visual-qa/$label.png"
+            } finally {
+              if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+              Start-Sleep -Milliseconds 300
+            }
+          }
+
+          # First launch intentionally keeps the localized connection hint visible.
+          Run-TonyCapture '00-first-run'
+
+          $poses = [ordered]@{
+            '01-idle' = 'idle'
+            '02-working' = 'working'
+            '03-study' = 'study'
+            '04-thinking' = 'thinking'
+            '05-sleep' = 'sleep'
+            '06-ask-hug' = 'ask_hug'
+            '07-hug' = 'hug'
+            '08-walk' = 'walk'
+            '09-adjust-glasses' = 'adjust_glasses'
+            '10-remove-glasses' = 'remove_glasses'
+            '11-wave' = 'wave'
+            '12-shiver' = 'shiver'
+            '13-celebrate' = 'celebrate'
+            '14-blush' = 'blush'
+            '15-blush-wave' = 'blush_wave'
+          }
+
+          foreach ($entry in $poses.GetEnumerator()) {
+            Run-TonyCapture $entry.Key $entry.Value
+          }
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+
+      - name: Confirm screenshot set
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem visual-qa -Filter '*.png' | Sort-Object Name
+          $files | ForEach-Object { Write-Host $_.Name $_.Length }
+          if ($files.Count -ne 16) { throw "Expected 16 visual QA screenshots, found $($files.Count)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-0.9.4-full-exposure-visual-qa
+          path: visual-qa/*.png
+          if-no-files-found: error
