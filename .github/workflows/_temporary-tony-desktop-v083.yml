@@ -1,0 +1,37 @@
+name: Apply Tony V0.8.3 desktop behavior
+
+on:
+  push:
+    branches:
+      - feature/teddy-agent-pet-v083
+    paths:
+      - .github/workflows/_temporary-tony-desktop-v083.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet-v083
+      - name: Apply Tony V0.8.3 desktop behavior
+        run: python3 .github/scripts/apply_tony_desktop_v083.py
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -q 'VERSION 0.8.3' teddy_agent_pet/client/CMakeLists.txt
+          grep -q 'tickPhysics' teddy_agent_pet/client/src/PetWindow.h
+          grep -q 'walkAlongForegroundWindow' teddy_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'Gravity and bounce after dragging' teddy_agent_pet/client/src/PetWindowV7.cpp
+          grep -q '10 quiet minutes' teddy_agent_pet/client/src/PetWindowV7.cpp
+      - name: Commit patched client
+        run: |
+          git config user.name 'Tony'
+          git config user.email '157110190+stloendays@users.noreply.github.com'
+          git add teddy_agent_pet/client
+          git commit -m 'Add Tony V0.8.3 physical desktop behavior'
+          git push origin HEAD:feature/teddy-agent-pet-v083
