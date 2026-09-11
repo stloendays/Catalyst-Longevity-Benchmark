@@ -74,7 +74,7 @@ jobs:
             }
           }
           Add-Type -AssemblyName System.Drawing
-          $icon = New-Object System.Drawing.Icon((Resolve-Path $iconPath)
+          $icon = New-Object System.Drawing.Icon((Resolve-Path $iconPath))
           if ($null -eq $icon) { throw 'System.Drawing could not load Tony icon' }
           $icon.Dispose()
           $sha = (Get-FileHash -Algorithm SHA256 $iconPath).Hash.ToLowerInvariant()
