@@ -1,0 +1,72 @@
+name: Integrate Tony 0.9.7 idle blink fix
+
+on:
+  push:
+    branches:
+      - fix/tony-v097-idle-blink
+    paths:
+      - '.github/workflows/tony-v097-idle-blink-integrate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Verify exact shared base
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='66395e70d2f1d5234fc9144dc14701ba67bb76c1'
+          test "$(git rev-parse HEAD)" = "$expected" || {
+            echo "Shared branch moved; aborting instead of overwriting concurrent work."
+            exit 1
+          }
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '0.9.6' || {
+            echo 'Canonical VERSION changed; aborting.'
+            exit 1
+          }
+
+      - name: Cherry-pick Windows-tested source fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin fix/tony-v097-idle-blink
+          git cherry-pick 544d91f7cfc191589e1e1d4c56a8eda963107560
+          grep -q 'setFixedSize(280,250);' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'QTimer::singleShot(2200,this,\[this\]' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'topSafety=(action_==Action::Hug) ? 16.0 : 8.0' bear_agent_pet/client/src/PetWindowV7.cpp
+          if grep -q 'animationAssets_\.constFind("idle")' bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'Legacy idle animation lookup remains; aborting.'
+            exit 1
+          fi
+
+      - name: Advance canonical version
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '0.9.7\n' > bear_agent_pet/client/VERSION
+          git add bear_agent_pet/client/VERSION
+          git commit -m 'Release Tony 0.9.7 idle visual hardening'
+
+      - name: Push only if remote did not move
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='66395e70d2f1d5234fc9144dc14701ba67bb76c1'
+          remote=$(git ls-remote origin refs/heads/feature/bear-agent-pet | cut -f1)
+          test "$remote" = "$expected" || {
+            echo "Concurrent shared-branch update detected: $remote"
+            exit 1
+          }
+          git push origin HEAD:feature/bear-agent-pet
