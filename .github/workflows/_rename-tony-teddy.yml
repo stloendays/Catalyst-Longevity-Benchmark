@@ -1,0 +1,151 @@
+name: Rename Tony desktop pet from bear to Teddy dog
+
+on:
+  push:
+    branches:
+      - feature/teddy-agent-pet
+    paths:
+      - .github/workflows/_rename-tony-teddy.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Teddy branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+
+      - name: Rename project paths and Tony species wording
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -d bear_agent_pet ] && [ ! -e teddy_agent_pet ]; then
+            git mv bear_agent_pet teddy_agent_pet
+          fi
+
+          for f in .github/workflows/bear-agent-*.yml; do
+            if [ -e "$f" ]; then
+              new="${f/bear-agent-/teddy-agent-}"
+              git mv "$f" "$new"
+            fi
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          core_replacements = [
+              ('bear_agent_pet', 'teddy_agent_pet'),
+              ('feature/bear-agent-pet', 'feature/teddy-agent-pet'),
+              ('bear-agent-', 'teddy-agent-'),
+              ('BearAgentPet', 'TeddyAgentPet'),
+              ('Bear Agent Pet', 'Teddy Agent Pet'),
+              ('Bear Agent', 'Teddy Agent'),
+          ]
+
+          species_replacements = [
+              ('a cute teddy-bear-like desktop companion from China.', 'a cute Teddy dog (toy poodle) desktop companion from China. You are a dog, not a bear.'),
+              ('her cute teddy-bear-like boyfriend from China:', 'her cute Teddy dog (toy poodle) boyfriend from China. You are a dog, not a bear:'),
+              ('- Form: a cute teddy-bear-like boy; soft, round, expressive, cuddly, and highly huggable', '- Form: a cute Teddy dog (toy poodle); fluffy, expressive, cuddly, and highly huggable. Tony is a dog, never a bear.'),
+              ('teddy-bear-like', 'Teddy-dog'),
+              ('teddy bear', 'Teddy dog'),
+              ('teddy-bear', 'Teddy dog'),
+              ('teddy-boyfriend', 'Teddy-dog boyfriend'),
+              ('teddy-hearted', 'poodle-hearted'),
+              ('teddy-shaped', 'poodle-shaped'),
+              ('teddy ears', 'poodle ears'),
+              ('teddy heart', 'poodle heart'),
+              ('teddy energy', 'Teddy-dog energy'),
+              ('teddy mode', 'Teddy-dog mode'),
+              ('teddy settings', 'Teddy-dog settings'),
+              ('teddy squeeze', 'poodle squeeze'),
+              ('teddy thermometer', 'poodle thermometer'),
+              ('teddy chemist', 'poodle chemist'),
+              ('teddy speed', 'sleepy-poodle speed'),
+              ('teddy-like', 'Teddy-dog-like'),
+          ]
+
+          text_suffixes = {
+              '.md', '.txt', '.json', '.py', '.cpp', '.h', '.hpp', '.c',
+              '.cmake', '.yml', '.yaml', '.toml', '.ini', '.ps1', '.sh',
+          }
+          exact_text_names = {'CMakeLists.txt'}
+
+          for path in root.rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              if path.suffix.lower() not in text_suffixes and path.name not in exact_text_names:
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+
+              original = text
+              for old, new in core_replacements:
+                  text = text.replace(old, new)
+
+              if 'teddy_agent_pet' in path.parts:
+                  for old, new in species_replacements:
+                      text = text.replace(old, new)
+                  text = text.replace('"teddy"', '"teddy_dog"')
+                  text = re.sub(r'\bbears\b', 'poodles', text, flags=re.IGNORECASE)
+                  text = re.sub(r'\bbear\b', 'poodle', text, flags=re.IGNORECASE)
+
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+
+          identity = Path('teddy_agent_pet/IDENTITY.md')
+          identity.write_text(
+              '# Tony Identity Contract\n\n'
+              '- Product character name: **Tony**.\n'
+              '- Species/form: **Teddy dog / toy poodle** (the Chinese “泰迪” pet-dog concept).\n'
+              '- Tony is **not a bear** and must not be described, tagged, trained, or illustrated as a bear.\n'
+              '- Character traits remain: from China, studies chemistry, gets cold easily, likes Paula, looks handsome without glasses, loves hugs and asks for hugs.\n'
+              '- Future UI, code names, documentation, corpus generation, and fine-tuning data should use `Teddy`, `toy poodle`, `poodle`, or `Tony` rather than `Bear`.\n',
+              encoding='utf-8',
+          )
+          PY
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for path in Path('teddy_agent_pet/training').rglob('*.json'):
+              json.loads(path.read_text(encoding='utf-8'))
+          print('JSON validation passed')
+          PY
+
+          python -m py_compile teddy_agent_pet/training/scripts/*.py teddy_agent_pet/server_gateway/app/*.py
+
+          if git grep -n -I -E 'bear_agent_pet|feature/bear-agent-pet|bear-agent-' -- . ':!*.png' ':!*.bin'; then
+            echo 'Legacy bear project identifiers still remain.' >&2
+            exit 1
+          fi
+
+          if git grep -n -I -i -E '\bbear\b|\bbears\b' -- teddy_agent_pet ':!*.png' ':!*.bin'; then
+            echo 'Tony corpus/docs still contain bear species wording.' >&2
+            exit 1
+          fi
+
+      - name: Commit Teddy rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No rename changes needed."
+            exit 0
+          fi
+          git commit -m "Rename Tony desktop pet from bear to Teddy dog"
+          git push origin HEAD:feature/teddy-agent-pet
