@@ -25,8 +25,6 @@ namespace {
 QUrl manifestUrl() {
     QUrl url(QStringLiteral(
         "https://github.com/stloendays/Catalyst-Longevity-Benchmark/releases/download/tony-desktop-latest/latest.json"));
-    // GitHub release assets may be cached at the edge. A changing query keeps the
-    // update channel fresh without changing the stable public release URL.
     QUrlQuery query;
     query.addQueryItem(QStringLiteral("t"), QString::number(QDateTime::currentMSecsSinceEpoch()));
     url.setQuery(query);
@@ -48,9 +46,27 @@ QString updateArchivePath(const QString &version) {
     return QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
         .filePath(QStringLiteral("TonyDesktopPet-update-%1.zip").arg(safe));
 }
+
+void cleanupStaleUpdaterArtifacts() {
+    QDir temp(QStandardPaths::writableLocation(QStandardPaths::TempLocation));
+    const QStringList patterns{
+        QStringLiteral("TonyDesktopPet-update-*.zip"),
+        QStringLiteral("TonyDesktopPet-apply-update*.ps1"),
+        QStringLiteral("TonyUpdateStage-*")
+    };
+    for(const auto &pattern : patterns) {
+        const auto entries = temp.entryInfoList({pattern}, QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+        for(const auto &entry : entries) {
+            if(entry.isDir()) QDir(entry.absoluteFilePath()).removeRecursively();
+            else QFile::remove(entry.absoluteFilePath());
+        }
+    }
+}
 }
 
-UpdateManager::UpdateManager(QObject *parent) : QObject(parent) {}
+UpdateManager::UpdateManager(QObject *parent) : QObject(parent) {
+    cleanupStaleUpdaterArtifacts();
+}
 
 bool UpdateManager::automaticUpdatesEnabled() const {
     return QSettings().value(QStringLiteral("update/automatic"), true).toBool();
@@ -189,9 +205,6 @@ void UpdateManager::downloadAvailableUpdate() {
         qInfo().noquote() << "Verified Tony update ready" << latestVersion_ << downloadedPath_;
         reply->deleteLater();
 
-        // A background check is genuinely automatic: after hash verification Tony
-        // hands the package to the updater, exits, installs, and restarts. A manual
-        // Settings-page check stays manual so the user is not surprised mid-session.
         if(automaticUpdatesEnabled() && !userInitiatedCheck_) {
             emit statusChanged(QStringLiteral("Installing the verified update automatically…"));
             QTimer::singleShot(1500, this, [this]{ applyDownloadedUpdate(); });
@@ -215,7 +228,8 @@ void UpdateManager::applyDownloadedUpdate() {
     [string]$Archive,
     [string]$Destination,
     [string]$Executable,
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$TargetVersion
 )
 $ErrorActionPreference = 'Stop'
 function Write-UpdateLog([string]$Message) {
@@ -223,22 +237,74 @@ function Write-UpdateLog([string]$Message) {
     if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     Add-Content -LiteralPath $LogPath -Value ("{0:o} {1}" -f (Get-Date), $Message)
 }
+function Get-SafeManagedPath([string]$Root, [string]$Relative) {
+    if ([string]::IsNullOrWhiteSpace($Relative) -or [IO.Path]::IsPathRooted($Relative)) { return $null }
+    $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    $candidate = [IO.Path]::GetFullPath((Join-Path $Root $Relative.Trim()))
+    if (-not $candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) { return $null }
+    return $candidate
+}
 try {
     Write-UpdateLog "Waiting for Tony process $ProcessId to exit"
     Wait-Process -Id $ProcessId -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
+
     $stage = Join-Path $env:TEMP ("TonyUpdateStage-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Expand-Archive -LiteralPath $Archive -DestinationPath $stage -Force
-    $candidate = Join-Path $stage $Executable
-    if (-not (Test-Path -LiteralPath $candidate)) { throw "Update archive does not contain $Executable" }
-    Write-UpdateLog "Copying verified update into $Destination"
+
+    $newMarker = Join-Path $stage 'tony-install-root.marker'
+    $newManaged = Join-Path $stage 'tony-file-list.txt'
+    if (-not (Test-Path -LiteralPath $newMarker) -or -not (Test-Path -LiteralPath $newManaged)) {
+        throw 'Verified update package is missing Tony managed-install metadata.'
+    }
+
+    $oldManaged = Join-Path $Destination 'tony-file-list.txt'
+    if (Test-Path -LiteralPath $oldManaged) {
+        Write-UpdateLog 'Removing files owned by the previous Tony package'
+        Get-Content -LiteralPath $oldManaged -ErrorAction Stop | ForEach-Object {
+            $oldPath = Get-SafeManagedPath $Destination $_
+            if ($oldPath -and (Test-Path -LiteralPath $oldPath -PathType Leaf)) {
+                Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Write-UpdateLog 'Legacy package has no managed-file list; using one-time overlay migration'
+    }
+
+    Write-UpdateLog "Copying verified Tony $TargetVersion into $Destination"
     & robocopy $stage $Destination /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
+
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $Archive -Force -ErrorAction SilentlyContinue
-    Write-UpdateLog "Update installed; restarting Tony"
+
+    Get-ChildItem -LiteralPath $env:TEMP -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -like 'TonyDesktopPet-update-*.zip'
+    } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Remove only Tony packages with the exact official naming patterns, and keep
+    # the current target version. Unrelated downloads are never touched.
+    $downloads = Join-Path $env:USERPROFILE 'Downloads'
+    if (Test-Path -LiteralPath $downloads) {
+        Get-ChildItem -LiteralPath $downloads -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $name = $_.Name
+            $oldVersion = $null
+            if ($name -match '^TonyDesktopPet-Setup-v(?<v>\d+\.\d+\.\d+)\.exe$') {
+                $oldVersion = $Matches['v']
+            } elseif ($name -match '^TonyDesktopPet-(?:v)?(?<v>\d+\.\d+\.\d+)-windows-x64\.zip$') {
+                $oldVersion = $Matches['v']
+            }
+            if ($oldVersion -and $oldVersion -ne $TargetVersion) {
+                Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+                Write-UpdateLog "Removed old Tony package $name"
+            }
+        }
+    }
+
+    Write-UpdateLog "Update installed; restarting Tony $TargetVersion"
     Start-Process -FilePath (Join-Path $Destination $Executable) -WorkingDirectory $Destination
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 } catch {
     Write-UpdateLog ("Update failed: " + $_.Exception.Message)
     exit 1
@@ -261,7 +327,8 @@ try {
         QStringLiteral("-Archive"), downloadedPath_,
         QStringLiteral("-Destination"), QCoreApplication::applicationDirPath(),
         QStringLiteral("-Executable"), QFileInfo(QCoreApplication::applicationFilePath()).fileName(),
-        QStringLiteral("-LogPath"), logPath
+        QStringLiteral("-LogPath"), logPath,
+        QStringLiteral("-TargetVersion"), latestVersion_
     };
 
     qInfo().noquote() << "Handing Tony update to detached PowerShell updater" << latestVersion_;
