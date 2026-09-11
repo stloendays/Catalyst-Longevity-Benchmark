@@ -12,6 +12,7 @@ public:
     bool connected() const;
 signals:
     void stateChanged(const QString &state);
+    void avatarAction(const QString &action, const QString &emotion, int durationMs);
     void textDelta(const QString &text);
     void answerFinished();
     void connectionChanged(bool connected);
