@@ -146,6 +146,7 @@ jobs:
           PY
 
           echo '=== LOCAL BOYFRIEND CHAT SMOKE ==='
+          cd "$APP"
           "$VENV/bin/python" - <<'PY'
           import json, urllib.request
           from app.main import TONY_PERSONA
