@@ -1,0 +1,50 @@
+name: Tony v0.9.8 live pairing diagnose
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-live-pairing-diagnose.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SERVER_IP: 150.158.27.206
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$SERVER_SSH_KEY" > "$RUNNER_TEMP/key"
+          chmod 600 "$RUNNER_TEMP/key"
+      - name: Inspect recent gateway activity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$RUNNER_TEMP/key" "ubuntu@$SERVER_IP" \
+            "echo ===RECENT_GATEWAY===; sudo journalctl -u bear-agent-gateway.service --since '10 minutes ago' --no-pager | grep -E 'pair|WebSocket|agent/ws|POST|GET|connection|ERROR|Exception' | tail -n 120 || true; echo ===PAIRING_SUMMARY===; cd /home/ubuntu/.local/share/bear-agent/app && /home/ubuntu/.local/share/bear-agent/venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+p=Path('/home/ubuntu/.local/share/bear-agent/pairing.json')
+if not p.exists():
+    print('pairing_store_missing')
+else:
+    d=json.loads(p.read_text())
+    reqs=d.get('device_requests') or []
+    devs=d.get('devices') or []
+    print('device_requests=', len(reqs))
+    for r in reqs[-5:]:
+        print({'device_name':r.get('device_name'),'approved':r.get('approved'),'created_at':r.get('created_at'),'expires_at':r.get('expires_at')})
+    print('devices=',len(devs))
+    for r in devs[-5:]:
+        print({'device_id':r.get('device_id'),'device_name':r.get('device_name'),'revoked':r.get('revoked'),'created_at':r.get('created_at')})
+PY"
