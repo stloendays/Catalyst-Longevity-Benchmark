@@ -19,13 +19,13 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     title_=new QLabel("Tony",this);
     title_->setObjectName("title");
-    hint_=new QLabel("想让我做什么？",this);
+    hint_=new QLabel("What do you want to tell me?",this);
     hint_->setObjectName("hint");
     edit_=new QLineEdit(this);
     edit_->setObjectName("message");
-    edit_->setPlaceholderText("输入消息…");
+    edit_->setPlaceholderText("Type a message…");
     edit_->setClearButtonEnabled(true);
-    send_=new QPushButton("发送",this);
+    send_=new QPushButton("Send",this);
     send_->setObjectName("send");
     send_->setCursor(Qt::PointingHandCursor);
 
@@ -96,6 +96,20 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     connect(send_,&QPushButton::clicked,this,&ChatComposer::submitCurrent);
     connect(edit_,&QLineEdit::returnPressed,this,&ChatComposer::submitCurrent);
+}
+
+void ChatComposer::setLanguage(const QString &language) {
+    const QString n=language.trimmed().toLower();
+    language_=(n.startsWith("zh") || n=="cn") ? "zh" : "en";
+    if(language_=="zh") {
+        hint_->setText("想对我说什么？");
+        edit_->setPlaceholderText("输入消息…");
+        send_->setText("发送");
+    } else {
+        hint_->setText("What do you want to tell me?");
+        edit_->setPlaceholderText("Type a message…");
+        send_->setText("Send");
+    }
 }
 
 void ChatComposer::openAt(const QPoint &anchorGlobal, const QString &prefill) {
