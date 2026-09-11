@@ -1,0 +1,160 @@
+name: Local2B MCP Step 4 Stage 3A diagnostic
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step4-stage3a-diagnostic.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
+jobs:
+  stage3a-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy frozen benchmark code
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'rm -rf /tmp/local2b-mcp-step4-stage3a && mkdir -p /tmp/local2b-mcp-step4-stage3a'
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/generate_stage2_dataset.py \
+            training/local2b_mcp/benchmark_tool_use.py \
+            training/local2b_mcp/validate_dataset.py \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-step4-stage3a/
+
+      - name: Regenerate frozen Step 2 data
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=30 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-step4-stage3a
+          cd "$ROOT"
+          python3 generate_stage2_dataset.py --out dataset --train 16000 --val 1600 --test 1600 --seed 20260908
+          python3 validate_dataset.py dataset
+          test "$(sha256sum dataset/train.jsonl | awk '{print $1}')" = d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303
+          test "$(sha256sum dataset/val.jsonl | awk '{print $1}')" = 89e4aca2f72fc4efd6bab0a88299a68a32cd637edc0561d7d2c95b2b27463990
+          test "$(sha256sum dataset/test.jsonl | awk '{print $1}')" = 460b5308f6791eb53692fc0736a53e6f6b553a925207caa34517b456e28d78f2
+          REMOTE
+
+      - name: Benchmark Stage 3A adapter
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-step4-stage3a
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          ADAPTER=/opt/rhocodec-llm/adapters/local2b-mcp-step3a-r4-qv.gguf
+          MODEL_SHA=d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58
+          ADAPTER_SHA=db8b9d9509c752941c47261017e52dab0a9590bc1d4f94dc09fc2e061fa0eb27
+          SERVER=/opt/rhocodec-llm/bin/llama-server
+          PORT=18081
+          ALIAS=qwen3.5-2b-q4-stage3a
+          SERVER_PID=""
+
+          test -s "$MODEL" && test -s "$ADAPTER" && test -x "$SERVER"
+          test "$(sha256sum "$MODEL" | awk '{print $1}')" = "$MODEL_SHA"
+          test "$(sha256sum "$ADAPTER" | awk '{print $1}')" = "$ADAPTER_SHA"
+
+          restore_base() {
+            if [ -n "$SERVER_PID" ]; then
+              kill "$SERVER_PID" 2>/dev/null || true
+              wait "$SERVER_PID" 2>/dev/null || true
+            fi
+            sudo systemctl start rhocodec-llm.service || true
+          }
+          trap restore_base EXIT INT TERM
+
+          sudo systemctl stop rhocodec-llm.service
+          "$SERVER" -m "$MODEL" --lora "$ADAPTER" --alias "$ALIAS" \
+            --host 127.0.0.1 --port "$PORT" -c 16384 -t 4 -b 128 -ub 128 --parallel 1 \
+            --jinja --reasoning-budget 0 --no-webui > "$ROOT/stage3a-server.log" 2>&1 &
+          SERVER_PID=$!
+
+          READY=0
+          for _ in $(seq 1 120); do
+            if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; then READY=1; break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          test "$READY" -eq 1
+
+          cd "$ROOT"
+          python3 benchmark_tool_use.py \
+            --dataset dataset/test.jsonl \
+            --endpoint "http://127.0.0.1:${PORT}/v1/chat/completions" \
+            --model "$ALIAS" --limit 80 --max-tokens 192 --timeout 120 \
+            --out stage3a-benchmark.json
+
+          kill "$SERVER_PID" 2>/dev/null || true
+          wait "$SERVER_PID" 2>/dev/null || true
+          SERVER_PID=""
+          sudo systemctl start rhocodec-llm.service
+          for _ in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18080/v1/models >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          systemctl is-active --quiet rhocodec-llm.service
+          curl -fsS http://127.0.0.1:18080/v1/models >/dev/null
+          printf 'stage3a_adapter_sha256=%s\nbase_service_after=HEALTHY\n' "$ADAPTER_SHA" > "$ROOT/runtime-status.txt"
+          trap - EXIT INT TERM
+          REMOTE
+
+      - name: Collect evidence
+        if: always()
+        run: |
+          mkdir -p build/local2b-mcp-step4-stage3a
+          for f in stage3a-benchmark.json runtime-status.txt stage3a-server.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/tmp/local2b-mcp-step4-stage3a/$f" \
+              build/local2b-mcp-step4-stage3a/ || true
+          done
+
+      - name: Compare Stage 3A with frozen base
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s build/local2b-mcp-step4-stage3a/stage3a-benchmark.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base=json.loads(Path('training/local2b_mcp/baselines/base_q4_step2.json').read_text())
+          a=json.loads(Path('build/local2b-mcp-step4-stage3a/stage3a-benchmark.json').read_text())
+          keys=['tool_gate_accuracy','tool_sequence_exact_accuracy','call_exact_accuracy','valid_argument_shape_rate','no_tool_precision','false_tool_call_rate','api_or_parse_error_rate','mean_latency_s']
+          out={'benchmark':'local2b_mcp_step4_stage3a_diagnostic_v1','stage3a_adapter_sha256':'db8b9d9509c752941c47261017e52dab0a9590bc1d4f94dc09fc2e061fa0eb27','records':a['records_loaded'],'counts':a['counts'],'metrics':{},'by_task_type':a['by_task_type']}
+          for k in keys:
+            out['metrics'][k]={'base':base['metrics'][k],'stage3a':a['metrics'][k],'delta':a['metrics'][k]-base['metrics'][k]}
+          Path('build/local2b-mcp-step4-stage3a/comparison.json').write_text(json.dumps(out,indent=2,ensure_ascii=False)+'\n')
+          print(json.dumps(out,indent=2,ensure_ascii=False))
+          PY
+
+      - name: Upload Stage 3A diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step4-stage3a-diagnostic
+          path: build/local2b-mcp-step4-stage3a/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
