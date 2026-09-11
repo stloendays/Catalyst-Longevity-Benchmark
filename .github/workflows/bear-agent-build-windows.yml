@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'bear_agent_pet/client/**'
+      - '.github/tony_assets_bootstrap/**'
       - '.github/workflows/bear-agent-build-windows.yml'
 
 permissions:
@@ -15,7 +16,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  integrate-artwork:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.integrate.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Integrate seven Tony living-interaction animations
+        id: integrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD='.github/tony_assets_bootstrap/chunk_00'
+          echo 'changed=false' >> "$GITHUB_OUTPUT"
+          if [ ! -f "$PAYLOAD" ]; then
+            echo 'TONY_V010_ARTWORK_ALREADY_INTEGRATED=PASS'
+            exit 0
+          fi
+
+          tr -d '\r\n ' < "$PAYLOAD" | base64 -d > /tmp/tony-v010-assets.zip
+          unzip -t /tmp/tony-v010-assets.zip
+          unzip -o /tmp/tony-v010-assets.zip -d .
+          python bear_agent_pet/client/tools/apply_v010_interactions.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+
+          # Remove one-off bootstrap and the abandoned source-embedded prototype.
+          rm -f "$PAYLOAD"
+          rm -f .github/workflows/tony-v010-integrate.yml
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.cpp
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets_pat.cpp
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add seven living Tony interaction animations'
+          git push origin HEAD:feature/bear-agent-pet
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+          echo 'TONY_V010_ARTWORK_INTEGRATION=PASS'
+
   build:
+    needs: integrate-artwork
+    if: needs.integrate-artwork.outputs.changed != 'true'
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
