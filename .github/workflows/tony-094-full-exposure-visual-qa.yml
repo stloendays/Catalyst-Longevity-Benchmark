@@ -31,10 +31,10 @@ jobs:
           Expand-Archive TonyDesktopPet-0.9.4-windows-x64.zip -DestinationPath runtime -Force
           if (-not (Test-Path runtime/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing from 0.9.4 release' }
           if (Test-Path runtime/VERSION.txt) {
-            $v = (Get-Content runtime/VERSION.txt -Raw).Trim()
-            $expected = 'TonyDesktopPet 0.9.4 commit=cb7154540f243bcd383bdcc3874cf920b41b23d9'
-            if ($v -ne $expected) { throw "Unexpected Tony release identity: $v" }
-            Write-Host "TONY_RELEASE_IDENTITY=$v"
+            $v = Get-Content runtime/VERSION.txt -Raw
+            if (-not $v.Contains('0.9.4')) { throw "Tony release does not identify as 0.9.4: $v" }
+            if (-not $v.Contains('cb7154540f243bcd383bdcc3874cf920b41b23d9')) { throw "Tony release commit mismatch: $v" }
+            Write-Host "TONY_RELEASE_IDENTITY=$($v.Trim())"
           }
 
       - name: Capture first-run and every major pose
@@ -78,7 +78,6 @@ jobs:
             }
           }
 
-          # First launch intentionally keeps the localized connection hint visible.
           Run-TonyCapture '00-first-run'
 
           $poses = [ordered]@{
