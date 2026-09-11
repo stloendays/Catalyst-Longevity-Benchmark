@@ -1,0 +1,1 @@
+Temporary asset bootstrap repair marker. Remove after v0.10 integration.
