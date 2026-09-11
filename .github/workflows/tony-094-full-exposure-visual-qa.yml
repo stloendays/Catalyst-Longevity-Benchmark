@@ -32,7 +32,9 @@ jobs:
           if (-not (Test-Path runtime/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing from 0.9.4 release' }
           if (Test-Path runtime/VERSION.txt) {
             $v = (Get-Content runtime/VERSION.txt -Raw).Trim()
-            if ($v -ne '0.9.4') { throw "Expected Tony 0.9.4, got $v" }
+            $expected = 'TonyDesktopPet 0.9.4 commit=cb7154540f243bcd383bdcc3874cf920b41b23d9'
+            if ($v -ne $expected) { throw "Unexpected Tony release identity: $v" }
+            Write-Host "TONY_RELEASE_IDENTITY=$v"
           }
 
       - name: Capture first-run and every major pose
