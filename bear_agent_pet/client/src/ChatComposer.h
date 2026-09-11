@@ -16,6 +16,7 @@ public:
     void openAt(const QPoint &anchorGlobal, const QString &prefill={});
     void follow(const QPoint &anchorGlobal);
     void dismiss();
+    void setLanguage(const QString &language);
 
 signals:
     void submitted(const QString &text);
@@ -32,4 +33,5 @@ private:
     QLineEdit *edit_{nullptr};
     QPushButton *send_{nullptr};
     QPoint anchorGlobal_;
+    QString language_{"en"};
 };
