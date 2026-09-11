@@ -1,0 +1,112 @@
+name: Deploy BearAgent gateway
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'bear_agent_pet/server_gateway/**'
+      - '.github/workflows/bear-agent-deploy-gateway.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy gateway source
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'mkdir -p /home/ubuntu/.local/share/bear-agent/app'
+          rsync -az --delete \
+            -e "ssh -i $HOME/.ssh/server_key" \
+            bear_agent_pet/server_gateway/ \
+            ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
+
+      - name: Install and restart service
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+
+          python3 -m venv "$VENV"
+          "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
+
+          if [ ! -f "$ROOT/bear-agent.env" ]; then
+            cat > "$ROOT/bear-agent.env" <<'ENV'
+          BEAR_AGENT_REQUIRE_AUTH=false
+          BEAR_OPENCLAW_AGENT=main
+          BEAR_OPENCLAW_TIMEOUT=240
+          OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
+          ENV
+            chmod 600 "$ROOT/bear-agent.env"
+          fi
+
+          sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=BearAgentPet OpenClaw WebSocket Gateway
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/.local/share/bear-agent/app
+          EnvironmentFile=/home/ubuntu/.local/share/bear-agent/bear-agent.env
+          ExecStart=/home/ubuntu/.local/share/bear-agent/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 18790
+          Restart=on-failure
+          RestartSec=3
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now bear-agent-gateway.service
+          sudo systemctl restart bear-agent-gateway.service
+
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/bear-health.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          cat /tmp/bear-health.json
+          echo
+          systemctl --no-pager --full status bear-agent-gateway.service | head -n 30
+
+          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
+          /home/ubuntu/.npm-global/bin/openclaw agent --agent main \
+            --session-key bear-gateway-deploy-smoke \
+            --message 'Reply exactly with: BEAR_OPENCLAW_OK' \
+            --timeout 240 --json >/tmp/bear-openclaw-smoke.json
+          grep -q 'BEAR_OPENCLAW_OK' /tmp/bear-openclaw-smoke.json
+          echo 'BEAR_OPENCLAW_BACKEND=PASS'
+          echo 'BEAR_GATEWAY_HEALTH=PASS'
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
