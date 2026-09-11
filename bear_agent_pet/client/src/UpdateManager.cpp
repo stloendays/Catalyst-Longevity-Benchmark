@@ -7,11 +7,13 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
