@@ -28,13 +28,13 @@ jobs:
       - name: Build
         shell: pwsh
         run: cmake --build bear_agent_pet/client/build --config Release --parallel
-      - name: Deploy Qt runtime
+      - name: Deploy Qt runtime and Tony artwork
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path bear_agent_pet/client/package/assets | Out-Null
           Copy-Item bear_agent_pet/client/build/Release/TonyDesktopPet.exe bear_agent_pet/client/package/
+          Copy-Item bear_agent_pet/client/assets/tony.png bear_agent_pet/client/package/assets/tony.png
           windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
-          Set-Content -Path bear_agent_pet/client/package/assets/PUT_TONY_PNG_HERE.txt -Value 'Place the approved Tony artwork here as tony.png.'
       - uses: actions/upload-artifact@v4
         with:
           name: TonyDesktopPet-windows-x64
