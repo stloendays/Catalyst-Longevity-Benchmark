@@ -700,11 +700,17 @@ bool PetWindow::foregroundWindowInfo(QRect *rect, QScreen **screenOut, bool *ful
 
     const QRect full=screen->geometry();
     constexpr int tolerance=8;
-    const bool isFullscreen=
+    const LONG_PTR style=GetWindowLongPtrW(foreground,GWL_STYLE);
+    const bool borderless=(style & WS_CAPTION)==0 && (style & WS_THICKFRAME)==0;
+    const bool coversMonitor=
         windowRect.left()<=full.left()+tolerance &&
         windowRect.top()<=full.top()+tolerance &&
         windowRect.right()-1>=full.right()-tolerance &&
         windowRect.bottom()-1>=full.bottom()-tolerance;
+    // A maximized overlapped window can have invisible resize borders outside the
+    // work area. Require a borderless foreground window as well, so normal maximized
+    // browsers/editors never make Tony disappear.
+    const bool isFullscreen=borderless && coversMonitor;
 
     if(rect) *rect=windowRect;
     if(screenOut) *screenOut=screen;
