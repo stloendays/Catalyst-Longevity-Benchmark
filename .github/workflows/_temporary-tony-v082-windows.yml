@@ -1,9 +1,10 @@
-name: Validate Tony V0.8.2 Windows desktop behavior
-# Re-run after hardened fullscreen detection.
+name: Validate Tony V0.8.3 Windows desktop behavior
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - feature/teddy-agent-pet-v083
     paths:
       - '.github/workflows/_temporary-tony-v082-windows.yml'
 
@@ -17,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/teddy-agent-pet
+          ref: feature/teddy-agent-pet-v083
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -45,12 +46,12 @@ jobs:
           try {
             Start-Sleep -Seconds 7
             if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
-            Write-Host 'TONY_V082_WINDOWS_SMOKE=PASS'
+            Write-Host 'TONY_V083_WINDOWS_SMOKE=PASS'
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: TonyDesktopPet-v0.8.2-windows-x64
+          name: TonyDesktopPet-v0.8.3-windows-x64
           path: teddy_agent_pet/client/package
           if-no-files-found: error
