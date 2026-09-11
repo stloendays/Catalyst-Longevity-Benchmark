@@ -29,11 +29,36 @@ jobs:
           ref: fix/tony-v098-icon-connection
           fetch-depth: 0
 
-      - name: Validate Windows icon structure
+      - name: Normalize Tony icon for Windows resource compiler
         shell: pwsh
         run: |
           $iconPath = 'bear_agent_pet/client/assets/tony-app.ico'
           if (-not (Test-Path $iconPath)) { throw 'Tony app icon is missing' }
+          if (-not (Get-Command magick -ErrorAction SilentlyContinue)) {
+            choco install imagemagick -y --no-progress
+          }
+          $rows = @(& magick identify -format "%p|%w|%h`n" $iconPath)
+          if ($LASTEXITCODE -ne 0 -or $rows.Count -lt 1) { throw 'ImageMagick could not inspect Tony icon' }
+          $frames = foreach ($row in $rows) {
+            foreach ($line in ($row -split "`n")) {
+              if ($line -match '^(\d+)\|(\d+)\|(\d+)$') {
+                [pscustomobject]@{ Index=[int]$Matches[1]; Width=[int]$Matches[2]; Height=[int]$Matches[3] }
+              }
+            }
+          }
+          $best = $frames | Sort-Object @{Expression={$_.Width * $_.Height};Descending=$true} | Select-Object -First 1
+          if ($null -eq $best) { throw 'Tony icon has no readable frame' }
+          $tmp = "$iconPath.rc.ico"
+          $sourceSpec = "${iconPath}[$($best.Index)]"
+          & magick $sourceSpec -define icon:auto-resize=256,64,48,32,16 $tmp
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tmp)) { throw 'Could not normalize Tony icon' }
+          Move-Item $tmp $iconPath -Force
+          Write-Host "TONY_ICON_NORMALIZED_FROM=$($best.Width)x$($best.Height) index=$($best.Index)"
+
+      - name: Validate Windows icon structure
+        shell: pwsh
+        run: |
+          $iconPath = 'bear_agent_pet/client/assets/tony-app.ico'
           $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $iconPath))
           if ($bytes.Length -lt 1024) { throw "Tony icon is unexpectedly small: $($bytes.Length) bytes" }
           if ($bytes[0] -ne 0 -or $bytes[1] -ne 0 -or $bytes[2] -ne 1 -or $bytes[3] -ne 0) {
@@ -41,6 +66,17 @@ jobs:
           }
           $count = [BitConverter]::ToUInt16($bytes, 4)
           if ($count -lt 3) { throw "Tony icon has too few embedded sizes: $count" }
+          for ($i=0; $i -lt $count; $i++) {
+            $entry = 6 + 16 * $i
+            $size = [BitConverter]::ToUInt32($bytes, $entry + 8)
+            $offset = [BitConverter]::ToUInt32($bytes, $entry + 12)
+            if ($size -lt 8 -or ($offset + $size) -gt $bytes.Length) { throw "Invalid ICO entry $i" }
+            $isPng = $bytes[$offset] -eq 0x89 -and $bytes[$offset+1] -eq 0x50 -and $bytes[$offset+2] -eq 0x4e -and $bytes[$offset+3] -eq 0x47
+            if (-not $isPng) {
+              $dibHeader = [BitConverter]::ToUInt32($bytes, $offset)
+              if ($dibHeader -notin @(40,108,124)) { throw "ICO entry $i uses unsupported DIB header $dibHeader" }
+            }
+          }
           Add-Type -AssemblyName System.Drawing
           $icon = New-Object System.Drawing.Icon((Resolve-Path $iconPath))
           if ($null -eq $icon) { throw 'System.Drawing could not load Tony icon' }
@@ -117,7 +153,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- bear_agent_pet/client/src/TonyVersion.rc.in bear_agent_pet/client/src/main.cpp bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/SettingsDialog.cpp bear_agent_pet/client/src/AgentClient.h bear_agent_pet/client/src/AgentClient.cpp bear_agent_pet/client/installer/TonyDesktopPet.iss
+          git add -- bear_agent_pet/client/assets/tony-app.ico bear_agent_pet/client/src/TonyVersion.rc.in bear_agent_pet/client/src/main.cpp bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/SettingsDialog.cpp bear_agent_pet/client/src/AgentClient.h bear_agent_pet/client/src/AgentClient.cpp bear_agent_pet/client/installer/TonyDesktopPet.iss
           if (git diff --cached --quiet) {
             Write-Host 'No staged source changes; guarded patch was already committed.'
             exit 0
