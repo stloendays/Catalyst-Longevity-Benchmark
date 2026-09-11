@@ -14,7 +14,7 @@ permissions:
 jobs:
   recover-tls:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       TONY_SERVER_IP: 150.158.27.206
     steps:
@@ -29,44 +29,125 @@ jobs:
           chmod 600 "$RUNNER_TEMP/tony_server_key"
           echo "TONY_SSH_KEY=$RUNNER_TEMP/tony_server_key" >> "$GITHUB_ENV"
 
-      - name: Probe public IP-mapped hostnames
+      - name: Issue trusted short-lived IP certificate and configure Caddy
         shell: bash
         run: |
           set -euo pipefail
-          chosen=''
-          for host in 150.158.27.206.nip.io 150-158-27-206.nip.io 150-158-27-206.sslip.io; do
-            echo "=== $host ==="
-            addrs="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u | tr '\n' ' ')"
-            echo "A=$addrs"
-            if printf '%s\n' "$addrs" | grep -qw "$TONY_SERVER_IP"; then
-              chosen="$host"
-              break
+          cat > "$RUNNER_TEMP/tony_ip_tls.sh" <<'REMOTE'
+          set -euo pipefail
+          IP='150.158.27.206'
+          CERTBOT='/opt/tony-certbot/bin/certbot'
+
+          if [ ! -x "$CERTBOT" ]; then
+            if ! python3 -m venv /tmp/tony-venv-probe >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv
             fi
-          done
-          test -n "$chosen" || { echo 'No candidate hostname resolves directly to Tony server IP'; exit 1; }
-          echo "TONY_HOST=$chosen" >> "$GITHUB_ENV"
-          echo "CHOSEN_TONY_HOST=$chosen"
+            sudo rm -rf /opt/tony-certbot
+            sudo python3 -m venv /opt/tony-certbot
+            sudo /opt/tony-certbot/bin/pip install --upgrade pip
+            sudo /opt/tony-certbot/bin/pip install 'certbot>=5.4'
+          fi
 
-      - name: Configure Caddy for chosen hostname and request certificate
+          echo "CERTBOT_VERSION=$($CERTBOT --version)"
+          sudo systemctl stop caddy
+          restore_caddy() { sudo systemctl start caddy >/dev/null 2>&1 || true; }
+          trap restore_caddy EXIT
+
+          sudo "$CERTBOT" certonly \
+            --non-interactive \
+            --agree-tos \
+            --register-unsafely-without-email \
+            --preferred-profile shortlived \
+            --standalone \
+            --ip-address "$IP"
+
+          LIVE="/etc/letsencrypt/live/$IP"
+          test -s "$LIVE/fullchain.pem"
+          test -s "$LIVE/privkey.pem"
+
+          sudo install -d -o caddy -g caddy -m 750 /etc/caddy/tony-tls
+          sudo install -o caddy -g caddy -m 644 "$LIVE/fullchain.pem" /etc/caddy/tony-tls/fullchain.pem
+          sudo install -o caddy -g caddy -m 600 "$LIVE/privkey.pem" /etc/caddy/tony-tls/privkey.pem
+
+          printf '%s\n' \
+            "https://$IP {" \
+            '    tls /etc/caddy/tony-tls/fullchain.pem /etc/caddy/tony-tls/privkey.pem' \
+            '    encode zstd gzip' \
+            '    reverse_proxy 127.0.0.1:18790' \
+            '}' | sudo tee /etc/caddy/Caddyfile >/dev/null
+
+          sudo caddy validate --config /etc/caddy/Caddyfile
+          sudo systemctl start caddy
+          trap - EXIT
+          sleep 3
+          sudo systemctl is-active caddy
+          echo '=== CERTIFICATE ==='
+          sudo openssl x509 -in /etc/caddy/tony-tls/fullchain.pem -noout -subject -issuer -dates -ext subjectAltName
+          echo '=== CADDYFILE ==='
+          sudo cat /etc/caddy/Caddyfile
+          REMOTE
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/tony_ip_tls.sh"
+
+      - name: Install automatic IP certificate renewal
         shell: bash
         run: |
           set -euo pipefail
-          remote_cmd="printf '%s\\n' '$TONY_HOST {' '    encode zstd gzip' '    reverse_proxy 127.0.0.1:18790' '}' | sudo tee /etc/caddy/Caddyfile >/dev/null; sudo caddy validate --config /etc/caddy/Caddyfile; sudo systemctl restart caddy; sleep 15; sudo systemctl is-active caddy; echo ===CADDYFILE===; sudo cat /etc/caddy/Caddyfile; echo ===TLS_LOGS===; sudo journalctl -u caddy -n 120 --no-pager | grep -E 'certificate|obtaining|challenge|tls.obtain|error|serving|renew' || true"
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" "$remote_cmd"
+          cat > "$RUNNER_TEMP/install_renewal.sh" <<'REMOTE'
+          set -euo pipefail
+          sudo tee /usr/local/sbin/tony-renew-ip-cert >/dev/null <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          IP='150.158.27.206'
+          CERTBOT='/opt/tony-certbot/bin/certbot'
+          systemctl stop caddy
+          start_caddy() { systemctl start caddy >/dev/null 2>&1 || true; }
+          trap start_caddy EXIT
+          "$CERTBOT" renew --quiet
+          LIVE="/etc/letsencrypt/live/$IP"
+          install -o caddy -g caddy -m 644 "$LIVE/fullchain.pem" /etc/caddy/tony-tls/fullchain.pem
+          install -o caddy -g caddy -m 600 "$LIVE/privkey.pem" /etc/caddy/tony-tls/privkey.pem
+          systemctl start caddy
+          trap - EXIT
+          SCRIPT
+          sudo chmod 750 /usr/local/sbin/tony-renew-ip-cert
 
-      - name: Verify chosen hostname over public HTTPS
+          sudo tee /etc/systemd/system/tony-ip-cert-renew.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Renew Tony public IP TLS certificate
+          After=network-online.target
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/sbin/tony-renew-ip-cert
+          UNIT
+
+          sudo tee /etc/systemd/system/tony-ip-cert-renew.timer >/dev/null <<'TIMER'
+          [Unit]
+          Description=Renew Tony public IP TLS certificate every 3 days
+
+          [Timer]
+          OnBootSec=12h
+          OnUnitActiveSec=3d
+          RandomizedDelaySec=30m
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+          TIMER
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now tony-ip-cert-renew.timer
+          systemctl list-timers --all tony-ip-cert-renew.timer --no-pager
+          REMOTE
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/install_renewal.sh"
+
+      - name: Verify trusted public HTTPS directly by IP
         shell: bash
         run: |
           set -euo pipefail
-          echo "HOST=$TONY_HOST"
-          echo '=== TCP ==='
-          timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/80" && echo PUBLIC_TCP_80=OPEN
-          timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/443" && echo PUBLIC_TCP_443=OPEN
-          echo '=== DNS ==='
-          getent ahostsv4 "$TONY_HOST" | head
-          echo '=== HTTP ==='
-          curl -sS -D - --max-time 15 -o /dev/null "http://$TONY_HOST/health"
-          echo '=== HTTPS ==='
-          curl -fsS --retry 4 --retry-delay 5 --max-time 20 "https://$TONY_HOST/health" | tee /tmp/health.json
+          timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/443"
+          echo PUBLIC_TCP_443=OPEN
+          curl -fsS --max-time 20 "https://$TONY_SERVER_IP/health" | tee /tmp/health.json
           grep -q '"ok":true' /tmp/health.json
-          echo PUBLIC_HTTPS_HEALTH=PASS
+          echo PUBLIC_IP_HTTPS_HEALTH=PASS
