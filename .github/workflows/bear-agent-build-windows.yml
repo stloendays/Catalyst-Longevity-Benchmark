@@ -31,21 +31,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PAYLOAD='.github/tony_assets_bootstrap/chunk_00'
+          PAYLOAD_DIR='.github/tony_assets_bootstrap'
           echo 'changed=false' >> "$GITHUB_OUTPUT"
-          if [ ! -f "$PAYLOAD" ]; then
+          if ! compgen -G "$PAYLOAD_DIR/chunk_*" > /dev/null; then
             echo 'TONY_V010_ARTWORK_ALREADY_INTEGRATED=PASS'
             exit 0
           fi
 
-          tr -d '\r\n ' < "$PAYLOAD" | base64 -d > /tmp/tony-v010-assets.zip
+          cat "$PAYLOAD_DIR"/chunk_* | tr -d '\r\n ' | base64 -d > /tmp/tony-v010-assets.zip
           unzip -t /tmp/tony-v010-assets.zip
           unzip -o /tmp/tony-v010-assets.zip -d .
           python bear_agent_pet/client/tools/apply_v010_interactions.py
           python bear_agent_pet/client/tools/validate_state_assets.py
 
-          # Remove one-off bootstrap and the abandoned source-embedded prototype.
-          rm -f "$PAYLOAD"
+          rm -rf "$PAYLOAD_DIR"
           rm -f .github/workflows/tony-v010-integrate.yml
           rm -f bear_agent_pet/client/src/EmbeddedActionAssets.h
           rm -f bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h
