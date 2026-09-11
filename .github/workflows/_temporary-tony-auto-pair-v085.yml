@@ -1,0 +1,97 @@
+name: Apply and validate Tony v0.8.5 secure auto pairing
+
+on:
+  push:
+    paths:
+      - '.github/scripts/patch_tony_auto_pair_v085.py'
+      - '.github/workflows/_temporary-tony-auto-pair-v085.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+
+      - name: Apply secure owner auto-pair patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_tony_auto_pair_v085.py
+          grep -q 'VERSION 0.8.5' teddy_agent_pet/client/CMakeLists.txt
+          grep -q 'pairViaTrustedTunnel' teddy_agent_pet/client/src/AgentClient.cpp
+          grep -q 'pair/ssh-bootstrap' teddy_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'Friend code (only needed once' teddy_agent_pet/client/src/PetWindowV7.cpp
+
+      - name: Commit client changes
+        run: |
+          set -euo pipefail
+          git config user.name Tony
+          git config user.email 157110190+stloendays@users.noreply.github.com
+          git add teddy_agent_pet/client/CMakeLists.txt \
+                  teddy_agent_pet/client/src/AgentClient.h \
+                  teddy_agent_pet/client/src/AgentClient.cpp \
+                  teddy_agent_pet/client/src/SshTunnel.h \
+                  teddy_agent_pet/client/src/SshTunnel.cpp \
+                  teddy_agent_pet/client/src/PetWindow.h \
+                  teddy_agent_pet/client/src/PetWindowV7.cpp
+          git diff --cached --check
+          git commit -m 'Add secure SSH owner auto pairing for Tony v0.8.5'
+          git push origin HEAD:feature/teddy-agent-pet
+
+  windows-build:
+    needs: patch
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python teddy_agent_pet/client/tools/validate_state_assets.py teddy_agent_pet/client/assets
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S teddy_agent_pet/client -B build-tony-v085 -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-tony-v085 --config Release --parallel
+
+      - name: Package runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force package | Out-Null
+          Copy-Item build-tony-v085/Release/TonyDesktopPet.exe package/
+          Copy-Item teddy_agent_pet/client/assets package/assets -Recurse
+          & windeployqt --release --no-translations package/TonyDesktopPet.exe
+
+      - name: Startup smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath (Resolve-Path package/TonyDesktopPet.exe) -PassThru
+          Start-Sleep -Seconds 7
+          if ($p.HasExited) { throw "Tony exited during startup smoke test with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Upload validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.8.5-auto-pair-validation
+          path: package
+          retention-days: 7
