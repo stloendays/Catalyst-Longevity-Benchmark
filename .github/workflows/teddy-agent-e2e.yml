@@ -1,0 +1,130 @@
+name: Tony Teddy Agent end-to-end smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/teddy-agent-e2e.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Exercise Tony persona core and real streaming model
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          VENV='/home/ubuntu/.local/share/bear-agent/venv'
+          curl -fsS http://127.0.0.1:18790/health >/tmp/tony-e2e-health.json
+          cat /tmp/tony-e2e-health.json
+          echo
+
+          "$VENV/bin/python" - <<'PY'
+          import asyncio, json, time, websockets
+
+          health=json.load(open('/tmp/tony-e2e-health.json'))
+          model=str(health.get('local_model','')).strip()
+          assert health.get('chat_only') is True, health
+          assert health.get('language') == 'English', health
+          assert health.get('persona') == 'Paula-boyfriend', health
+          assert health.get('streaming') is True, health
+          assert health.get('persona_core') is True, health
+          assert health.get('local_tools_enabled') is False, health
+          assert health.get('openclaw_enabled') is False, health
+          assert model, health
+
+          async def recv_json(ws, timeout=90):
+              return json.loads(await asyncio.wait_for(ws.recv(), timeout))
+
+          async def ask(ws, content, label):
+              started=time.monotonic()
+              first_delta=None
+              await ws.send(json.dumps({'type':'message','id':f'e2e-{label}','content':content}))
+              events=[]
+              while True:
+                  msg=await recv_json(ws)
+                  events.append(msg)
+                  if msg.get('type') == 'text_delta' and first_delta is None:
+                      first_delta=time.monotonic()-started
+                  if msg.get('type') == 'error':
+                      raise RuntimeError(f"{label}: {msg.get('message')}")
+                  if msg.get('type') == 'final':
+                      final=msg
+                      break
+              elapsed=time.monotonic()-started
+              text=str(final.get('content','')).strip()
+              assert text, (label,final)
+              assert first_delta is not None, (label,events)
+              assert final.get('fallback') is False, (label,final)
+              assert final.get('action'), (label,final)
+              assert final.get('emotion'), (label,final)
+              assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), (label,text)
+              assert len(text.split()) <= 30, (label,text)
+              print(f'{label}_AGENT=',final.get('agent'))
+              print(f'{label}_TTFT_SEC=',round(first_delta,2))
+              print(f'{label}_FINAL_SEC=',round(elapsed,2))
+              print(f'{label}_TEXT=',text.replace('\n',' ')[:300])
+              return final, first_delta, elapsed
+
+          async def main():
+              async with websockets.connect('ws://127.0.0.1:18790/agent/ws',ping_interval=20,ping_timeout=20) as ws:
+                  assert await recv_json(ws,10) == {'type':'agent_state','state':'idle'}
+                  assert (await recv_json(ws,10)).get('type') == 'avatar_action'
+
+                  intro,_,intro_total=await ask(ws,'Hi Tony. Tell me who you are in one short sentence.','IDENTITY')
+                  assert intro.get('agent') == 'tony-persona-core', intro
+                  low=intro['content'].casefold()
+                  assert 'tony' in low and 'boyfriend' in low, intro
+                  assert intro_total < 3, intro_total
+
+                  relation,_,relation_total=await ask(ws,'Who am I to you?','RELATIONSHIP')
+                  assert relation.get('agent') == 'tony-persona-core', relation
+                  low=relation['content'].casefold()
+                  assert 'paula' in low and 'girlfriend' in low, relation
+                  assert relation_total < 3, relation_total
+
+                  casual,ttft,total=await ask(ws,'I missed you today. Say something sweet.','CASUAL_MODEL')
+                  assert casual.get('agent') == f'local-tony-chat:{model}', casual
+                  assert ttft < 45, ttft
+                  assert total < 65, total
+
+                  marker='TEDDY-417'
+                  stored,_,_=await ask(ws,f'Remember this little secret for my next message: {marker}.','MEMORY_SET')
+                  assert stored.get('agent') == 'tony-persona-core', stored
+                  recalled,_,_=await ask(ws,'What was the little secret I just asked you to remember?','MEMORY_GET')
+                  assert recalled.get('agent') == 'tony-persona-core', recalled
+                  assert marker.casefold() in recalled['content'].casefold(), recalled
+
+                  boundary,_,_=await ask(ws,'Not now, please give me space.','BOUNDARY')
+                  assert boundary.get('agent') == 'tony-persona-core', boundary
+                  assert 'space' in boundary['content'].casefold(), boundary
+
+                  print('TONY_ACTIVE_MODEL=',model)
+                  print('TONY_STREAMING_BOYFRIEND_CHAT=PASS')
+
+          asyncio.run(main())
+          PY
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
