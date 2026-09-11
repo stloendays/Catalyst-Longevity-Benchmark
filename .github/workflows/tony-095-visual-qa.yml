@@ -14,7 +14,7 @@ permissions:
 jobs:
   visual-qa:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -62,7 +62,9 @@ jobs:
             $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
             $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
             try {
-              Start-Sleep -Milliseconds 2600
+              # Hosted Windows cold-start is consistently slower than 5 seconds.
+              # Eight seconds ensures the actual pet surface is visible before QA captures it.
+              Start-Sleep -Milliseconds 8000
               if ($proc.HasExited) { throw "Tony exited before capture '$label': $($proc.ExitCode)" }
               Save-Desktop "visual-qa/$label.png"
             } finally {
