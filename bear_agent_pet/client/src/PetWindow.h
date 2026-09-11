@@ -5,6 +5,7 @@
 #include <QPoint>
 #include <QSystemTrayIcon>
 #include <QHash>
+#include <QVector>
 #include "AgentClient.h"
 #include "SshTunnel.h"
 #include "SpeechBubble.h"
@@ -28,12 +29,13 @@ protected:
 private:
     enum class Action {
         Idle, Bob, Walk, Think, Celebrate, Sleep,
-        Shiver, AskHug, Hug, Blush, Study,
+        Shiver, AskHug, Hug, Blush, BlushWave, Study,
         AdjustGlasses, RemoveGlasses, Wave
     };
 
     void loadAssets();
     QString assetKeyForAction(Action action) const;
+    int frameStrideForAction(Action action) const;
     const QPixmap *pixmapForAction(Action action) const;
     void setAction(Action action, int durationMs=0);
     Action actionFromWire(const QString &name) const;
@@ -53,6 +55,7 @@ private:
 
     QPixmap pet_;
     QHash<QString,QPixmap> stateAssets_;
+    QHash<QString,QVector<QPixmap>> animationAssets_;
     QTimer animTimer_;
     QTimer idleTimer_;
     QTimer actionTimer_;
