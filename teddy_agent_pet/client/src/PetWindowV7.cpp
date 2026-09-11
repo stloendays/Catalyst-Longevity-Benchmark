@@ -96,6 +96,8 @@ PetWindow::PetWindow(QWidget *parent)
     dockScreenName_=initialSettings.value("pet/dock_screen","").toString();
     followCursor_=initialSettings.value("desktop/follow_cursor",true).toBool();
     snapToEdges_=initialSettings.value("desktop/snap_to_edges",true).toBool();
+    hideForFullscreen_=initialSettings.value("desktop/hide_for_fullscreen",true).toBool();
+    perchOnActiveWindow_=initialSettings.value("desktop/perch_on_active_window",false).toBool();
     lastCursorGlobal_=QCursor::pos();
     ensureOnDesktop();
     lifeClock_.start();
@@ -501,6 +503,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
 void PetWindow::setAction(Action a,int durationMs){
     action_=a; frame_=0; basePos_=pos();
+    if(a!=Action::Walk) hasWalkTarget_=false;
     if(a!=Action::Idle) {
         idleBlinking_=false;
         idleBlinkTick_=0;
@@ -646,6 +649,8 @@ void PetWindow::tickLife(){
 void PetWindow::tickDesktop(){
     if(dragging_ || mouseDown_) return;
 
+    updateForegroundWindowBehavior();
+    if(hiddenForFullscreen_) return;
     ensureOnDesktop();
 
     const QPoint cursor=QCursor::pos();
@@ -653,7 +658,12 @@ void PetWindow::tickDesktop(){
     else cursorStillTicks_=0;
     lastCursorGlobal_=cursor;
 
-    if(!followCursor_ || agentState_!="idle" || composer_.isVisible() ||
+    if(perchOnActiveWindow_ && agentState_=="idle" && !composer_.isVisible() &&
+       (action_==Action::Idle || action_==Action::Curious) && !actionTimer_.isActive()) {
+        perchOnForegroundWindow();
+    }
+
+    if(!followCursor_ || perchOnActiveWindow_ || agentState_!="idle" || composer_.isVisible() ||
        action_!=Action::Idle || actionTimer_.isActive()) return;
 
     const auto life=behavior_.snapshot();
@@ -663,17 +673,135 @@ void PetWindow::tickDesktop(){
     const int distance=qAbs(dx)+qAbs(dy);
     const bool recentlyTouched=activityClock_.isValid() && activityClock_.elapsed()<2200;
 
-    // Cursor following is intentionally low-frequency. Tony only takes a short
-    // curious walk when the pointer has been resting nearby for a few seconds.
-    if(cursorStillTicks_>=3 && !recentlyTouched && distance>150 && distance<430 &&
+    // Cursor following is intentionally low-frequency, but unlike V0.8.1 Tony now
+    // stores a real destination and walks toward it instead of taking a token 20px step.
+    if(cursorStillTicks_>=3 && !recentlyTouched && distance>150 && distance<520 &&
        life.curiosity>=58 && life.energy>=36 && QRandomGenerator::global()->bounded(100)<32) {
-        walkDirection_=(dx>=0) ? 1 : -1;
-        if(dockMode_==DockMode::Top || dockMode_==DockMode::Left || dockMode_==DockMode::Right)
-            dockMode_=DockMode::Free;
-        emotion_="curious";
-        setAction(Action::Walk,qBound(650,distance*3,1500));
+        startCursorWalk(cursor);
         cursorStillTicks_=0;
     }
+}
+
+bool PetWindow::foregroundWindowInfo(QRect *rect, QScreen **screenOut, bool *fullscreen) const {
+    if(rect) *rect=QRect();
+    if(screenOut) *screenOut=nullptr;
+    if(fullscreen) *fullscreen=false;
+#ifdef Q_OS_WIN
+    HWND foreground=GetForegroundWindow();
+    if(!foreground || !IsWindowVisible(foreground) || IsIconic(foreground)) return false;
+    const HWND selfHandle=reinterpret_cast<HWND>(winId());
+    if(foreground==selfHandle || foreground==GetShellWindow() || foreground==GetDesktopWindow()) return false;
+
+    RECT wr{};
+    if(!GetWindowRect(foreground,&wr) || wr.right<=wr.left || wr.bottom<=wr.top) return false;
+    const QRect windowRect(wr.left,wr.top,wr.right-wr.left,wr.bottom-wr.top);
+    QScreen *screen=screenForPoint(windowRect.center());
+    if(!screen) return false;
+
+    const QRect full=screen->geometry();
+    constexpr int tolerance=8;
+    const bool isFullscreen=
+        windowRect.left()<=full.left()+tolerance &&
+        windowRect.top()<=full.top()+tolerance &&
+        windowRect.right()-1>=full.right()-tolerance &&
+        windowRect.bottom()-1>=full.bottom()-tolerance;
+
+    if(rect) *rect=windowRect;
+    if(screenOut) *screenOut=screen;
+    if(fullscreen) *fullscreen=isFullscreen;
+    return true;
+#else
+    return false;
+#endif
+}
+
+void PetWindow::updateForegroundWindowBehavior(){
+    QRect foregroundRect;
+    QScreen *foregroundScreen=nullptr;
+    bool fullscreen=false;
+    const bool hasForeground=foregroundWindowInfo(&foregroundRect,&foregroundScreen,&fullscreen);
+
+    if(hiddenForFullscreen_) {
+        if(hideForFullscreen_ && hasForeground && fullscreen) return;
+        hiddenForFullscreen_=false;
+        show();
+        raise();
+        ensureOnDesktop();
+        emotion_="content";
+        setAction(Action::Land,650);
+        tray_.setToolTip(agent_.connected() ? "Tony · connected" : "Tony · waiting for server");
+        return;
+    }
+
+    if(hideForFullscreen_ && hasForeground && fullscreen && isVisible() && !composer_.isVisible()) {
+        hiddenForFullscreen_=true;
+        bubble_.dismiss();
+        hide();
+        tray_.setToolTip("Tony · resting during fullscreen");
+    }
+}
+
+void PetWindow::perchOnForegroundWindow(){
+    QRect windowRect;
+    QScreen *screen=nullptr;
+    bool fullscreen=false;
+    if(!foregroundWindowInfo(&windowRect,&screen,&fullscreen) || !screen || fullscreen) return;
+
+    const QRect area=screen->availableGeometry();
+    const QRect visibleWindow=windowRect.intersected(area);
+    if(visibleWindow.width()<180 || visibleWindow.height()<140) return;
+
+    const int maxX=qMax(area.left(),area.right()-width()+1);
+    const int maxY=qMax(area.top(),area.bottom()-height()+1);
+    const int shadowY=196;
+    const int rightInset=18;
+    QPoint target;
+    target.setX(qBound(area.left(),visibleWindow.right()-width()+1-rightInset,maxX));
+
+    // Prefer sitting on the top edge when there is room above the app. Otherwise
+    // Tony sits on the app's lower edge, clamped so the taskbar remains usable.
+    const int topPerch=visibleWindow.top()-shadowY;
+    const int bottomPerch=visibleWindow.bottom()-shadowY;
+    target.setY(topPerch>=area.top() ? qMin(topPerch,maxY) : qBound(area.top(),bottomPerch,maxY));
+
+    if((target-pos()).manhattanLength()>2) {
+        move(target);
+        bubble_.follow(mapToGlobal(QPoint(width()/2,20)));
+        composer_.follow(mapToGlobal(QPoint(width()/2,20)));
+    }
+    dockMode_=DockMode::Free;
+    dockScreenName_=screen->name();
+}
+
+void PetWindow::startCursorWalk(const QPoint &cursor){
+    QScreen *targetScreen=screenForPoint(cursor);
+    if(!targetScreen) return;
+
+    const QRect area=targetScreen->availableGeometry();
+    const int maxX=qMax(area.left(),area.right()-width()+1);
+    const int maxY=qMax(area.top(),area.bottom()-height()+1);
+    QPoint target=pos();
+    target.setX(qBound(area.left(),cursor.x()-width()/2,maxX));
+    if(dockMode_==DockMode::Bottom) target.setY(maxY);
+    else target.setY(qBound(area.top(),target.y(),maxY));
+
+    const int horizontalDistance=qAbs(target.x()-pos().x());
+    if(horizontalDistance<24) {
+        emotion_="curious";
+        setAction(Action::Curious,850);
+        return;
+    }
+
+    walkTarget_=target;
+    hasWalkTarget_=true;
+    walkDirection_=target.x()>=pos().x() ? 1 : -1;
+    if(dockMode_==DockMode::Top || dockMode_==DockMode::Left || dockMode_==DockMode::Right)
+        dockMode_=DockMode::Free;
+    emotion_="curious";
+    setAction(Action::Walk,qBound(1000,(horizontalDistance*70)/5+500,6500));
+    // setAction keeps explicit Walk targets; assign once more to make that invariant obvious.
+    hasWalkTarget_=true;
+    walkTarget_=target;
 }
 
 QScreen *PetWindow::screenForPoint(const QPoint &globalPoint) const {
@@ -798,8 +926,23 @@ void PetWindow::stepWalkAcrossDesktop(){
     if(!screen) screen=screenForPoint(frameGeometry().center());
     if(!screen) return;
 
+    if(hasWalkTarget_) {
+        const int remaining=walkTarget_.x()-pos().x();
+        if(qAbs(remaining)<=5) {
+            move(walkTarget_);
+            dockScreenName_=screenForPoint(frameGeometry().center()) ? screenForPoint(frameGeometry().center())->name() : dockScreenName_;
+            hasWalkTarget_=false;
+            actionTimer_.stop();
+            savePosition();
+            restoreAgentAction();
+            return;
+        }
+        walkDirection_=remaining>0 ? 1 : -1;
+    }
+
     const QRect area=screen->availableGeometry();
-    QPoint next=pos()+QPoint(walkDirection_,0);
+    const int stepPixels=hasWalkTarget_ ? 5 : 2;
+    QPoint next=pos()+QPoint(walkDirection_*stepPixels,0);
     const int nextLeft=next.x();
     const int nextRight=next.x()+width()-1;
 
@@ -830,6 +973,16 @@ void PetWindow::stepWalkAcrossDesktop(){
         next.setY(qBound(other.top(),next.y(),qMax(other.top(),other.bottom()-height()+1)));
         move(next);
         dockScreenName_=adjacent->name();
+        return;
+    }
+
+    if(hasWalkTarget_) {
+        // There is no reachable display in the requested direction. Stop at the
+        // current screen edge instead of oscillating forever.
+        hasWalkTarget_=false;
+        actionTimer_.stop();
+        settleOnDesktop();
+        restoreAgentAction();
         return;
     }
 
@@ -993,6 +1146,11 @@ void PetWindow::mouseMoveEvent(QMouseEvent *e){
     if(mouseDown_ && (e->buttons()&Qt::LeftButton)) {
         if(!dragging_ && (global-pressGlobal_).manhattanLength()>=QApplication::startDragDistance()) {
           dragging_=true;
+          if(perchOnActiveWindow_) {
+              perchOnActiveWindow_=false;
+              QSettings().setValue("desktop/perch_on_active_window",false);
+          }
+          hasWalkTarget_=false;
           dockMode_=DockMode::Free;
           dockScreenName_.clear();
           actionTimer_.stop();
@@ -1068,7 +1226,14 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto snapEdges=desktopMenu->addAction(uiText("Snap to screen edges / taskbar","靠近屏幕边缘 / 任务栏时停靠"));
     snapEdges->setCheckable(true);
     snapEdges->setChecked(snapToEdges_);
+    auto fullscreenAware=desktopMenu->addAction(uiText("Hide during fullscreen apps","全屏应用时自动躲起来"));
+    fullscreenAware->setCheckable(true);
+    fullscreenAware->setChecked(hideForFullscreen_);
+    auto perchWindow=desktopMenu->addAction(uiText("Perch on the active window edge","坐在当前窗口边缘"));
+    perchWindow->setCheckable(true);
+    perchWindow->setChecked(perchOnActiveWindow_);
     desktopMenu->addSeparator();
+    auto walkToCursor=desktopMenu->addAction(uiText("Walk to the cursor now","现在走到鼠标旁边"));
     auto taskbarHome=desktopMenu->addAction(uiText("Sit by the taskbar","回到任务栏旁边"));
     auto nextDisplay=desktopMenu->addAction(uiText("Move to next display","去下一个显示器"));
 
@@ -1124,8 +1289,20 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
         if(snapToEdges_) settleOnDesktop();
         else { dockMode_=DockMode::Free; savePosition(); }
     }
-    else if(chosen==taskbarHome) dockToTaskbar();
-    else if(chosen==nextDisplay) moveToNextScreen();
+    else if(chosen==fullscreenAware) {
+        hideForFullscreen_=fullscreenAware->isChecked();
+        QSettings().setValue("desktop/hide_for_fullscreen",hideForFullscreen_);
+        if(!hideForFullscreen_ && hiddenForFullscreen_) { hiddenForFullscreen_=false; show(); ensureOnDesktop(); }
+    }
+    else if(chosen==perchWindow) {
+        perchOnActiveWindow_=perchWindow->isChecked();
+        QSettings().setValue("desktop/perch_on_active_window",perchOnActiveWindow_);
+        if(perchOnActiveWindow_) { hasWalkTarget_=false; perchOnForegroundWindow(); }
+        else savePosition();
+    }
+    else if(chosen==walkToCursor) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); startCursorWalk(QCursor::pos()); }
+    else if(chosen==taskbarHome) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); dockToTaskbar(); }
+    else if(chosen==nextDisplay) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); moveToNextScreen(); }
     else if(chosen==idle) setAction(Action::Idle);
     else if(chosen==walk) { if(dockMode_==DockMode::Left || dockMode_==DockMode::Right || dockMode_==DockMode::Top) dockMode_=DockMode::Free; setAction(Action::Walk,3000); }
     else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);

@@ -4,6 +4,7 @@
 #include <QPixmap>
 #include <QScreen>
 #include <QPoint>
+#include <QRect>
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QVector>
@@ -52,6 +53,10 @@ private:
     void tickAnimation();
     void tickLife();
     void tickDesktop();
+    void updateForegroundWindowBehavior();
+    bool foregroundWindowInfo(QRect *rect, QScreen **screen, bool *fullscreen) const;
+    void perchOnForegroundWindow();
+    void startCursorWalk(const QPoint &cursor);
     QScreen *screenForPoint(const QPoint &globalPoint) const;
     void settleOnDesktop();
     void ensureOnDesktop();
@@ -109,6 +114,10 @@ private:
     bool idleBlinking_{false};
     bool followCursor_{true};
     bool snapToEdges_{true};
+    bool hideForFullscreen_{true};
+    bool perchOnActiveWindow_{false};
+    bool hiddenForFullscreen_{false};
+    bool hasWalkTarget_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
@@ -119,6 +128,7 @@ private:
     DockMode dockMode_{DockMode::Free};
     QString dockScreenName_;
     QPoint lastCursorGlobal_;
+    QPoint walkTarget_;
     QString answer_;
     QString emotion_{"neutral"};
     QString agentState_{"idle"};
