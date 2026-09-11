@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QEvent>
+#include <QIcon>
 #include <QKeySequence>
 #include <QMouseEvent>
 #include <QShortcut>
@@ -72,6 +73,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("TonyAgent");
     QCoreApplication::setApplicationName("Tony Desktop Pet");
     QCoreApplication::setApplicationVersion(QStringLiteral(TONY_APP_VERSION));
+    const QIcon appIcon(QCoreApplication::applicationDirPath()+QStringLiteral("/assets/tony-app.ico"));
+    if(!appIcon.isNull()) app.setWindowIcon(appIcon);
     app.setQuitOnLastWindowClosed(false);
 
     AppLogger::install();

@@ -90,6 +90,7 @@ PetWindow::PetWindow(QWidget *parent)
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
     loadAssets();
+    setWindowIcon(QApplication::windowIcon());
     restorePosition();
 
     QSettings initialSettings;
@@ -208,6 +209,18 @@ PetWindow::PetWindow(QWidget *parent)
         }
         tray_.setToolTip(connected ? "Tony · connected" : "Tony · waiting for server");
     });
+    connect(&agent_, &AgentClient::connectionStageChanged, this, [this](const QString &stage){
+        if(stage==QStringLiteral("connecting"))
+            tray_.setToolTip(uiText("Tony · connecting securely","Tony · 正在安全连接"));
+        else if(stage==QStringLiteral("retrying"))
+            tray_.setToolTip(uiText("Tony · retrying connection","Tony · 正在重试连接"));
+        else if(stage==QStringLiteral("pairing_request"))
+            tray_.setToolTip(uiText("Tony · checking public server","Tony · 正在检查公网服务器"));
+        else if(stage==QStringLiteral("approval_required"))
+            tray_.setToolTip(uiText("Tony · waiting for owner approval","Tony · 等待服务器批准"));
+        else if(stage==QStringLiteral("connected"))
+            tray_.setToolTip(uiText("Tony · connected","Tony · 已连接"));
+    });
     connect(&agent_, &AgentClient::pairingCodeReady, this,
             [this](const QString &code, qint64 expiresAt){
         pairingRequestActive_=false;
@@ -245,7 +258,7 @@ PetWindow::PetWindow(QWidget *parent)
         agentState_="error";
         emotion_="worried";
         setAction(Action::Think,2800);
-        showBubble("Tony couldn't finish that: " + text.left(260),7000);
+        showBubble(uiText("Tony couldn't finish that: ","Tony 连接或执行失败：") + text.left(320),8000);
     });
     connect(&tunnel_, &SshTunnel::statusChanged, this, [this](const QString &status){
         if(!agent_.connected()) tray_.setToolTip("Tony · "+status);
@@ -258,6 +271,7 @@ PetWindow::PetWindow(QWidget *parent)
         }
     });
 
+    if(!QApplication::windowIcon().isNull()) tray_.setIcon(QApplication::windowIcon());
     tray_.setToolTip("Tony · Desktop Agent");
     tray_.setVisible(true);
     localBridge_.setTrayIcon(&tray_);

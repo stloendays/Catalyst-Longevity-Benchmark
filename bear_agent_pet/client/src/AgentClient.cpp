@@ -27,35 +27,80 @@ QUrl pairingApiUrlFor(const QUrl &wsUrl, const QString &path) {
     url.setFragment({});
     return url;
 }
+
+QString friendlyTransportMessage(const QString &raw, const QUrl &url, bool zh) {
+    const QString lower=raw.toLower();
+    const bool secure=url.scheme().compare(QStringLiteral("wss"),Qt::CaseInsensitive)==0 ||
+                      url.scheme().compare(QStringLiteral("https"),Qt::CaseInsensitive)==0;
+    if(lower.contains(QStringLiteral("timed out")) || lower.contains(QStringLiteral("timeout"))) {
+        if(secure) return zh ? QStringLiteral("无法连接 Tony 公网入口（超时）。请检查云服务器安全组是否放行 TCP 443。")
+                             : QStringLiteral("Tony's public endpoint timed out. Check that the cloud security group allows inbound TCP 443.");
+        return zh ? QStringLiteral("连接 Tony 超时。") : QStringLiteral("The Tony connection timed out.");
+    }
+    if(lower.contains(QStringLiteral("host not found")) || lower.contains(QStringLiteral("name or service")))
+        return zh ? QStringLiteral("无法解析 Tony 服务器域名，请检查网络或服务器地址。")
+                  : QStringLiteral("Tony's server name could not be resolved. Check the network or server address.");
+    if(lower.contains(QStringLiteral("ssl")) || lower.contains(QStringLiteral("tls")) || lower.contains(QStringLiteral("handshake")))
+        return zh ? QStringLiteral("Tony 的 TLS 安全连接失败。请检查 HTTPS 证书以及 TCP 443 是否可达。")
+                  : QStringLiteral("Tony's TLS handshake failed. Check the HTTPS certificate and TCP 443 reachability.");
+    if(lower.contains(QStringLiteral("refused")))
+        return zh ? QStringLiteral("Tony 服务器拒绝连接，请检查反向代理和网关服务。")
+                  : QStringLiteral("Tony's server refused the connection. Check the reverse proxy and gateway service.");
+    return raw.trimmed().isEmpty()
+        ? (zh ? QStringLiteral("Tony 网络连接失败。") : QStringLiteral("Tony's network connection failed."))
+        : raw.trimmed();
+}
 }
 
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
-    reconnectTimer_.setInterval(3000);
-    reconnectTimer_.setSingleShot(false);
+    reconnectTimer_.setSingleShot(true);
     connect(&reconnectTimer_, &QTimer::timeout, this, &AgentClient::reconnect);
+
+    connectWatchdog_.setSingleShot(true);
+    connect(&connectWatchdog_, &QTimer::timeout, this, [this]{
+        if(socket_.state()!=QAbstractSocket::ConnectingState) return;
+        const QString detail=friendlyTransportMessage(
+            language_=="zh" ? QStringLiteral("连接超时") : QStringLiteral("connection timed out"),
+            endpoint_,language_=="zh");
+        socket_.abort();
+        if(!outageReported_) {
+            outageReported_=true;
+            emit errorMessage(detail);
+        }
+        emit connectionStageChanged(QStringLiteral("retrying"));
+        scheduleReconnect();
+    });
 
     pairingPollTimer_.setInterval(2000);
     pairingPollTimer_.setSingleShot(false);
     connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
 
     connect(&socket_, &QWebSocket::connected, this, [this]{
+        connectWatchdog_.stop();
         reconnectTimer_.stop();
+        reconnectDelayMs_=1000;
         outageReported_=false;
         sendClientHello();
+        emit connectionStageChanged(QStringLiteral("connected"));
         emit connectionChanged(true);
     });
     connect(&socket_, &QWebSocket::disconnected, this, [this]{
+        connectWatchdog_.stop();
         emit connectionChanged(false);
-        if(endpoint_.isValid() && !reconnectTimer_.isActive()) reconnectTimer_.start();
+        if(endpoint_.isValid() && !bearerToken_.isEmpty()) {
+            emit connectionStageChanged(QStringLiteral("retrying"));
+            scheduleReconnect();
+        }
     });
     connect(&socket_, &QWebSocket::textMessageReceived, this, &AgentClient::onText);
     connect(&socket_, &QWebSocket::errorOccurred, this, [this](QAbstractSocket::SocketError){
+        connectWatchdog_.stop();
         if(!outageReported_){
             outageReported_=true;
-            emit errorMessage(socket_.errorString());
+            emit errorMessage(friendlyTransportMessage(socket_.errorString(),endpoint_,language_=="zh"));
         }
-        if(endpoint_.isValid() && socket_.state()==QAbstractSocket::UnconnectedState && !reconnectTimer_.isActive())
-            reconnectTimer_.start();
+        emit connectionStageChanged(QStringLiteral("retrying"));
+        scheduleReconnect();
     });
 }
 
@@ -75,6 +120,8 @@ void AgentClient::connectTo(const QUrl &url, const QString &bearerToken) {
     endpoint_=url;
     bearerToken_=bearerToken.trimmed();
     outageReported_=false;
+    reconnectDelayMs_=1000;
+    connectWatchdog_.stop();
     reconnectTimer_.stop();
 
     if(changed && socket_.state()!=QAbstractSocket::UnconnectedState) {
@@ -117,18 +164,21 @@ void AgentClient::requestDevicePairing(const QUrl &wsUrl, const QString &deviceN
     QNetworkRequest request(requestUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
     request.setHeader(QNetworkRequest::UserAgentHeader,tonyUserAgent());
+    request.setTransferTimeout(12000);
+    emit connectionStageChanged(QStringLiteral("pairing_request"));
     const QJsonObject body{
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
     };
     auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply,&QNetworkReply::finished,this,[this,reply]{
+    connect(reply,&QNetworkReply::finished,this,[this,reply,requestUrl]{
         const QByteArray raw=reply->readAll();
         const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto doc=QJsonDocument::fromJson(raw);
         const auto obj=doc.isObject() ? doc.object() : QJsonObject{};
         if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300) {
             QString detail=obj.value("detail").toString();
-            if(detail.isEmpty()) detail=reply->errorString();
+            if(detail.isEmpty()) detail=friendlyTransportMessage(reply->errorString(),requestUrl,language_=="zh");
+            emit connectionStageChanged(QStringLiteral("offline"));
             emit pairingFailed((language_=="zh" ? QString("无法生成连接码：") : QString("Could not create a connection code: "))+detail);
             reply->deleteLater();
             return;
@@ -147,6 +197,7 @@ void AgentClient::requestDevicePairing(const QUrl &wsUrl, const QString &deviceN
 
         pairingPollTimer_.setInterval(pollMs);
         pairingPollTimer_.start();
+        emit connectionStageChanged(QStringLiteral("approval_required"));
         emit pairingCodeReady(code,pairingExpiresAt_);
         reply->deleteLater();
     });
@@ -167,6 +218,7 @@ void AgentClient::pollDevicePairing() {
     QNetworkRequest request(statusUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
     request.setHeader(QNetworkRequest::UserAgentHeader,tonyUserAgent());
+    request.setTransferTimeout(8000);
     const QJsonObject body{{"request_id",pairingRequestId_}};
     auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply,&QNetworkReply::finished,this,[this,reply]{
@@ -216,6 +268,7 @@ void AgentClient::pollDevicePairing() {
         pairingPollTimer_.stop();
         pairingRequestId_.clear();
         AppLogger::recordOperatorEvent(QStringLiteral("device_pair_approved"));
+        emit connectionStageChanged(QStringLiteral("connecting"));
         emit paired(token,deviceId,endpoint);
         connectTo(endpoint,token);
         reply->deleteLater();
@@ -242,12 +295,13 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setHeader(QNetworkRequest::UserAgentHeader, tonyUserAgent());
+    request.setTransferTimeout(12000);
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
     };
     auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply,&QNetworkReply::finished,this,[this,reply,wsUrl]{
+    connect(reply,&QNetworkReply::finished,this,[this,reply,wsUrl,pairUrl]{
         const QByteArray raw=reply->readAll();
         const auto status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto doc=QJsonDocument::fromJson(raw);
@@ -255,7 +309,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 
         if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300) {
             QString detail=obj.value("detail").toString();
-            if(detail.isEmpty()) detail=reply->errorString();
+            if(detail.isEmpty()) detail=friendlyTransportMessage(reply->errorString(),pairUrl,language_=="zh");
             emit pairingFailed((language_=="zh" ? QString("配对失败：") : QString("Pairing failed: "))+detail);
             reply->deleteLater();
             return;
@@ -275,12 +329,19 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
     });
 }
 
+void AgentClient::scheduleReconnect() {
+    if(!endpoint_.isValid() || bearerToken_.isEmpty() || reconnectTimer_.isActive()) return;
+    reconnectTimer_.start(reconnectDelayMs_);
+    reconnectDelayMs_=qMin(reconnectDelayMs_*2,15000);
+}
+
 void AgentClient::reconnect() {
-    if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
+    if(!endpoint_.isValid() || bearerToken_.isEmpty() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
+    emit connectionStageChanged(QStringLiteral("connecting"));
     QNetworkRequest request(endpoint_);
     request.setHeader(QNetworkRequest::UserAgentHeader, tonyUserAgent());
-    if(!bearerToken_.isEmpty())
-        request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
+    request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
+    connectWatchdog_.start(12000);
     socket_.open(request);
 }
 
