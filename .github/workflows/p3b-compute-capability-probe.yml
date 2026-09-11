@@ -1,0 +1,67 @@
+name: QoI P3B compute capability probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/p3b-compute-capability-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare server key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Read-only scientific-compute capability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -u
+          echo '=== IDENTITY ==='
+          whoami
+          hostname
+          uname -a
+          echo '=== RESOURCES ==='
+          nproc
+          free -h
+          df -h /
+          echo '=== SCHEDULERS / MPI ==='
+          for x in qsub qstat sbatch squeue srun mpirun mpiexec; do
+            printf '%-10s ' "$x"
+            command -v "$x" 2>/dev/null || echo MISSING
+          done
+          echo '=== VASP EXECUTABLES ==='
+          for x in vasp_std vasp_gam vasp_ncl vasp; do
+            printf '%-10s ' "$x"
+            command -v "$x" 2>/dev/null || echo MISSING
+          done
+          echo '=== MODULE SYSTEM ==='
+          if command -v module >/dev/null 2>&1; then
+            module --version 2>&1 | head -3 || true
+            module avail 2>&1 | grep -Ei 'vasp|intel|oneapi|openmpi|mpi' | head -80 || true
+          else
+            echo 'module command: MISSING'
+          fi
+          echo '=== LIMITED EXECUTABLE SEARCH ==='
+          find /opt /usr/local /home/ubuntu -maxdepth 5 -type f \( -name 'vasp_std' -o -name 'vasp_gam' -o -name 'vasp_ncl' \) -print 2>/dev/null | head -30 || true
+          echo '=== POTENTIAL-DATA DIRECTORY NAMES ONLY ==='
+          find /opt /usr/local /home/ubuntu -maxdepth 5 -type d \( -iname '*potcar*' -o -iname '*vasp*pseudo*' -o -iname '*potpaw*' \) -print 2>/dev/null | head -30 || true
+          echo 'NOTE: no POTCAR file contents are read or emitted.'
+          REMOTE
+
+      - name: Remove key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
