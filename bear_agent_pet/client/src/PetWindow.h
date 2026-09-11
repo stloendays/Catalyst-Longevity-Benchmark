@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QPixmap>
+#include <QImage>
 #include <QTimer>
 #include <QPoint>
 #include <QSystemTrayIcon>
