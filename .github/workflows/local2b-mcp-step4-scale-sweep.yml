@@ -1,0 +1,215 @@
+name: Local2B MCP Step 4 LoRA scale sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step4-scale-sweep.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
+jobs:
+  scale-sweep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy frozen benchmark and trace code
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'rm -rf /tmp/local2b-mcp-scale-sweep && mkdir -p /tmp/local2b-mcp-scale-sweep'
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/generate_stage2_dataset.py \
+            training/local2b_mcp/validate_dataset.py \
+            training/local2b_mcp/benchmark_tool_use.py \
+            training/local2b_mcp/benchmark_tool_use_trace.py \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-scale-sweep/
+
+      - name: Regenerate and freeze-check Step 2 data
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=30 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-scale-sweep
+          cd "$ROOT"
+          python3 generate_stage2_dataset.py --out dataset --train 16000 --val 1600 --test 1600 --seed 20260908
+          python3 validate_dataset.py dataset
+          test "$(sha256sum dataset/train.jsonl | awk '{print $1}')" = d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303
+          test "$(sha256sum dataset/val.jsonl | awk '{print $1}')" = 89e4aca2f72fc4efd6bab0a88299a68a32cd637edc0561d7d2c95b2b27463990
+          test "$(sha256sum dataset/test.jsonl | awk '{print $1}')" = 460b5308f6791eb53692fc0736a53e6f6b553a925207caa34517b456e28d78f2
+          python3 - <<'PY'
+          import json
+          from collections import Counter
+          rows=[]
+          with open('dataset/test.jsonl', encoding='utf-8') as f:
+              for _ in range(32): rows.append(json.loads(next(f)))
+          c=Counter(r['task_type'] for r in rows)
+          assert len(c)==16 and set(c.values())=={2}, c
+          print('STRATIFIED_FIRST32=PASS', dict(sorted(c.items())))
+          PY
+          REMOTE
+
+      - name: Run Base and Stage 3B scale sweep with traces
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=80 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-scale-sweep
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          ADAPTER=/opt/rhocodec-llm/adapters/local2b-mcp-step3b-r4-qv.gguf
+          SERVER=/opt/rhocodec-llm/bin/llama-server
+          MODEL_SHA=d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58
+          ADAPTER_SHA=177dafa0114e5f41f7bb4fe518be8a6e2dfbc998ca86687287bb7d2f0dd72502
+          PORT=18081
+          SERVER_PID=""
+
+          test -s "$MODEL" && test -s "$ADAPTER" && test -x "$SERVER"
+          test "$(sha256sum "$MODEL" | awk '{print $1}')" = "$MODEL_SHA"
+          test "$(sha256sum "$ADAPTER" | awk '{print $1}')" = "$ADAPTER_SHA"
+
+          HELP_LINE=$("$SERVER" --help 2>&1 | grep -- '--lora-scaled' | head -n 1 || true)
+          test -n "$HELP_LINE"
+          printf 'LORA_SCALE_HELP=%s\n' "$HELP_LINE" | tee "$ROOT/runtime-capability.txt"
+
+          # Exact base on the same first-32 stratified subset, using the deployed base endpoint.
+          systemctl is-active --quiet rhocodec-llm.service
+          cd "$ROOT"
+          python3 benchmark_tool_use_trace.py \
+            --dataset dataset/test.jsonl --endpoint http://127.0.0.1:18080/v1/chat/completions \
+            --model qwen3.5-2b-q4 --limit 32 --max-tokens 192 --timeout 120 \
+            --out base32.json --trace-out base32.trace.jsonl
+
+          restore_base() {
+            if [ -n "$SERVER_PID" ]; then
+              kill "$SERVER_PID" 2>/dev/null || true
+              wait "$SERVER_PID" 2>/dev/null || true
+            fi
+            sudo systemctl start rhocodec-llm.service || true
+          }
+          trap restore_base EXIT INT TERM
+          sudo systemctl stop rhocodec-llm.service
+
+          run_scale() {
+            label="$1"
+            scale="$2"
+            alias="qwen3.5-2b-q4-stage3b-${label}"
+            log="$ROOT/${label}-server.log"
+            if printf '%s' "$HELP_LINE" | grep -q 'FNAME:SCALE'; then
+              LORA_ARGS=(--lora-scaled "${ADAPTER}:${scale}")
+            else
+              LORA_ARGS=(--lora-scaled "$ADAPTER" "$scale")
+            fi
+            "$SERVER" -m "$MODEL" "${LORA_ARGS[@]}" --alias "$alias" \
+              --host 127.0.0.1 --port "$PORT" -c 16384 -t 4 -b 128 -ub 128 --parallel 1 \
+              --jinja --reasoning-budget 0 --no-webui >"$log" 2>&1 &
+            SERVER_PID=$!
+            ready=0
+            for _ in $(seq 1 120); do
+              if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; then ready=1; break; fi
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              tail -120 "$log" || true
+              exit 20
+            fi
+            python3 "$ROOT/benchmark_tool_use_trace.py" \
+              --dataset "$ROOT/dataset/test.jsonl" --endpoint "http://127.0.0.1:${PORT}/v1/chat/completions" \
+              --model "$alias" --limit 32 --max-tokens 192 --timeout 120 \
+              --out "$ROOT/${label}.json" --trace-out "$ROOT/${label}.trace.jsonl"
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+            SERVER_PID=""
+          }
+
+          run_scale s025 0.25
+          run_scale s050 0.50
+          run_scale s075 0.75
+          run_scale s100 1.00
+
+          sudo systemctl start rhocodec-llm.service
+          healthy=0
+          for _ in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18080/v1/models >/dev/null 2>&1; then healthy=1; break; fi
+            sleep 1
+          done
+          test "$healthy" -eq 1
+          systemctl is-active --quiet rhocodec-llm.service
+          echo 'base_service_after=HEALTHY' > "$ROOT/runtime-status.txt"
+          trap - EXIT INT TERM
+          REMOTE
+
+      - name: Collect sweep evidence
+        if: always()
+        run: |
+          mkdir -p build/local2b-mcp-scale-sweep
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            'ubuntu@150.158.27.206:/tmp/local2b-mcp-scale-sweep/*.json' \
+            'ubuntu@150.158.27.206:/tmp/local2b-mcp-scale-sweep/*.jsonl' \
+            'ubuntu@150.158.27.206:/tmp/local2b-mcp-scale-sweep/*.txt' \
+            build/local2b-mcp-scale-sweep/ || true
+
+      - name: Compare scales and select any rescue candidate
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('build/local2b-mcp-scale-sweep')
+          labels=['base32','s025','s050','s075','s100']
+          rows={label:json.loads((root/f'{label}.json').read_text()) for label in labels}
+          keys=['tool_gate_accuracy','tool_sequence_exact_accuracy','call_exact_accuracy','valid_argument_shape_rate','no_tool_precision','false_tool_call_rate','api_or_parse_error_rate','mean_latency_s']
+          table={k:{label:rows[label]['metrics'][k] for label in labels} for k in keys}
+          base=rows['base32']['metrics']
+          candidates=[]
+          for label in labels[1:]:
+              m=rows[label]['metrics']
+              nonreg=(m['api_or_parse_error_rate']==0 and m['tool_gate_accuracy']>=base['tool_gate_accuracy'] and m['call_exact_accuracy']>=base['call_exact_accuracy'] and m['no_tool_precision']>=base['no_tool_precision'] and m['false_tool_call_rate']<=base['false_tool_call_rate'])
+              gain=(m['tool_gate_accuracy']>base['tool_gate_accuracy'] or m['call_exact_accuracy']>base['call_exact_accuracy'] or m['no_tool_precision']>base['no_tool_precision'] or m['false_tool_call_rate']<base['false_tool_call_rate'])
+              if nonreg and gain: candidates.append(label)
+          report={'benchmark':'local2b_mcp_stage3b_scale_sweep_first32_v1','records_per_condition':32,'conditions':labels,'metrics':table,'rescue_candidates':candidates,'full_benchmark_next':candidates[0] if candidates else None}
+          (root/'scale-comparison.json').write_text(json.dumps(report,indent=2,ensure_ascii=False)+'\n')
+          print(json.dumps(report,indent=2,ensure_ascii=False))
+
+          hdr='| Metric | Base | 0.25 | 0.50 | 0.75 | 1.00 |\n|---|---:|---:|---:|---:|---:|\n'
+          lines=[hdr]
+          names={'tool_gate_accuracy':'Tool gate','call_exact_accuracy':'Exact call+args','no_tool_precision':'No-tool','false_tool_call_rate':'False tool-call','valid_argument_shape_rate':'Valid args'}
+          for k in ['tool_gate_accuracy','call_exact_accuracy','valid_argument_shape_rate','no_tool_precision','false_tool_call_rate']:
+              vals=[table[k][x] for x in labels]
+              lines.append('| '+names[k]+' | '+' | '.join(f'{v*100:.2f}%' for v in vals)+' |\n')
+          lines.append(f"\nRescue candidates: {', '.join(candidates) if candidates else 'none'}\n")
+          (root/'summary.md').write_text(''.join(lines))
+          print(''.join(lines))
+          PY
+          cat build/local2b-mcp-scale-sweep/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scale sweep
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step4-scale-sweep
+          path: build/local2b-mcp-scale-sweep/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
