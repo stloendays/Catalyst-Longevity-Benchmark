@@ -85,9 +85,6 @@ jobs:
             printf '%s\n' 'BEAR_LOCAL_MAX_TOKENS=220' >> "$ENVFILE"
           fi
 
-          # The local model had previously been deliberately stopped with a clean
-          # systemd stop (not an OOM/crash). Tony depends on it for the resilient
-          # offline persona route, so deployments ensure it is enabled and alive.
           sudo systemctl enable "$LOCAL_SERVICE"
           if ! systemctl is-active --quiet "$LOCAL_SERVICE"; then
             sudo systemctl restart "$LOCAL_SERVICE"
@@ -145,15 +142,33 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.6.1', d
+          assert d['version'] == '0.7.0', d
           assert d['tony_persona'] is True, d
           assert d['technical_agent'] == 'main', d
           assert d['local_model'] == 'qwen3.5-2b-q4', d
+          assert d['pairing_supported'] is True, d
           print('TONY_GATEWAY_HEALTH=PASS')
           PY
 
-          echo '=== ROUTER CONTRACT ==='
+          echo '=== PAIRING CONTRACT ==='
           cd "$APP"
+          BEAR_PAIRING_STORE=/tmp/tony-pairing-contract.json "$VENV/bin/python" - <<'PY'
+          from pathlib import Path
+          from app.pairing import issue_pairing_code, consume_pairing_code, token_valid, revoke_device
+          p=Path('/tmp/tony-pairing-contract.json')
+          p.unlink(missing_ok=True)
+          code, expires_at = issue_pairing_code(120)
+          assert len(code.replace('-', '')) == 12
+          assert expires_at > 0
+          token, device_id = consume_pairing_code(code, 'GitHub Actions')
+          assert token_valid(token)
+          assert revoke_device(device_id)
+          assert not token_valid(token)
+          p.unlink(missing_ok=True)
+          print('TONY_PAIRING_CONTRACT=PASS')
+          PY
+
+          echo '=== ROUTER CONTRACT ==='
           "$VENV/bin/python" - <<'PY'
           from app.main import action_for_text, route_backends
           assert route_backends('Can I have a hug?')[0] == 'local-qwen'
