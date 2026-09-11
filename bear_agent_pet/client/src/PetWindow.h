@@ -2,6 +2,7 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QPixmap>
+#include <QScreen>
 #include <QPoint>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -31,6 +32,8 @@ protected:
     void enterEvent(QEnterEvent*) override;
     void leaveEvent(QEvent*) override;
 private:
+    enum class DockMode { Free, Bottom, Top, Left, Right };
+
     enum class Action {
         Idle, Curious, Pet, Carried, Land, Dizzy, Stretch, Yawn,
         Bob, Walk, Think, Celebrate, Sleep,
@@ -48,6 +51,15 @@ private:
     void restoreAgentAction();
     void tickAnimation();
     void tickLife();
+    void tickDesktop();
+    QScreen *screenForPoint(const QPoint &globalPoint) const;
+    void settleOnDesktop();
+    void ensureOnDesktop();
+    void stepWalkAcrossDesktop();
+    void dockToTaskbar(QScreen *screen=nullptr);
+    void moveToNextScreen();
+    QString dockModeName(DockMode mode) const;
+    DockMode dockModeFromName(const QString &name) const;
     void scheduleBlink();
     void scheduleIdleMoment();
     void runIdleMoment();
@@ -74,6 +86,7 @@ private:
     QTimer actionTimer_;
     QTimer lifeTimer_;
     QTimer hoverTimer_;
+    QTimer desktopTimer_;
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
@@ -94,12 +107,18 @@ private:
     bool mouseDown_{false};
     bool hovered_{false};
     bool idleBlinking_{false};
+    bool followCursor_{true};
+    bool snapToEdges_{true};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
     int dragTravel_{0};
     int rapidClicks_{0};
     int lifeSaveTicks_{0};
+    int cursorStillTicks_{0};
+    DockMode dockMode_{DockMode::Free};
+    QString dockScreenName_;
+    QPoint lastCursorGlobal_;
     QString answer_;
     QString emotion_{"neutral"};
     QString agentState_{"idle"};

@@ -20,6 +20,7 @@
 #include <QSysInfo>
 #include <QTime>
 #include <QtMath>
+#include <limits>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -91,6 +92,12 @@ PetWindow::PetWindow(QWidget *parent)
     QSettings initialSettings;
     if(!initialSettings.contains("ui/language")) initialSettings.setValue("ui/language","en");
     behavior_.restore(initialSettings);
+    dockMode_=dockModeFromName(initialSettings.value("pet/dock_mode","free").toString());
+    dockScreenName_=initialSettings.value("pet/dock_screen","").toString();
+    followCursor_=initialSettings.value("desktop/follow_cursor",true).toBool();
+    snapToEdges_=initialSettings.value("desktop/snap_to_edges",true).toBool();
+    lastCursorGlobal_=QCursor::pos();
+    ensureOnDesktop();
     lifeClock_.start();
     activityClock_.start();
     pressClock_.invalidate();
@@ -134,6 +141,10 @@ PetWindow::PetWindow(QWidget *parent)
     lifeTimer_.setInterval(5000);
     connect(&lifeTimer_, &QTimer::timeout, this, &PetWindow::tickLife);
     lifeTimer_.start();
+
+    desktopTimer_.setInterval(1000);
+    connect(&desktopTimer_, &QTimer::timeout, this, &PetWindow::tickDesktop);
+    desktopTimer_.start();
 
     connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){
         submitTonyPrompt(text);
@@ -244,6 +255,7 @@ PetWindow::PetWindow(QWidget *parent)
 PetWindow::~PetWindow() {
     QSettings lifeSettings;
     behavior_.save(lifeSettings);
+    savePosition();
     composer_.dismiss();
     bubble_.dismiss();
     tunnel_.stop();
@@ -428,6 +440,18 @@ void PetWindow::paintEvent(QPaintEvent*) {
     case Action::Wave: dy=-qAbs(int(3*qSin(t*1.6))); rotation=3.0*qSin(t*1.8); break;
     }
 
+    // The desktop surface affects Tony's resting pose. Bottom means he is sitting
+    // on the usable desktop/taskbar boundary; side edges make him lean inward.
+    if(!dragging_) {
+        switch(dockMode_) {
+        case DockMode::Bottom: dy += 3; scale *= .995; break;
+        case DockMode::Top: dy -= 2; rotation += 1.2*qSin(t*.30); break;
+        case DockMode::Left: dx -= 3; rotation -= 2.4; break;
+        case DockMode::Right: dx += 3; rotation += 2.4; break;
+        case DockMode::Free: break;
+        }
+    }
+
     // Tony notices the cursor even while idle. With no dedicated eye sprite yet,
     // a tiny body lean gives the impression that he is following the user.
     if(!dragging_ && (action_==Action::Idle || action_==Action::Curious)) {
@@ -538,14 +562,7 @@ void PetWindow::tickAnimation(){
         }
     }
     if(action_==Action::Walk && !dragging_){
-        auto screen=QGuiApplication::screenAt(frameGeometry().center());
-        if(!screen) screen=QGuiApplication::primaryScreen();
-        const auto area=screen->availableGeometry();
-        // Slow desktop walk: one pixel per animation tick rather than gliding constantly.
-        QPoint n=pos()+QPoint(1*walkDirection_,0);
-        if(n.x()+width()>area.right()) { walkDirection_=-1; n.setX(area.right()-width()); }
-        else if(n.x()<area.left()) { walkDirection_=1; n.setX(area.left()); }
-        move(n);
+        stepWalkAcrossDesktop();
     }
     const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
     bubble_.follow(anchor);
@@ -623,6 +640,253 @@ void PetWindow::tickLife(){
         lifeSaveTicks_=0;
     }
     if((action_==Action::Idle || action_==Action::Curious) && nearbyArea.contains(cursorLocal)) update();
+}
+
+
+void PetWindow::tickDesktop(){
+    if(dragging_ || mouseDown_) return;
+
+    ensureOnDesktop();
+
+    const QPoint cursor=QCursor::pos();
+    if((cursor-lastCursorGlobal_).manhattanLength()<4) ++cursorStillTicks_;
+    else cursorStillTicks_=0;
+    lastCursorGlobal_=cursor;
+
+    if(!followCursor_ || agentState_!="idle" || composer_.isVisible() ||
+       action_!=Action::Idle || actionTimer_.isActive()) return;
+
+    const auto life=behavior_.snapshot();
+    const QPoint center=frameGeometry().center();
+    const int dx=cursor.x()-center.x();
+    const int dy=cursor.y()-center.y();
+    const int distance=qAbs(dx)+qAbs(dy);
+    const bool recentlyTouched=activityClock_.isValid() && activityClock_.elapsed()<2200;
+
+    // Cursor following is intentionally low-frequency. Tony only takes a short
+    // curious walk when the pointer has been resting nearby for a few seconds.
+    if(cursorStillTicks_>=3 && !recentlyTouched && distance>150 && distance<430 &&
+       life.curiosity>=58 && life.energy>=36 && QRandomGenerator::global()->bounded(100)<32) {
+        walkDirection_=(dx>=0) ? 1 : -1;
+        if(dockMode_==DockMode::Top || dockMode_==DockMode::Left || dockMode_==DockMode::Right)
+            dockMode_=DockMode::Free;
+        emotion_="curious";
+        setAction(Action::Walk,qBound(650,distance*3,1500));
+        cursorStillTicks_=0;
+    }
+}
+
+QScreen *PetWindow::screenForPoint(const QPoint &globalPoint) const {
+    if(auto *screen=QGuiApplication::screenAt(globalPoint)) return screen;
+
+    QScreen *best=QGuiApplication::primaryScreen();
+    int bestDistance=std::numeric_limits<int>::max();
+    for(auto *screen:QGuiApplication::screens()) {
+        const QRect g=screen->geometry();
+        const int dx=globalPoint.x()<g.left() ? g.left()-globalPoint.x() :
+                     globalPoint.x()>g.right() ? globalPoint.x()-g.right() : 0;
+        const int dy=globalPoint.y()<g.top() ? g.top()-globalPoint.y() :
+                     globalPoint.y()>g.bottom() ? globalPoint.y()-g.bottom() : 0;
+        const int d=dx+dy;
+        if(d<bestDistance) { bestDistance=d; best=screen; }
+    }
+    return best;
+}
+
+QString PetWindow::dockModeName(DockMode mode) const {
+    switch(mode) {
+    case DockMode::Bottom:return "bottom";
+    case DockMode::Top:return "top";
+    case DockMode::Left:return "left";
+    case DockMode::Right:return "right";
+    case DockMode::Free:return "free";
+    }
+    return "free";
+}
+
+PetWindow::DockMode PetWindow::dockModeFromName(const QString &name) const {
+    const QString n=name.trimmed().toLower();
+    if(n=="bottom") return DockMode::Bottom;
+    if(n=="top") return DockMode::Top;
+    if(n=="left") return DockMode::Left;
+    if(n=="right") return DockMode::Right;
+    return DockMode::Free;
+}
+
+void PetWindow::ensureOnDesktop(){
+    QScreen *screen=nullptr;
+    if(!dockScreenName_.isEmpty()) {
+        for(auto *candidate:QGuiApplication::screens()) {
+            if(candidate->name()==dockScreenName_) { screen=candidate; break; }
+        }
+    }
+    if(!screen) screen=screenForPoint(frameGeometry().center());
+    if(!screen) return;
+
+    const QRect area=screen->availableGeometry();
+    QPoint p=pos();
+    const int maxX=qMax(area.left(),area.right()-width()+1);
+    const int maxY=qMax(area.top(),area.bottom()-height()+1);
+
+    switch(dockMode_) {
+    case DockMode::Bottom:
+        p.setX(qBound(area.left(),p.x(),maxX));
+        p.setY(maxY);
+        break;
+    case DockMode::Top:
+        p.setX(qBound(area.left(),p.x(),maxX));
+        p.setY(area.top());
+        break;
+    case DockMode::Left:
+        p.setX(area.left());
+        p.setY(qBound(area.top(),p.y(),maxY));
+        break;
+    case DockMode::Right:
+        p.setX(maxX);
+        p.setY(qBound(area.top(),p.y(),maxY));
+        break;
+    case DockMode::Free: {
+        bool visible=false;
+        for(auto *candidate:QGuiApplication::screens()) {
+            const QRect intersection=frameGeometry().intersected(candidate->geometry());
+            if(intersection.width()>=48 && intersection.height()>=48) { visible=true; break; }
+        }
+        if(!visible) {
+            p.setX(qBound(area.left(),p.x(),maxX));
+            p.setY(qBound(area.top(),p.y(),maxY));
+        }
+        break;
+    }
+    }
+
+    if(p!=pos()) move(p);
+    dockScreenName_=screen->name();
+}
+
+void PetWindow::settleOnDesktop(){
+    QScreen *screen=screenForPoint(frameGeometry().center());
+    if(!screen) return;
+    dockScreenName_=screen->name();
+
+    const QRect area=screen->availableGeometry();
+    QPoint p=pos();
+    const int maxX=qMax(area.left(),area.right()-width()+1);
+    const int maxY=qMax(area.top(),area.bottom()-height()+1);
+    p.setX(qBound(area.left(),p.x(),maxX));
+    p.setY(qBound(area.top(),p.y(),maxY));
+
+    dockMode_=DockMode::Free;
+    if(snapToEdges_) {
+        struct Candidate { int distance; DockMode mode; };
+        const Candidate candidates[] = {
+            {qAbs(p.y()+height()-1-area.bottom()),DockMode::Bottom},
+            {qAbs(p.y()-area.top()),DockMode::Top},
+            {qAbs(p.x()-area.left()),DockMode::Left},
+            {qAbs(p.x()+width()-1-area.right()),DockMode::Right},
+        };
+        Candidate best=candidates[0];
+        for(const auto &candidate:candidates) if(candidate.distance<best.distance) best=candidate;
+        if(best.distance<=52) dockMode_=best.mode;
+    }
+
+    move(p);
+    ensureOnDesktop();
+}
+
+void PetWindow::stepWalkAcrossDesktop(){
+    QScreen *screen=QGuiApplication::screenAt(frameGeometry().center());
+    if(!screen) screen=screenForPoint(frameGeometry().center());
+    if(!screen) return;
+
+    const QRect area=screen->availableGeometry();
+    QPoint next=pos()+QPoint(walkDirection_,0);
+    const int nextLeft=next.x();
+    const int nextRight=next.x()+width()-1;
+
+    if(nextLeft>=area.left() && nextRight<=area.right()) {
+        move(next);
+        dockScreenName_=screen->name();
+        return;
+    }
+
+    QScreen *adjacent=nullptr;
+    int bestGap=std::numeric_limits<int>::max();
+    const QRect currentRect=frameGeometry();
+    for(auto *candidate:QGuiApplication::screens()) {
+        if(candidate==screen) continue;
+        const QRect other=candidate->availableGeometry();
+        const bool verticalOverlap=other.bottom()>=currentRect.top()+40 &&
+                                   other.top()<=currentRect.bottom()-40;
+        if(!verticalOverlap) continue;
+        int gap=std::numeric_limits<int>::max();
+        if(walkDirection_>0 && other.left()>=area.right()-2) gap=other.left()-area.right();
+        if(walkDirection_<0 && other.right()<=area.left()+2) gap=area.left()-other.right();
+        if(gap>=0 && gap<bestGap && gap<=96) { bestGap=gap; adjacent=candidate; }
+    }
+
+    if(adjacent) {
+        const QRect other=adjacent->availableGeometry();
+        next.setX(walkDirection_>0 ? other.left() : other.right()-width()+1);
+        next.setY(qBound(other.top(),next.y(),qMax(other.top(),other.bottom()-height()+1)));
+        move(next);
+        dockScreenName_=adjacent->name();
+        return;
+    }
+
+    walkDirection_=-walkDirection_;
+    next=pos();
+    next.setX(walkDirection_>0 ? area.left() : area.right()-width()+1);
+    move(next);
+}
+
+void PetWindow::dockToTaskbar(QScreen *screen){
+    if(!screen) screen=screenForPoint(frameGeometry().center());
+    if(!screen) return;
+
+    const QRect full=screen->geometry();
+    const QRect area=screen->availableGeometry();
+    const int insetLeft=area.left()-full.left();
+    const int insetTop=area.top()-full.top();
+    const int insetRight=full.right()-area.right();
+    const int insetBottom=full.bottom()-area.bottom();
+
+    int biggest=insetBottom;
+    dockMode_=DockMode::Bottom;
+    if(insetTop>biggest) { biggest=insetTop; dockMode_=DockMode::Top; }
+    if(insetLeft>biggest) { biggest=insetLeft; dockMode_=DockMode::Left; }
+    if(insetRight>biggest) { biggest=insetRight; dockMode_=DockMode::Right; }
+    if(biggest<3) dockMode_=DockMode::Bottom;
+
+    dockScreenName_=screen->name();
+    QPoint p=pos();
+    p.setX(qBound(area.left(),p.x(),qMax(area.left(),area.right()-width()+1)));
+    p.setY(qBound(area.top(),p.y(),qMax(area.top(),area.bottom()-height()+1)));
+    move(p);
+    ensureOnDesktop();
+    savePosition();
+    emotion_="content";
+    setAction(Action::Land,650);
+}
+
+void PetWindow::moveToNextScreen(){
+    const auto screens=QGuiApplication::screens();
+    if(screens.size()<2) {
+        showBubble(uiText("I only see one display.","我现在只看到一个显示器。"),2600);
+        return;
+    }
+
+    QScreen *current=screenForPoint(frameGeometry().center());
+    int index=screens.indexOf(current);
+    if(index<0) index=0;
+    QScreen *next=screens.at((index+1)%screens.size());
+    const QRect area=next->availableGeometry();
+    move(area.center().x()-width()/2,area.bottom()-height()+1);
+    dockScreenName_=next->name();
+    dockMode_=DockMode::Bottom;
+    ensureOnDesktop();
+    savePosition();
+    emotion_="playful";
+    setAction(Action::Land,700);
 }
 
 void PetWindow::markInteraction(){
@@ -728,8 +992,10 @@ void PetWindow::mouseMoveEvent(QMouseEvent *e){
     const QPoint global=e->globalPosition().toPoint();
     if(mouseDown_ && (e->buttons()&Qt::LeftButton)) {
         if(!dragging_ && (global-pressGlobal_).manhattanLength()>=QApplication::startDragDistance()) {
-  dragging_=true;
-  actionTimer_.stop();
+          dragging_=true;
+          dockMode_=DockMode::Free;
+          dockScreenName_.clear();
+          actionTimer_.stop();
   action_=Action::Carried;
   frame_=0;
   lastDragGlobal_=global;
@@ -753,6 +1019,7 @@ void PetWindow::mouseReleaseEvent(QMouseEvent *e){
         const bool rough=dragTravel_>850 || (pressClock_.isValid() && pressClock_.elapsed()<450 && dragTravel_>360);
         behavior_.onDragged(rough);
         dragging_=false;
+        settleOnDesktop();
         savePosition();
         if(rough) {
   emotion_="dizzy";
@@ -793,6 +1060,17 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto *connectionMenu=settings->addMenu(uiText("Connection","连接"));
     auto serverAddress=connectionMenu->addAction(uiText("Server address…","服务器地址…"));
     auto localSsh=connectionMenu->addAction(uiText("Use local SSH tunnel (advanced)","使用本机 SSH 隧道（高级）"));
+
+    auto *desktopMenu=settings->addMenu(uiText("Desktop behavior","桌面行为"));
+    auto followCursor=desktopMenu->addAction(uiText("Gently follow a nearby cursor","轻轻跟随附近的鼠标"));
+    followCursor->setCheckable(true);
+    followCursor->setChecked(followCursor_);
+    auto snapEdges=desktopMenu->addAction(uiText("Snap to screen edges / taskbar","靠近屏幕边缘 / 任务栏时停靠"));
+    snapEdges->setCheckable(true);
+    snapEdges->setChecked(snapToEdges_);
+    desktopMenu->addSeparator();
+    auto taskbarHome=desktopMenu->addAction(uiText("Sit by the taskbar","回到任务栏旁边"));
+    auto nextDisplay=desktopMenu->addAction(uiText("Move to next display","去下一个显示器"));
 
     auto *actions=m.addMenu(uiText("Tony actions","Tony 动作"));
     auto idle=actions->addAction(uiText("Sit quietly","安静坐好"));
@@ -835,8 +1113,21 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
         }
     }
     else if(chosen==localSsh) useLocalSshConnection();
+    else if(chosen==followCursor) {
+        followCursor_=followCursor->isChecked();
+        QSettings().setValue("desktop/follow_cursor",followCursor_);
+        showBubble(followCursor_ ? uiText("Okay. I may wander over when the cursor waits nearby.","好。我看到鼠标在附近停着时，偶尔会走过去看看。") : uiText("Okay. I will stay put unless you move me.","好。我不会主动追着鼠标跑了。"),3200);
+    }
+    else if(chosen==snapEdges) {
+        snapToEdges_=snapEdges->isChecked();
+        QSettings().setValue("desktop/snap_to_edges",snapToEdges_);
+        if(snapToEdges_) settleOnDesktop();
+        else { dockMode_=DockMode::Free; savePosition(); }
+    }
+    else if(chosen==taskbarHome) dockToTaskbar();
+    else if(chosen==nextDisplay) moveToNextScreen();
     else if(chosen==idle) setAction(Action::Idle);
-    else if(chosen==walk) setAction(Action::Walk,3000);
+    else if(chosen==walk) { if(dockMode_==DockMode::Left || dockMode_==DockMode::Right || dockMode_==DockMode::Top) dockMode_=DockMode::Free; setAction(Action::Walk,3000); }
     else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);
     else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);
     else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }
@@ -901,6 +1192,11 @@ void PetWindow::showBubble(const QString &text, int timeoutMs){ bubble_.showMess
 void PetWindow::restorePosition(){
     QSettings s; auto v=s.value("pet/position");
     if(v.isValid()) move(v.toPoint());
-    else { auto a=QGuiApplication::primaryScreen()->availableGeometry(); move(a.right()-width()-40,a.bottom()-height()-20); }
+    else { auto a=QGuiApplication::primaryScreen()->availableGeometry(); move(a.right()-width()-40,a.bottom()-height()+1); }
 }
-void PetWindow::savePosition(){ QSettings().setValue("pet/position",pos()); }
+void PetWindow::savePosition(){
+    QSettings s;
+    s.setValue("pet/position",pos());
+    s.setValue("pet/dock_mode",dockModeName(dockMode_));
+    s.setValue("pet/dock_screen",dockScreenName_);
+}
