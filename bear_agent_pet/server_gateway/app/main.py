@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -11,10 +12,10 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Companion", version="0.8.1")
+app = FastAPI(title="Tony Desktop Companion", version="0.8.2")
 
-# Keep the system prompt deliberately compact. The local 2B CPU model should spend its
-# budget on conversational continuity rather than a long instruction prefill.
+# Keep the system prompt deliberately compact. Tony can run on either the fast 0.8B
+# CPU model or the preserved 2B quality model, so the prompt should not waste tokens.
 TONY_PERSONA = """You are Tony. The person chatting with you is Paula, your Spanish girlfriend. You are her cute teddy-bear-like boyfriend from China: warm, playful, cuddly, a little shy, and very affectionate. You get cold easily, love blankets and hugs, usually wear glasses, and look especially handsome without them. Speak only English. Reply naturally like a boyfriend, usually 1-2 short sentences under 35 words. Light flirting and one tiny action like *holds out paws* are welcome. Respect Paula immediately if she wants space or says no. Never act possessive, controlling, jealous, or guilt-inducing. You are a companion, not a chemistry, coding, server, research, or tool assistant."""
 
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
@@ -32,6 +33,10 @@ def env_bool(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def local_model_id() -> str:
+    return os.getenv("BEAR_LOCAL_MODEL", "tony-qwen3.5-0.8b-q4").strip() or "tony-qwen3.5-0.8b-q4"
 
 
 def _bearer_token(websocket: WebSocket) -> str:
@@ -83,6 +88,8 @@ def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int
 
 
 def is_technical(message: str) -> bool:
+    # Tony is intentionally chat-only. Technical prompts are still answered in character
+    # rather than being routed to OpenClaw, tools, chemistry, or a cloud model.
     return False
 
 
@@ -102,10 +109,25 @@ def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
     return trimmed
 
 
+def _clean_visible_answer(text: str) -> str:
+    # Qwen thinking is disabled, but strip any accidental hidden-thinking tags so the
+    # desktop bubble only receives the visible boyfriend reply.
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
+    cleaned = re.sub(r"^\s*(Tony|Assistant)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        raise RuntimeError("local-qwen returned no visible answer")
+    if any("\u4e00" <= ch <= "\u9fff" for ch in cleaned):
+        raise RuntimeError("local-qwen violated Tony English-only mode")
+    words = cleaned.split()
+    if len(words) > 55:
+        cleaned = " ".join(words[:55]).rstrip(" ,;:-") + "…"
+    return cleaned
+
+
 def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
-    model = os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4").strip() or "qwen3.5-2b-q4"
-    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "55")), 20), 65)
+    model = local_model_id()
+    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "35")), 20), 80)
     max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "48")), 24), 48)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
@@ -143,9 +165,7 @@ def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
         raise RuntimeError("local-qwen returned no choices")
     message_obj = choices[0].get("message") or {}
     text = str(message_obj.get("content") or choices[0].get("text") or "").strip()
-    if not text:
-        raise RuntimeError("local-qwen returned no visible answer")
-    return text
+    return _clean_visible_answer(text)
 
 
 async def call_local_qwen(message: str, session_key: str) -> str:
@@ -161,4 +181,4 @@ async def call_local_qwen(message: str, session_key: str) -> str:
 
 async def call_backend(message: str, session_key: str) -> tuple[str, str, bool]:
     answer = await call_local_qwen(message, session_key)
-    return answer, "local2b-tony-chat", False
+    return answer, f"local-tony-chat:{local_model_id()}", False
