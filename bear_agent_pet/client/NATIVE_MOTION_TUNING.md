@@ -8,6 +8,9 @@ Tony keeps the original soft teddy-style poses, but movement is intentionally ca
 - Animation ticks run at 110 ms.
 - Micro-expression spacing is 7.5–15 seconds.
 - Autonomous gestures are spaced 140–320 seconds apart.
-- Walking advances one pixel every second animation tick.
+- Walking advances one pixel every second animation tick and mirrors the artwork when Tony turns left.
 - Walk, shiver, ask-hug, hug, glasses, wave, sleep and study are the preferred native-style actions.
+- Every full-character pose shares the same desktop ground line so compact poses such as sleep, study and working do not appear to float.
+- First launch stays non-modal; the connection dialog opens only when the user explicitly asks to connect.
+- The detached always-visible settings gear was removed; settings remain available from the context menu and Ctrl+,.
 - PNG integrity validation includes chunk CRC checks so corrupted artwork cannot silently ship again.
