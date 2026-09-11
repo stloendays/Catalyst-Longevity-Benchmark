@@ -94,7 +94,7 @@ PetWindow::PetWindow(QWidget *parent)
 
     // Calm desktop-companion cadence: animation is deliberately low-frame-rate.
     // At normal idle Tony stays still; only an occasional blink/wink changes the sprite.
-    animTimer_.setInterval(70);
+    animTimer_.setInterval(110);
     connect(&animTimer_, &QTimer::timeout, this, &PetWindow::tickAnimation);
     animTimer_.start();
 
@@ -161,7 +161,7 @@ PetWindow::PetWindow(QWidget *parent)
             agentState_="idle";
         } else if(agentState_=="idle" && !actionTimer_.isActive()) {
             emotion_="friendly";
-            setAction(Action::Wave,900);
+            setAction(Action::Wave,1500);
         }
         tray_.setToolTip(connected ? "Tony · connected" : "Tony · waiting for server");
     });
@@ -173,7 +173,7 @@ PetWindow::PetWindow(QWidget *parent)
         s.setValue("agent/device_id",deviceId);
         if(endpoint.host()!="127.0.0.1" && endpoint.host()!="localhost") tunnel_.stop();
         emotion_="happy";
-        setAction(Action::Celebrate,1400);
+        setAction(Action::Celebrate,2100);
         tray_.setToolTip("Tony · paired · connecting");
         showBubble(uiText("Paired. Tony will remember this computer.","配对成功。Tony 会记住这台电脑。"),5200);
     });
@@ -497,8 +497,9 @@ void PetWindow::tickAnimation(){
         auto screen=QGuiApplication::screenAt(frameGeometry().center());
         if(!screen) screen=QGuiApplication::primaryScreen();
         const auto area=screen->availableGeometry();
-        // Slow desktop walk: one pixel per animation tick rather than gliding constantly.
-        QPoint n=pos()+QPoint(1*walkDirection_,0);
+        // Slow desktop walk: advance only on every second animation tick.
+        // This preserves the original native-motion feel without making Tony pace.
+        QPoint n=pos()+QPoint((frame_%2==0 ? 1 : 0)*walkDirection_,0);
         if(n.x()+width()>area.right()) { walkDirection_=-1; n.setX(area.right()-width()); }
         else if(n.x()<area.left()) { walkDirection_=1; n.setX(area.left()); }
         move(n);
@@ -511,13 +512,13 @@ void PetWindow::tickAnimation(){
 
 void PetWindow::scheduleBlink(){
     if(blinkTimer_.isActive()) return;
-    // Natural but quiet: roughly one blink every 5-11 seconds.
-    blinkTimer_.start(QRandomGenerator::global()->bounded(5000,11001));
+    // Natural but quiet: keep long pauses so Tony does not look restless.
+    blinkTimer_.start(QRandomGenerator::global()->bounded(7500,15001));
 }
 
 void PetWindow::scheduleIdleMoment(){
-    // Autonomous gestures are now rare; the usual state is simply sitting and blinking.
-    idleTimer_.start(QRandomGenerator::global()->bounded(90000,210001));
+    // Autonomous gestures stay rare. Tony should spend most of his time simply sitting.
+    idleTimer_.start(QRandomGenerator::global()->bounded(140000,320001));
 }
 
 void PetWindow::runIdleMoment(){
@@ -529,11 +530,11 @@ void PetWindow::runIdleMoment(){
     const int r=QRandomGenerator::global()->bounded(100);
     // Most checks intentionally do nothing. Tony should feel present, not restless.
     if(night && r<10) { emotion_="sleepy"; setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,9501)); }
-    else if(r<4) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble("Brrr... stay warm with me?",3600); }
-    else if(r<8) { emotion_="hopeful"; setAction(Action::AskHug,2600); showBubble("Can I have a tiny hug?",3600); }
-    else if(r<12) { emotion_="friendly"; setAction(Action::Wave,1400); }
-    else if(r<15) { emotion_="focused"; setAction(Action::AdjustGlasses,1600); }
-    else if(r<17) { emotion_="playful"; setAction(Action::Walk,3200); }
+    else if(r<4) { emotion_="cold"; setAction(Action::Shiver,3000); showBubble("Brrr... stay warm with me?",3600); }
+    else if(r<8) { emotion_="hopeful"; setAction(Action::AskHug,3400); showBubble("Can I have a tiny hug?",3600); }
+    else if(r<12) { emotion_="friendly"; setAction(Action::Wave,1900); }
+    else if(r<15) { emotion_="focused"; setAction(Action::AdjustGlasses,2300); }
+    else if(r<17) { emotion_="playful"; setAction(Action::Walk,4800); }
     scheduleIdleMoment();
 }
 
@@ -630,9 +631,9 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     }
     else if(chosen==localSsh) useLocalSshConnection();
     else if(chosen==idle) setAction(Action::Idle);
-    else if(chosen==walk) setAction(Action::Walk,3000);
-    else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);
-    else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);
+    else if(chosen==walk) setAction(Action::Walk,4800);
+    else if(chosen==glasses) setAction(Action::AdjustGlasses,2300);
+    else if(chosen==noGlasses) setAction(Action::RemoveGlasses,3400);
     else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }
     else if(chosen==sleep) setAction(Action::Sleep);
     else if(chosen==quit) qApp->quit();
@@ -655,7 +656,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
     }
 }
 
-void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
+void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,3400); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
 
 void PetWindow::configureConnection(){
     QSettings s; bool ok=false;

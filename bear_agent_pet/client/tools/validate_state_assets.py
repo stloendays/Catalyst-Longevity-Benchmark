@@ -18,6 +18,38 @@ EXPECTED = (
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
+def verify_png_chunks(path: Path) -> None:
+    data = path.read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError("not a PNG")
+    import zlib
+    pos = 8
+    saw_idat = False
+    saw_iend = False
+    while pos + 12 <= len(data):
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        chunk_type = data[pos + 4:pos + 8]
+        end = pos + 12 + length
+        if end > len(data):
+            raise ValueError(f"truncated {chunk_type!r} chunk")
+        payload = data[pos + 8:pos + 8 + length]
+        expected_crc = struct.unpack(">I", data[pos + 8 + length:end])[0]
+        actual_crc = zlib.crc32(chunk_type)
+        actual_crc = zlib.crc32(payload, actual_crc) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise ValueError(f"CRC mismatch in {chunk_type.decode('latin1')} chunk")
+        if chunk_type == b"IDAT":
+            saw_idat = True
+        if chunk_type == b"IEND":
+            saw_iend = True
+            if end != len(data):
+                raise ValueError("unexpected bytes after IEND")
+            break
+        pos = end
+    if not saw_idat or not saw_iend:
+        raise ValueError("missing IDAT or IEND")
+
+
 def inspect_png(path: Path) -> tuple[int, int, int, str]:
     data = path.read_bytes()
     if len(data) < 33 or data[:8] != PNG_SIGNATURE:
@@ -32,6 +64,7 @@ def inspect_png(path: Path) -> tuple[int, int, int, str]:
 
 def validate_png(path: Path, failures: list[str], *, min_size: int = 180) -> tuple[int, int] | None:
     try:
+        verify_png_chunks(path)
         w, h, color_type, digest = inspect_png(path)
     except Exception as exc:
         failures.append(f"{path}: {exc}")
