@@ -1,0 +1,99 @@
+name: Tony v0.9.8 Windows network diagnose
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-network-diagnose.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    env:
+      TONY_SERVER_IP: 150.158.27.206
+      TONY_HOST: 150-158-27-206.sslip.io
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:SERVER_SSH_KEY)) { throw 'SERVER_SSH_KEY is empty' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'tony_server_key'
+          $keyText = $env:SERVER_SSH_KEY.Replace("`r", '')
+          [IO.File]::WriteAllText($keyPath, $keyText + "`n", [Text.UTF8Encoding]::new($false))
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+          "TONY_SSH_KEY=$keyPath" >> $env:GITHUB_ENV
+
+      - name: Windows public TCP and HTTP diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          foreach ($port in 22,80,443,18790) {
+            $client = [System.Net.Sockets.TcpClient]::new()
+            try {
+              $task = $client.ConnectAsync($env:TONY_SERVER_IP, $port)
+              if ($task.Wait(5000) -and $client.Connected) {
+                Write-Host "PUBLIC_TCP_${port}=OPEN"
+              } else {
+                Write-Host "PUBLIC_TCP_${port}=TIMEOUT_OR_CLOSED"
+              }
+            } catch {
+              Write-Host "PUBLIC_TCP_${port}=ERROR $($_.Exception.Message)"
+            } finally { $client.Dispose() }
+          }
+          try {
+            $r = Invoke-WebRequest -Uri "http://$env:TONY_HOST/health" -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+            Write-Host "PUBLIC_HTTP_STATUS=$($r.StatusCode)"
+            Write-Host "PUBLIC_HTTP_LOCATION=$($r.Headers.Location)"
+          } catch { Write-Host "PUBLIC_HTTP_ERROR=$($_.Exception.Message)" }
+          try {
+            $r = Invoke-WebRequest -Uri "https://$env:TONY_HOST/health" -TimeoutSec 10 -SkipHttpErrorCheck
+            Write-Host "PUBLIC_HTTPS_STATUS=$($r.StatusCode)"
+            Write-Host "PUBLIC_HTTPS_BODY=$($r.Content)"
+          } catch { Write-Host "PUBLIC_HTTPS_ERROR=$($_.Exception.Message)" }
+
+      - name: Remote server diagnostics through SSH
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $remote = @'
+          set +e
+          echo '=== SERVICES ==='
+          systemctl is-active bear-agent-gateway.service
+          systemctl is-active rhocodec-llm.service
+          systemctl is-active caddy
+          systemctl is-active nginx
+          echo '=== LISTENERS ==='
+          sudo ss -lntp | grep -E ':(22|80|443|18790|18080)\b' || true
+          echo '=== LOCAL GATEWAY HEALTH ==='
+          curl -v --max-time 8 http://127.0.0.1:18790/health || true
+          echo
+          echo '=== LOCAL HTTP 80 ==='
+          curl -v --max-time 8 -H 'Host: 150-158-27-206.sslip.io' http://127.0.0.1/health || true
+          echo
+          echo '=== LOCAL HTTPS 443 ==='
+          curl -vk --max-time 8 --resolve 150-158-27-206.sslip.io:443:127.0.0.1 https://150-158-27-206.sslip.io/health || true
+          echo
+          echo '=== UFW ==='
+          sudo ufw status verbose || true
+          echo '=== IPTABLES INPUT ==='
+          sudo iptables -S INPUT || true
+          echo '=== CADDYFILE ==='
+          sudo cat /etc/caddy/Caddyfile 2>/dev/null || true
+          echo '=== CADDY LOG ==='
+          sudo journalctl -u caddy -n 80 --no-pager 2>/dev/null || true
+          echo '=== GATEWAY LOG ==='
+          sudo journalctl -u bear-agent-gateway.service -n 80 --no-pager 2>/dev/null || true
+          '@
+          & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $remote
+          if ($LASTEXITCODE -ne 0) { Write-Host "SSH_DIAGNOSTIC_EXIT=$LASTEXITCODE" }
