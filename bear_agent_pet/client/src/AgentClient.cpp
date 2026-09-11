@@ -1,9 +1,11 @@
 #include "AgentClient.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSysInfo>
 #include <QUuid>
 
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
@@ -14,6 +16,7 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
     connect(&socket_, &QWebSocket::connected, this, [this]{
         reconnectTimer_.stop();
         outageReported_=false;
+        sendClientHello();
         emit connectionChanged(true);
     });
     connect(&socket_, &QWebSocket::disconnected, this, [this]{
@@ -65,7 +68,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.4");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.7");
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -102,13 +105,33 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.4");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.7");
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
 }
 
 bool AgentClient::connected() const { return socket_.state() == QAbstractSocket::ConnectedState; }
+
+void AgentClient::sendClientHello() {
+    if(!connected()) return;
+    QJsonArray capabilities;
+    for(const char *name : {
+            "read_clipboard", "write_clipboard", "capture_screen",
+            "open_url", "open_file", "show_notification"}) {
+        capabilities.append(QString::fromLatin1(name));
+    }
+    QJsonObject o{
+        {"type","client_hello"},
+        {"protocol_version","1"},
+        {"client","TonyDesktopPet"},
+        {"client_version","0.7.0"},
+        {"device_name",QSysInfo::machineHostName()},
+        {"platform",QSysInfo::productType()},
+        {"capabilities",capabilities}
+    };
+    socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
 
 void AgentClient::sendMessage(const QString &text) {
     if(!connected()) {
@@ -119,6 +142,23 @@ void AgentClient::sendMessage(const QString &text) {
         return;
     }
     QJsonObject o{{"type","message"},{"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},{"content",text}};
+    socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+void AgentClient::sendToolResult(const QString &requestId,
+                                 const QString &tool,
+                                 bool ok,
+                                 const QJsonObject &result,
+                                 const QString &error) {
+    if(!connected()) return;
+    QJsonObject o{
+        {"type","tool_result"},
+        {"request_id",requestId},
+        {"tool",tool},
+        {"ok",ok},
+        {"result",result}
+    };
+    if(!error.isEmpty()) o.insert("error",error.left(1200));
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
@@ -136,6 +176,15 @@ void AgentClient::onText(const QString &message) {
             o.value("duration_ms").toInt(0));
     } else if(type=="text_delta") {
         emit textDelta(o.value("content").toString());
+    } else if(type=="tool_request") {
+        const QString requestId=o.value("request_id").toString();
+        const QString tool=o.value("tool").toString();
+        const QJsonObject args=o.value("args").toObject();
+        if(requestId.isEmpty() || tool.isEmpty()) {
+            emit errorMessage("Tony 收到了不完整的本地工具请求。");
+        } else {
+            emit toolRequest(requestId,tool,args);
+        }
     } else if(type=="final" || type=="answer_done") {
         emit answerFinished();
     } else if(type=="error") {
