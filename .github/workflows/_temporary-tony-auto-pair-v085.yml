@@ -22,13 +22,17 @@ jobs:
       - name: Apply secure owner auto-pair patch
         run: |
           set -euo pipefail
-          python3 .github/scripts/patch_tony_auto_pair_v085.py
+          if grep -q 'VERSION 0.8.5' teddy_agent_pet/client/CMakeLists.txt; then
+            echo 'Tony v0.8.5 client patch already present'
+          else
+            python3 .github/scripts/patch_tony_auto_pair_v085.py
+          fi
           grep -q 'VERSION 0.8.5' teddy_agent_pet/client/CMakeLists.txt
           grep -q 'pairViaTrustedTunnel' teddy_agent_pet/client/src/AgentClient.cpp
           grep -q 'pair/ssh-bootstrap' teddy_agent_pet/client/src/PetWindowV7.cpp
           grep -q 'Friend code (only needed once' teddy_agent_pet/client/src/PetWindowV7.cpp
 
-      - name: Commit client changes
+      - name: Commit client changes if needed
         run: |
           set -euo pipefail
           git config user.name Tony
@@ -41,8 +45,12 @@ jobs:
                   teddy_agent_pet/client/src/PetWindow.h \
                   teddy_agent_pet/client/src/PetWindowV7.cpp
           git diff --cached --check
-          git commit -m 'Add secure SSH owner auto pairing for Tony v0.8.5'
-          git push origin HEAD:feature/teddy-agent-pet
+          if git diff --cached --quiet; then
+            echo 'No client changes to commit'
+          else
+            git commit -m 'Add secure SSH owner auto pairing for Tony v0.8.5'
+            git push origin HEAD:feature/teddy-agent-pet
+          fi
 
   windows-build:
     needs: patch
@@ -59,6 +67,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          modules: 'qtwebsockets'
           cache: true
 
       - name: Validate Tony artwork
@@ -80,6 +89,7 @@ jobs:
           Copy-Item build-tony-v085/Release/TonyDesktopPet.exe package/
           Copy-Item teddy_agent_pet/client/assets package/assets -Recurse
           & windeployqt --release --no-translations package/TonyDesktopPet.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 
       - name: Startup smoke test
         shell: pwsh
