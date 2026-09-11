@@ -12,7 +12,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Prepare SSH key
         env:
@@ -31,7 +31,8 @@ jobs:
           set -euo pipefail
           VENV='/home/ubuntu/.local/share/bear-agent/venv'
           test -x "$VENV/bin/python"
-          curl -fsS http://127.0.0.1:18790/health
+          curl -fsS http://127.0.0.1:18790/health >/tmp/tony-e2e-health.json
+          cat /tmp/tony-e2e-health.json
           echo
 
           "$VENV/bin/python" - <<'PY'
@@ -40,7 +41,16 @@ jobs:
           import time
           import websockets
 
-          async def recv_json(ws, timeout=80):
+          health=json.load(open('/tmp/tony-e2e-health.json'))
+          expected_model=str(health.get('local_model','')).strip()
+          assert expected_model, health
+          assert health.get('chat_only') is True, health
+          assert health.get('language') == 'English', health
+          assert health.get('persona') == 'Paula-boyfriend', health
+          assert health.get('local_tools_enabled') is False, health
+          assert health.get('openclaw_enabled') is False, health
+
+          async def recv_json(ws, timeout=90):
               return json.loads(await asyncio.wait_for(ws.recv(), timeout))
 
           async def ask(ws, content, label):
@@ -62,7 +72,8 @@ jobs:
               elapsed=time.monotonic()-started
               text=str(final.get('content','')).strip()
               assert text, (label, final)
-              assert final.get('agent') == 'local2b-tony-chat', (label, final)
+              agent=str(final.get('agent',''))
+              assert agent == f'local-tony-chat:{expected_model}', (label, final, expected_model)
               assert final.get('fallback') is False, (label, final)
               assert final.get('action'), (label, final)
               assert final.get('emotion'), (label, final)
@@ -73,7 +84,7 @@ jobs:
               assert 'text_delta' in kinds, (label, kinds)
               print(f'{label}_LATENCY_SEC=', round(elapsed,2))
               print(f'{label}_TEXT=', text[:500].replace('\n',' '))
-              return text
+              return text, elapsed
 
           async def main():
               async with websockets.connect(
@@ -84,20 +95,25 @@ jobs:
                   assert first == {'type':'agent_state','state':'idle'}, first
                   assert second.get('type') == 'avatar_action', second
 
-                  intro=await ask(ws, 'Hi Tony. Tell me who you are in one short sentence.', 'INTRO')
+                  intro,intro_latency=await ask(ws, 'Hi Tony. Tell me who you are in one short sentence.', 'INTRO')
                   low=intro.casefold()
                   assert ('boyfriend' in low) or ('paula' in low) or ('teddy' in low), intro
 
-                  paula=await ask(ws, 'Who am I to you?', 'PAULA_RELATIONSHIP')
+                  paula,_=await ask(ws, 'Who am I to you?', 'PAULA_RELATIONSHIP')
                   low=paula.casefold()
                   assert ('paula' in low) or ('girlfriend' in low), paula
                   assert ('boyfriend' in low) or ('girlfriend' in low) or ('love' in low), paula
 
                   marker='TEDDY-417'
                   await ask(ws, f'Remember this little secret for my next message: {marker}.', 'MEMORY_SET')
-                  recalled=await ask(ws, 'What was the little secret I just asked you to remember?', 'MEMORY_GET')
+                  recalled,_=await ask(ws, 'What was the little secret I just asked you to remember?', 'MEMORY_GET')
                   assert marker.casefold() in recalled.casefold(), recalled
 
+                  if health.get('model_profile') == 'fast':
+                      print('TONY_FAST_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
+                  else:
+                      print('TONY_QUALITY_PROFILE_FIRST_REPLY_SEC=', round(intro_latency,2))
+                  print('TONY_ACTIVE_MODEL=', expected_model)
                   print('TONY_ENGLISH_BOYFRIEND_CHAT=PASS')
 
           asyncio.run(main())
