@@ -12,6 +12,7 @@ public:
     explicit AgentClient(QObject *parent=nullptr);
     void connectTo(const QUrl &url, const QString &bearerToken={});
     void pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, const QString &deviceName);
+    void pairViaTrustedTunnel(const QUrl &wsUrl, const QUrl &bootstrapUrl, const QString &deviceName);
     void sendMessage(const QString &text);
     void sendToolResult(const QString &requestId,
                         const QString &tool,

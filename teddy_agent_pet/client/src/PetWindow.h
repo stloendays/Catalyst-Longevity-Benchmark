@@ -76,6 +76,9 @@ private:
     void submitTonyPrompt(const QString &text);
     void hugTony();
     void configureConnection();
+    void beginSecureOwnerPairing(bool friendFallbackOnFailure);
+    void trySecureOwnerBootstrap();
+    void showFriendCodeDialog();
     void useLocalSshConnection();
     void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
@@ -92,6 +95,7 @@ private:
     QTimer lifeTimer_;
     QTimer hoverTimer_;
     QTimer desktopTimer_;
+    QTimer ownerPairTimer_;
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
@@ -118,6 +122,9 @@ private:
     bool perchOnActiveWindow_{false};
     bool hiddenForFullscreen_{false};
     bool hasWalkTarget_{false};
+    bool ownerPairing_{false};
+    bool ownerPairFriendFallback_{false};
+    bool ownerBootstrapRequestSent_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
@@ -125,6 +132,7 @@ private:
     int rapidClicks_{0};
     int lifeSaveTicks_{0};
     int cursorStillTicks_{0};
+    int ownerPairAttempts_{0};
     DockMode dockMode_{DockMode::Free};
     QString dockScreenName_;
     QPoint lastCursorGlobal_;

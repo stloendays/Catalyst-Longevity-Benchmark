@@ -11,6 +11,8 @@ public:
     void start();
     void stop();
     bool running() const;
+    bool ready() const;
+    int localPort() const;
 
 signals:
     void statusChanged(const QString &status);

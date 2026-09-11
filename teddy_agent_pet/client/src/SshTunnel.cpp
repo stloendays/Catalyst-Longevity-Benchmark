@@ -46,6 +46,14 @@ bool SshTunnel::running() const {
     return process_.state()!=QProcess::NotRunning;
 }
 
+int SshTunnel::localPort() const {
+    return QSettings().value("ssh/local_port",18790).toInt();
+}
+
+bool SshTunnel::ready() const {
+    return localForwardReady(localPort());
+}
+
 void SshTunnel::start() {
     QSettings s;
     if(!s.value("ssh/enabled",true).toBool()) {

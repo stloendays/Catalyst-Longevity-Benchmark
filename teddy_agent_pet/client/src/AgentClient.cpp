@@ -74,7 +74,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -108,10 +108,53 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
     });
 }
 
+void AgentClient::pairViaTrustedTunnel(const QUrl &wsUrl, const QUrl &bootstrapUrl, const QString &deviceName) {
+    const QString host=bootstrapUrl.host().trimmed().toLower();
+    const bool loopback=(host=="127.0.0.1" || host=="localhost" || host=="::1");
+    if(!bootstrapUrl.isValid() || !loopback || bootstrapUrl.scheme().toLower()!="http") {
+        emit pairingFailed(language_=="zh" ? "安全自动配对地址无效。" : "The secure auto-pair address is invalid.");
+        return;
+    }
+
+    QNetworkRequest request(bootstrapUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
+    const QJsonObject body{
+        {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
+    };
+    auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply,&QNetworkReply::finished,this,[this,reply,wsUrl]{
+        const QByteArray raw=reply->readAll();
+        const auto status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto doc=QJsonDocument::fromJson(raw);
+        const auto obj=doc.isObject() ? doc.object() : QJsonObject{};
+
+        if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300) {
+            QString detail=obj.value("detail").toString();
+            if(detail.isEmpty()) detail=reply->errorString();
+            emit pairingFailed((language_=="zh" ? QString("自动验证失败：") : QString("Automatic verification failed: "))+detail);
+            reply->deleteLater();
+            return;
+        }
+
+        const QString token=obj.value("token").toString().trimmed();
+        const QString deviceId=obj.value("device_id").toString().trimmed();
+        if(token.isEmpty()) {
+            emit pairingFailed(language_=="zh" ? "自动配对响应中没有设备令牌。" : "Automatic pairing returned no device token.");
+            reply->deleteLater();
+            return;
+        }
+
+        emit paired(token,deviceId,wsUrl);
+        connectTo(wsUrl,token);
+        reply->deleteLater();
+    });
+}
+
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8");
+    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
@@ -125,7 +168,7 @@ void AgentClient::sendClientHello() {
         {"type","client_hello"},
         {"protocol_version","1"},
         {"client","TonyDesktopPet"},
-        {"client_version","0.8.0"},
+        {"client_version","0.8.5"},
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},

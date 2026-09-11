@@ -148,6 +148,10 @@ PetWindow::PetWindow(QWidget *parent)
     connect(&desktopTimer_, &QTimer::timeout, this, &PetWindow::tickDesktop);
     desktopTimer_.start();
 
+    ownerPairTimer_.setInterval(700);
+    ownerPairTimer_.setSingleShot(false);
+    connect(&ownerPairTimer_, &QTimer::timeout, this, &PetWindow::trySecureOwnerBootstrap);
+
     connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){
         submitTonyPrompt(text);
     });
@@ -198,6 +202,10 @@ PetWindow::PetWindow(QWidget *parent)
     });
     connect(&agent_, &AgentClient::paired, this,
             [this](const QString &token, const QString &deviceId, const QUrl &endpoint){
+        ownerPairTimer_.stop();
+        ownerPairing_=false;
+        ownerPairFriendFallback_=false;
+        ownerBootstrapRequestSent_=false;
         QSettings s;
         s.setValue("agent/url",endpoint);
         s.setValue("agent/token",protectSecret(token));
@@ -209,9 +217,26 @@ PetWindow::PetWindow(QWidget *parent)
         showBubble(uiText("Paired. Tony will remember this computer.","配对成功。Tony 会记住这台电脑。"),5200);
     });
     connect(&agent_, &AgentClient::pairingFailed, this, [this](const QString &text){
+        const bool automatic=ownerPairing_;
+        const bool openFriend=automatic && ownerPairFriendFallback_;
+        if(automatic) {
+            ownerPairTimer_.stop();
+            ownerPairing_=false;
+            ownerBootstrapRequestSent_=false;
+            tunnel_.stop();
+        }
         emotion_="worried";
         tray_.setToolTip("Tony · pairing failed");
-        showBubble(text,6500);
+        if(openFriend) {
+            ownerPairFriendFallback_=false;
+            showFriendCodeDialog();
+        } else if(automatic) {
+            ownerPairFriendFallback_=false;
+            showBubble(uiText("I couldn't verify this computer through your SSH key. Right-click me and choose Connect to Tony to use a Friend code once.",
+                              "没能通过你的 SSH 身份自动验证这台电脑。右键点我并选择“连接 Tony”，好友码只需输入一次。"),7000);
+        } else {
+            showBubble(text,6500);
+        }
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
         agentState_="error";
@@ -249,8 +274,10 @@ PetWindow::PetWindow(QWidget *parent)
         if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();
         agent_.connectTo(endpoint,token);
     } else {
-        tray_.setToolTip("Tony · not paired");
-        showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);
+        tray_.setToolTip("Tony · checking this computer");
+        showBubble(uiText("Hi Paula. I'm checking whether this is your trusted computer…",
+                          "嗨 Paula。我先看看这是不是你已经信任的电脑……"),4200);
+        QTimer::singleShot(800,this,[this]{ beginSecureOwnerPairing(false); });
     }
 }
 
@@ -1342,18 +1369,106 @@ void PetWindow::submitTonyPrompt(const QString &text){
 void PetWindow::hugTony(){ markInteraction(); behavior_.onHugged(); emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
 
 void PetWindow::configureConnection(){
-    QSettings s; bool ok=false;
+    QSettings s;
     const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
     if(!endpoint.isValid() || endpoint.scheme().toLower()!="wss" || endpoint.host().isEmpty()) {
         QMessageBox::warning(this,"Tony",uiText("The server address in Settings is invalid.","设置中的服务器地址无效。"));
         return;
     }
-    const QString code=QInputDialog::getText(this,uiText("Connect to Tony","连接 Tony"),uiText("Friend code:","好友码："),QLineEdit::Normal,{},&ok);
-    if(!ok || code.trimmed().isEmpty()) return;
+
+    const QString token=unprotectSecret(s.value("agent/token","").toString());
+    if(!token.isEmpty()) {
+        s.setValue("connection/prefer_local_ssh",false);
+        s.setValue("agent/url",endpoint);
+        agent_.connectTo(endpoint,token);
+        showBubble(uiText("Reconnecting with this computer's saved secure token…","正在使用这台电脑已保存的安全令牌重新连接……"),3600);
+        return;
+    }
+
+    beginSecureOwnerPairing(true);
+}
+
+void PetWindow::beginSecureOwnerPairing(bool friendFallbackOnFailure){
+    if(ownerPairing_) return;
+    QSettings s;
+    const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
+    if(!endpoint.isValid() || endpoint.scheme().toLower()!="wss" || endpoint.host().isEmpty()) {
+        if(friendFallbackOnFailure) showFriendCodeDialog();
+        return;
+    }
+
+    ownerPairing_=true;
+    ownerPairFriendFallback_=friendFallbackOnFailure;
+    ownerBootstrapRequestSent_=false;
+    ownerPairAttempts_=0;
+    s.setValue("connection/prefer_local_ssh",false);
+    tray_.setToolTip("Tony · verifying owner computer");
+    emotion_="curious";
+    setAction(Action::Think,0);
+    showBubble(uiText("Checking your SSH identity so you don't need a Friend code…",
+                      "正在通过你的 SSH 身份验证，这样就不用输入好友码了……"),0);
+    tunnel_.start();
+    ownerPairTimer_.start();
+    QTimer::singleShot(120,this,&PetWindow::trySecureOwnerBootstrap);
+}
+
+void PetWindow::trySecureOwnerBootstrap(){
+    if(!ownerPairing_ || ownerBootstrapRequestSent_) return;
+    ++ownerPairAttempts_;
+
+    if(tunnel_.ready()) {
+        ownerPairTimer_.stop();
+        ownerBootstrapRequestSent_=true;
+        QSettings s;
+        const QUrl publicEndpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
+        QUrl bootstrap;
+        bootstrap.setScheme("http");
+        bootstrap.setHost("127.0.0.1");
+        bootstrap.setPort(tunnel_.localPort());
+        bootstrap.setPath("/pair/ssh-bootstrap");
+        const QString deviceName=QSysInfo::machineHostName().isEmpty() ? QString("Tony desktop") : QSysInfo::machineHostName();
+        tray_.setToolTip("Tony · secure owner pairing");
+        agent_.pairViaTrustedTunnel(publicEndpoint,bootstrap,deviceName);
+        return;
+    }
+
+    if(ownerPairAttempts_ < 12) return;
+
+    const bool openFriend=ownerPairFriendFallback_;
+    ownerPairTimer_.stop();
+    ownerPairing_=false;
+    ownerPairFriendFallback_=false;
+    tunnel_.stop();
+    if(openFriend) {
+        showFriendCodeDialog();
+    } else {
+        tray_.setToolTip("Tony · not paired");
+        emotion_="gentle";
+        setAction(Action::Idle);
+        showBubble(uiText("Automatic owner verification isn't available on this computer. Right-click me and choose Connect to Tony; the Friend code is only needed once.",
+                          "这台电脑暂时无法自动验证。右键点我并选择“连接 Tony”；好友码只需要输入一次。"),7200);
+    }
+}
+
+void PetWindow::showFriendCodeDialog(){
+    QSettings s;
+    bool ok=false;
+    const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
+    const QString code=QInputDialog::getText(
+        this,
+        uiText("One-time setup","首次连接"),
+        uiText("Friend code (only needed once on this computer):","好友码（这台电脑只需输入一次）："),
+        QLineEdit::Normal,{},&ok);
+    if(!ok || code.trimmed().isEmpty()) {
+        setAction(Action::Idle);
+        return;
+    }
     const QString deviceName=QSysInfo::machineHostName().isEmpty() ? QString("Tony desktop") : QSysInfo::machineHostName();
     s.setValue("connection/prefer_local_ssh",false);
-    emotion_="curious"; setAction(Action::Think,0); tray_.setToolTip("Tony · pairing…");
-    showBubble(uiText("Connecting securely…","正在安全连接…"),0);
+    emotion_="curious";
+    setAction(Action::Think,0);
+    tray_.setToolTip("Tony · pairing…");
+    showBubble(uiText("Connecting securely…","正在安全连接……"),0);
     agent_.pairAndConnect(endpoint,code,deviceName);
 }
 
