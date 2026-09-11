@@ -1,0 +1,62 @@
+name: Issue encrypted Tony pairing code
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_temporary-tony-pairing.yml'
+
+permissions:
+  contents: read
+
+env:
+  SERVER_HOST: 150.158.27.206
+  SERVER_USER: ubuntu
+
+jobs:
+  issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H "$SERVER_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Issue code without logging plaintext
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" "$SERVER_USER@$SERVER_HOST" \
+            "cd /home/ubuntu/.local/share/bear-agent/app && /home/ubuntu/.local/share/bear-agent/venv/bin/python -m app.pairing_cli issue --ttl 1800 > /tmp/tony-pairing.txt && chmod 600 /tmp/tony-pairing.txt"
+          scp -q -i "$HOME/.ssh/server_key" "$SERVER_USER@$SERVER_HOST:/tmp/tony-pairing.txt" ./tony-pairing.txt
+          cat > public.pem <<'KEY'
+          -----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAshRH3Vnys2woEDeuWdj8
+          Esfg/6VBNh+djP3CfYInW8VVzulFAX2xQFap7BxnqPEWzXTq5ZdKIqduI272QftX
+          2c9F5T42Rt0/qGR7uzKSy3pSivoQnhQIyJYrBflARpyTxAULgF7RrF5Enj2eH3qK
+          mR8PtsKNUEnI3dn8jq8zOrOgUbwV58Gxg7H6Q70jvgbt6CCwiNLoIwWRH2lHd6FQ
+          aEkqvgTRHRXM5yHPH3C5rzReVipxioGngtzycxIwI2AJhYaBVJkRvz28oJdNZx4d
+          u6nbW74K+2YboRG93/Ygdf3x7Rs6jYU0Hx6jkO7dyTyNW/z/bJ1+sEIHcjnCUGR2
+          0QIDAQAB
+          -----END PUBLIC KEY-----
+          KEY
+          openssl pkeyutl -encrypt -pubin -inkey public.pem \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            -in tony-pairing.txt -out tony-pairing.bin
+          rm -f tony-pairing.txt public.pem
+          ssh -i "$HOME/.ssh/server_key" "$SERVER_USER@$SERVER_HOST" 'rm -f /tmp/tony-pairing.txt'
+
+      - name: Upload encrypted pairing artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tony-pairing-encrypted
+          path: tony-pairing.bin
+          retention-days: 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key" tony-pairing.txt public.pem tony-pairing.bin
