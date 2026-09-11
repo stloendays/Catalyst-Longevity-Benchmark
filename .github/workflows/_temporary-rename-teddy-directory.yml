@@ -1,0 +1,78 @@
+name: Rename Tony project directory to Teddy
+
+on:
+  push:
+    branches:
+      - feature/teddy-agent-pet
+    paths:
+      - .github/workflows/_temporary-rename-teddy-directory.yml
+
+permissions:
+  contents: write
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+      - name: Rename project directory without touching workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d bear_agent_pet ] && [ ! -e teddy_agent_pet ]; then
+            git mv bear_agent_pet teddy_agent_pet
+          fi
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          files = subprocess.check_output(['git','ls-files','-z']).decode().split('\0')
+          replacements = [
+              ('bear_agent_pet', 'teddy_agent_pet'),
+              ('BearAgentPet', 'TeddyAgentPet'),
+              ('Bear Agent Pet', 'Teddy Agent Pet'),
+          ]
+          for name in files:
+              if not name or name.startswith('.github/workflows/'):
+                  continue
+              path = Path(name)
+              if not path.exists() or not path.is_file():
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except (UnicodeDecodeError, OSError):
+                  continue
+              original = text
+              for old, new in replacements:
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+
+          identity = Path('teddy_agent_pet/IDENTITY.md')
+          identity.write_text(
+              '# Tony Identity Contract\n\n'
+              '- Character name: **Tony**.\n'
+              '- Species/form: **Teddy dog / toy poodle (泰迪犬)**.\n'
+              '- Tony is a dog, **not a bear**.\n'
+              '- Source code, UI copy, training data, artwork prompts, and documentation must use Tony/Teddy/toy poodle terminology rather than Bear.\n'
+              '- Existing personality traits and Agent capabilities are preserved.\n',
+              encoding='utf-8',
+          )
+          PY
+          git diff --check
+          if git grep -n -I 'bear_agent_pet' -- ':!.github/workflows/*'; then
+            echo 'Legacy project path remains outside workflows.' >&2
+            exit 1
+          fi
+      - name: Commit directory rename
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Rename Tony project directory to Teddy"
+          git push origin HEAD:feature/teddy-agent-pet
