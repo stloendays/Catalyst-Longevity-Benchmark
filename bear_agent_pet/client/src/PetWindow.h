@@ -18,11 +18,18 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent*) override;
     void contextMenuEvent(QContextMenuEvent*) override;
 private:
-    enum class Action { Idle, Bob, Walk, Think, Celebrate, Sleep };
+    enum class Action {
+        Idle, Bob, Walk, Think, Celebrate, Sleep,
+        Shiver, AskHug, Hug, Blush, Study,
+        AdjustGlasses, RemoveGlasses, Wave
+    };
+
     void loadAsset();
     void setAction(Action action, int durationMs=0);
+    Action actionFromWire(const QString &name) const;
     void tickAnimation();
     void askTony();
+    void hugTony();
     void showBubble(const QString &text);
     void restorePosition();
     void savePosition();
@@ -39,5 +46,7 @@ private:
     QPoint basePos_;
     bool dragging_{false};
     int frame_{0};
+    int walkDirection_{1};
     QString answer_;
+    QString emotion_{"neutral"};
 };
