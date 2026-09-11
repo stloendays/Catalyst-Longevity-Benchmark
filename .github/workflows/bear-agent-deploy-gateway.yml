@@ -1,4 +1,4 @@
-name: Deploy BearAgent gateway
+name: Deploy Tony desktop Agent gateway
 
 on:
   workflow_dispatch:
@@ -38,13 +38,14 @@ jobs:
             bear_agent_pet/server_gateway/ \
             ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
 
-      - name: Install and restart service
+      - name: Install restart and verify service
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           ROOT='/home/ubuntu/.local/share/bear-agent'
           APP="$ROOT/app"
           VENV="$ROOT/venv"
+          ENVFILE="$ROOT/bear-agent.env"
 
           if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
             sudo apt-get update -qq
@@ -55,19 +56,21 @@ jobs:
           python3 -m venv "$VENV"
           "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
 
-          if [ ! -f "$ROOT/bear-agent.env" ]; then
-            cat > "$ROOT/bear-agent.env" <<'ENV'
+          if [ ! -f "$ENVFILE" ]; then
+            cat > "$ENVFILE" <<'ENV'
           BEAR_AGENT_REQUIRE_AUTH=false
           BEAR_OPENCLAW_AGENT=main
           BEAR_OPENCLAW_TIMEOUT=240
+          BEAR_TONY_PERSONA=true
           OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
           ENV
-            chmod 600 "$ROOT/bear-agent.env"
+            chmod 600 "$ENVFILE"
           fi
+          grep -q '^BEAR_TONY_PERSONA=' "$ENVFILE" || printf '%s\n' 'BEAR_TONY_PERSONA=true' >> "$ENVFILE"
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
-          Description=BearAgentPet OpenClaw WebSocket Gateway
+          Description=Tony Desktop Agent OpenClaw WebSocket Gateway
           After=network-online.target
           Wants=network-online.target
 
@@ -92,25 +95,55 @@ jobs:
 
           ready=0
           for i in $(seq 1 30); do
-            if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/bear-health.json 2>/dev/null; then
+            if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/tony-health.json 2>/dev/null; then
               ready=1
               break
             fi
             sleep 1
           done
           test "$ready" -eq 1
-          cat /tmp/bear-health.json
-          echo
-          systemctl --no-pager --full status bear-agent-gateway.service | head -n 30
 
+          echo '=== TONY GATEWAY HEALTH ==='
+          cat /tmp/tony-health.json
+          echo
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/tony-health.json'))
+          assert d['ok'] is True, d
+          assert d['service'] == 'Tony Desktop Agent Gateway', d
+          assert d['version'] == '0.4.0', d
+          assert d['tony_persona'] is True, d
+          print('TONY_GATEWAY_HEALTH=PASS')
+          PY
+
+          echo '=== OPENCLAW BACKEND ==='
           export PATH="/home/ubuntu/.npm-global/bin:$PATH"
-          /home/ubuntu/.npm-global/bin/openclaw agent --agent main \
-            --session-key bear-gateway-deploy-smoke \
-            --message 'Reply exactly with: BEAR_OPENCLAW_OK' \
-            --timeout 240 --json >/tmp/bear-openclaw-smoke.json
-          grep -q 'BEAR_OPENCLAW_OK' /tmp/bear-openclaw-smoke.json
-          echo 'BEAR_OPENCLAW_BACKEND=PASS'
-          echo 'BEAR_GATEWAY_HEALTH=PASS'
+          /home/ubuntu/.npm-global/bin/openclaw gateway status --deep --json >/tmp/tony-openclaw-status.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/tony-openclaw-status.json'))
+          assert ((d.get('service') or {}).get('runtime') or {}).get('status') == 'running', d
+          assert (d.get('rpc') or {}).get('ok') is True, d
+          print('TONY_OPENCLAW_BACKEND=PASS')
+          PY
+
+          echo '=== WEBSOCKET CONTRACT ==='
+          "$VENV/bin/python" - <<'PY'
+          import asyncio, json
+          import websockets
+
+          async def main():
+              async with websockets.connect('ws://127.0.0.1:18790/agent/ws') as ws:
+                  first=json.loads(await asyncio.wait_for(ws.recv(), 5))
+                  second=json.loads(await asyncio.wait_for(ws.recv(), 5))
+                  assert first == {'type':'agent_state','state':'idle'}, first
+                  assert second.get('type') == 'avatar_action', second
+                  assert second.get('action') == 'wave', second
+                  print('TONY_WEBSOCKET_CONTRACT=PASS')
+          asyncio.run(main())
+          PY
+
+          systemctl --no-pager --full status bear-agent-gateway.service | head -n 24
           REMOTE
 
       - name: Remove SSH key
