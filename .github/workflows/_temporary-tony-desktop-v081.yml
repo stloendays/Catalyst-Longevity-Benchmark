@@ -20,6 +20,10 @@ jobs:
         with:
           ref: feature/teddy-agent-pet
           fetch-depth: 0
+      - name: Normalize legacy drag indentation
+        shell: bash
+        run: |
+          python -c 'from pathlib import Path; p=Path("bear_agent_pet/client/src/PetWindowV7.cpp"); s=p.read_text(encoding="utf-8"); s=s.replace("  dragging_=true;\n  actionTimer_.stop();", "          dragging_=true;\n          actionTimer_.stop();", 1); p.write_text(s, encoding="utf-8")'
       - name: Patch Tony desktop behavior
         run: python .github/scripts/patch_tony_desktop_v081.py
       - name: Validate patch
