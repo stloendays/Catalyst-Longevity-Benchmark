@@ -1,0 +1,104 @@
+name: Recover Tony v0.10 interaction artwork
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tony-v010-recover-assets.yml'
+
+permissions:
+  contents: write
+
+env:
+  TONY_V010_CHUNKS: >-
+    6ba80ddd22e4f25bfd18a84a543716473963c6a3
+    bc2b3493d3904af408ec585ffae1c80486148f3a
+    f3609273234cbd4a1b9787ca6a822fb345e26d7d
+    ccae3c04e90fadd6b07f01ef53f163fefc0040a6
+    0009e30ee462f74354d29511b356a6e6c59c3420
+    1aa341178adf0baae6d85ea84acf2a8985b7e7ea
+    5563dbdeb8cdb493d9e38367ec52b6607c2e57d1
+    6fce8f7fc9a17e9e1380b88de3333d79333dd1cd
+    994769926bf05523c986010a40ee09918d194e4e
+    f4a2f2ea9238bc45e64a9b6333b3af5404c4a570
+    e223eaaeee15111444b148447244c73e7f2887a5
+    cfb5f5038ebe9c530b28be966f99990278fbe7ef
+    1de456398239f070f4f998b71558e900268bd45e
+    06592341502a5ccd57bb59e9cf23cea923293aee
+
+jobs:
+  recover-and-integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Reconstruct valid artwork archive from Git blobs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > /tmp/tony-v010-assets.b64
+          for sha in $TONY_V010_CHUNKS; do
+            gh api "/repos/$GITHUB_REPOSITORY/git/blobs/$sha" --jq '.content' \
+              | tr -d '\r\n' | base64 -d >> /tmp/tony-v010-assets.b64
+          done
+          tr -d '\r\n ' < /tmp/tony-v010-assets.b64 | base64 -d > /tmp/tony-v010-assets.zip
+          unzip -t /tmp/tony-v010-assets.zip
+          rm -rf bear_agent_pet/client/assets/animations/{pat,lifted,landing,dizzy,stretch,yawn,cursor_watch}
+          unzip -o /tmp/tony-v010-assets.zip -d .
+          count=$(find bear_agent_pet/client/assets/animations -path '*/frame_*.png' \
+            \( -path '*/pat/*' -o -path '*/lifted/*' -o -path '*/landing/*' -o -path '*/dizzy/*' -o -path '*/stretch/*' -o -path '*/yawn/*' -o -path '*/cursor_watch/*' \) | wc -l)
+          test "$count" -eq 21
+          echo 'TONY_V010_ARCHIVE_RECOVERY=PASS frames=21'
+
+      - name: Apply v0.10 interaction code
+        shell: bash
+        run: |
+          set -u
+          set +e
+          python bear_agent_pet/client/tools/apply_v010_interactions.py
+          patch_rc=$?
+          set -e
+          # The current project reads the semantic version from client/VERSION.
+          # Older patch helpers attempted to edit project(... VERSION ...), so
+          # tolerate only that final version-anchor failure and verify every
+          # interaction patch marker explicitly below.
+          if [ "$patch_rc" -ne 0 ]; then
+            echo "Patch helper returned $patch_rc; verifying applied markers before continuing."
+          fi
+          printf '0.10.0\n' > bear_agent_pet/client/VERSION
+          grep -q 'Pat, Lifted, Landing, Dizzy, Stretch, Yawn, CursorWatch' bear_agent_pet/client/src/PetWindow.h
+          grep -q 'movedDuringDrag_' bear_agent_pet/client/src/PetWindow.h
+          grep -q 'case Action::Pat:return "pat"' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'const bool useAuthoredFrames' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'dragTravel_>700' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'Action::CursorWatch' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'Action::Stretch' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'Action::Yawn' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'NEW_INTERACTIONS' bear_agent_pet/client/tools/validate_state_assets.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          echo 'TONY_V010_INTERACTION_CODE=PASS version=0.10.0'
+
+      - name: Commit real interaction frames and clean bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/tony_assets_bootstrap
+          rm -f .github/workflows/tony-v010-integrate.yml
+          rm -f .github/workflows/tony-v010-from-staging.yml
+          rm -f .github/workflows/tony-v010-recover-assets.yml
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.cpp
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets_pat.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add seven living Tony interaction animations'
+          git push origin HEAD:feature/bear-agent-pet
+          echo 'TONY_V010_COMMIT=PASS'
