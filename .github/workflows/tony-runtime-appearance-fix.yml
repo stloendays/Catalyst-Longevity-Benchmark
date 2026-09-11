@@ -1,0 +1,59 @@
+name: Fix Tony runtime appearance
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/scripts/fix_tony_runtime_appearance.py'
+      - '.github/workflows/tony-runtime-appearance-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-runtime-appearance-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Apply runtime appearance repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/fix_tony_runtime_appearance.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          git diff --check
+          grep -F 'groundY=205.0+dy' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'walkDirection_<0' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'VERSION 0.9.3' bear_agent_pet/client/CMakeLists.txt
+          if grep -F 'QTimer::singleShot(700, &pet, &PetWindow::configureConnection)' bear_agent_pet/client/src/main.cpp; then
+            echo 'Automatic pairing dialog still present.' >&2
+            exit 1
+          fi
+
+      - name: Commit runtime appearance repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/src/main.cpp \
+                  bear_agent_pet/client/src/PetWindowV7.cpp \
+                  bear_agent_pet/client/CMakeLists.txt
+          if git diff --cached --quiet; then
+            echo 'Runtime appearance repair already applied.'
+            exit 0
+          fi
+          git commit -m 'Fix Tony runtime layout and first-run clutter'
+          git pull --rebase origin feature/bear-agent-pet
+          git push origin HEAD:feature/bear-agent-pet
