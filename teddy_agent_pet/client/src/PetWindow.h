@@ -36,7 +36,7 @@ private:
     enum class DockMode { Free, Bottom, Top, Left, Right };
 
     enum class Action {
-        Idle, Curious, Pet, Carried, Land, Dizzy, Stretch, Yawn,
+        Idle, Curious, Peek, Pet, Carried, Land, Dizzy, Stretch, Yawn,
         Bob, Walk, Think, Celebrate, Sleep,
         Shiver, AskHug, Hug, Blush, BlushWave, Study,
         AdjustGlasses, RemoveGlasses, Wave
@@ -53,10 +53,15 @@ private:
     void tickAnimation();
     void tickLife();
     void tickDesktop();
+    void tickPhysics();
     void updateForegroundWindowBehavior();
     bool foregroundWindowInfo(QRect *rect, QScreen **screen, bool *fullscreen) const;
     void perchOnForegroundWindow();
+    void walkAlongForegroundWindow();
+    bool wouldHitForegroundWindow(const QRect &nextFrame) const;
     void startCursorWalk(const QPoint &cursor);
+    void startFall(bool rough);
+    void moveToRestCorner();
     QScreen *screenForPoint(const QPoint &globalPoint) const;
     void settleOnDesktop();
     void ensureOnDesktop();
@@ -92,6 +97,7 @@ private:
     QTimer lifeTimer_;
     QTimer hoverTimer_;
     QTimer desktopTimer_;
+    QTimer physicsTimer_;
     SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
@@ -118,6 +124,14 @@ private:
     bool perchOnActiveWindow_{false};
     bool hiddenForFullscreen_{false};
     bool hasWalkTarget_{false};
+    bool gravityEnabled_{true};
+    bool fastCursorChase_{true};
+    bool autoRest_{true};
+    bool edgePeek_{true};
+    bool falling_{false};
+    bool pendingDizzyAfterFall_{false};
+    bool autoRested_{false};
+    bool walkingOnWindow_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
@@ -125,10 +139,14 @@ private:
     int rapidClicks_{0};
     int lifeSaveTicks_{0};
     int cursorStillTicks_{0};
+    int fallVelocity_{0};
+    int fallTargetY_{0};
+    int bounceCount_{0};
     DockMode dockMode_{DockMode::Free};
     QString dockScreenName_;
     QPoint lastCursorGlobal_;
     QPoint walkTarget_;
+    QRect windowWalkArea_;
     QString answer_;
     QString emotion_{"neutral"};
     QString agentState_{"idle"};

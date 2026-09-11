@@ -24,3 +24,17 @@ cmake --build build --config Release
 ```
 
 Double-click Tony to talk to the server agent. Right-click Tony for manual actions.
+
+
+## V0.8.3 desktop-world behavior
+
+Tony now treats the Windows desktop as a physical environment rather than a flat overlay:
+
+- walks along the active window edge when asked (and during some idle walks while perched);
+- avoids newly entering the foreground window while wandering, turning back or stopping to inspect the obstacle;
+- occasionally chases a fast cursor sweep that passes nearby;
+- peeks from left/right/top screen edges without requiring dedicated artwork;
+- falls under gravity and bounces after being dragged, with a switch to disable the physics;
+- after ten quiet minutes, moves to the less intrusive bottom corner and sleeps until the next interaction.
+
+All of these behaviors are optional from **Settings → Desktop behavior**.

@@ -98,6 +98,10 @@ PetWindow::PetWindow(QWidget *parent)
     snapToEdges_=initialSettings.value("desktop/snap_to_edges",true).toBool();
     hideForFullscreen_=initialSettings.value("desktop/hide_for_fullscreen",true).toBool();
     perchOnActiveWindow_=initialSettings.value("desktop/perch_on_active_window",false).toBool();
+    gravityEnabled_=initialSettings.value("desktop/gravity",true).toBool();
+    fastCursorChase_=initialSettings.value("desktop/fast_cursor_chase",true).toBool();
+    autoRest_=initialSettings.value("desktop/auto_rest",true).toBool();
+    edgePeek_=initialSettings.value("desktop/edge_peek",true).toBool();
     lastCursorGlobal_=QCursor::pos();
     ensureOnDesktop();
     lifeClock_.start();
@@ -144,9 +148,14 @@ PetWindow::PetWindow(QWidget *parent)
     connect(&lifeTimer_, &QTimer::timeout, this, &PetWindow::tickLife);
     lifeTimer_.start();
 
-    desktopTimer_.setInterval(1000);
+    // Desktop sensing runs at 4 Hz: quick enough to notice cursor sweeps without
+    // turning foreground-window checks into a busy loop.
+    desktopTimer_.setInterval(250);
     connect(&desktopTimer_, &QTimer::timeout, this, &PetWindow::tickDesktop);
     desktopTimer_.start();
+
+    physicsTimer_.setInterval(16);
+    connect(&physicsTimer_, &QTimer::timeout, this, &PetWindow::tickPhysics);
 
     connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){
         submitTonyPrompt(text);
@@ -322,6 +331,7 @@ QString PetWindow::assetKeyForAction(Action action) const {
     switch(action){
     case Action::Idle:return "idle";
     case Action::Curious:return "curious";
+    case Action::Peek:return "idle";
     case Action::Pet:return "pet";
     case Action::Carried:return "carried";
     case Action::Land:return "land";
@@ -352,6 +362,7 @@ int PetWindow::frameStrideForAction(Action action) const {
     case Action::Land:return 3;
     case Action::Dizzy:return 2;
     case Action::Curious:return 5;
+    case Action::Peek:return 5;
     case Action::Pet:return 4;
     case Action::Stretch:return 5;
     case Action::Yawn:return 7;
@@ -420,6 +431,12 @@ void PetWindow::paintEvent(QPaintEvent*) {
         // handles the occasional blink; no perpetual bobbing or breathing zoom.
         break;
     case Action::Curious: dy=-1; rotation=1.4*qSin(t*.45); scale=1.008; break;
+    case Action::Peek:
+        if(dockMode_==DockMode::Left) { dx=-28; rotation=-4.0; }
+        else if(dockMode_==DockMode::Right) { dx=28; rotation=4.0; }
+        else if(dockMode_==DockMode::Top) { dy=-24; rotation=2.0*qSin(t*.55); }
+        else { dy=-2; scale=1.01; }
+        break;
     case Action::Pet: dy=2; scale=1.018+0.006*qSin(t*.75); rotation=1.0*qSin(t*.5); break;
     case Action::Carried: dy=-7; scale=.985; rotation=2.2*qSin(t*.9); break;
     case Action::Land: dy=-qAbs(int(5*qSin(t*1.55))); scale=1.0+0.012*qSin(t*1.55); break;
@@ -503,7 +520,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
 void PetWindow::setAction(Action a,int durationMs){
     action_=a; frame_=0; basePos_=pos();
-    if(a!=Action::Walk) hasWalkTarget_=false;
+    if(a!=Action::Walk) { hasWalkTarget_=false; walkingOnWindow_=false; }
     if(a!=Action::Idle) {
         idleBlinking_=false;
         idleBlinkTick_=0;
@@ -589,6 +606,14 @@ void PetWindow::runIdleMoment(){
         scheduleIdleMoment(); return;
     }
 
+    if(edgePeek_ && (dockMode_==DockMode::Left || dockMode_==DockMode::Right || dockMode_==DockMode::Top) &&
+       QRandomGenerator::global()->bounded(100)<26) {
+        emotion_="curious";
+        setAction(Action::Peek,1700);
+        scheduleIdleMoment();
+        return;
+    }
+
     using Impulse=TonyBehaviorEngine::Impulse;
     const auto impulse=behavior_.chooseIdleImpulse(QTime::currentTime().hour());
     switch(impulse) {
@@ -613,7 +638,10 @@ void PetWindow::runIdleMoment(){
     case Impulse::Wave:
         emotion_="friendly"; setAction(Action::Wave,1300); break;
     case Impulse::Walk:
-        emotion_="playful"; setAction(Action::Walk,3200); break;
+        emotion_="playful";
+        if(perchOnActiveWindow_) walkAlongForegroundWindow();
+        else setAction(Action::Walk,3200);
+        break;
     case Impulse::Study:
         emotion_="focused"; setAction(Action::Study,3000); break;
     case Impulse::AdjustGlasses:
@@ -647,24 +675,34 @@ void PetWindow::tickLife(){
 
 
 void PetWindow::tickDesktop(){
-    if(dragging_ || mouseDown_) return;
+    if(dragging_ || mouseDown_ || falling_) return;
 
     updateForegroundWindowBehavior();
     if(hiddenForFullscreen_) return;
     ensureOnDesktop();
 
     const QPoint cursor=QCursor::pos();
-    if((cursor-lastCursorGlobal_).manhattanLength()<4) ++cursorStillTicks_;
+    const QPoint previousCursor=lastCursorGlobal_;
+    const int cursorTravel=(cursor-previousCursor).manhattanLength();
+    if(cursorTravel<4) ++cursorStillTicks_;
     else cursorStillTicks_=0;
     lastCursorGlobal_=cursor;
 
-    if(perchOnActiveWindow_ && agentState_=="idle" && !composer_.isVisible() &&
-       (action_==Action::Idle || action_==Action::Curious) && !actionTimer_.isActive()) {
+    const bool idleAgent=agentState_=="idle" && !composer_.isVisible();
+    const bool actionFree=(action_==Action::Idle || action_==Action::Curious) && !actionTimer_.isActive();
+
+    // After ten quiet minutes Tony chooses the less intrusive lower corner and sleeps.
+    if(autoRest_ && !autoRested_ && idleAgent && action_==Action::Idle &&
+       activityClock_.isValid() && activityClock_.elapsed()>=10*60*1000) {
+        moveToRestCorner();
+        return;
+    }
+
+    if(perchOnActiveWindow_ && idleAgent && actionFree) {
         perchOnForegroundWindow();
     }
 
-    if(!followCursor_ || perchOnActiveWindow_ || agentState_!="idle" || composer_.isVisible() ||
-       action_!=Action::Idle || actionTimer_.isActive()) return;
+    if(!idleAgent || !actionFree || perchOnActiveWindow_) return;
 
     const auto life=behavior_.snapshot();
     const QPoint center=frameGeometry().center();
@@ -673,10 +711,24 @@ void PetWindow::tickDesktop(){
     const int distance=qAbs(dx)+qAbs(dy);
     const bool recentlyTouched=activityClock_.isValid() && activityClock_.elapsed()<2200;
 
-    // Cursor following is intentionally low-frequency, but unlike V0.8.1 Tony now
-    // stores a real destination and walks toward it instead of taking a token 20px step.
-    if(cursorStillTicks_>=3 && !recentlyTouched && distance>150 && distance<520 &&
-       life.curiosity>=58 && life.energy>=36 && QRandomGenerator::global()->bounded(100)<32) {
+    // A fast pointer sweep near Tony triggers an occasional short chase. Using the
+    // swept rectangle catches passes that cross Tony even when both sampled endpoints
+    // are already far away.
+    QRect cursorSweep(previousCursor,cursor);
+    cursorSweep=cursorSweep.normalized().adjusted(-105,-105,105,105);
+    const bool sweptNear=cursorSweep.contains(center);
+    if(fastCursorChase_ && followCursor_ && !recentlyTouched && cursorTravel>=150 && sweptNear &&
+       life.curiosity>=52 && life.energy>=34 && QRandomGenerator::global()->bounded(100)<22) {
+        startCursorWalk(cursor);
+        cursorStillTicks_=0;
+        return;
+    }
+
+    if(!followCursor_) return;
+
+    // Four-Hz sensing means 12 still samples is roughly three seconds.
+    if(cursorStillTicks_>=12 && !recentlyTouched && distance>150 && distance<520 &&
+       life.curiosity>=58 && life.energy>=36 && QRandomGenerator::global()->bounded(100)<14) {
         startCursorWalk(cursor);
         cursorStillTicks_=0;
     }
@@ -779,6 +831,68 @@ void PetWindow::perchOnForegroundWindow(){
     dockScreenName_=screen->name();
 }
 
+void PetWindow::walkAlongForegroundWindow(){
+    QRect windowRect;
+    QScreen *screen=nullptr;
+    bool fullscreen=false;
+    if(!foregroundWindowInfo(&windowRect,&screen,&fullscreen) || !screen || fullscreen) {
+        emotion_="curious";
+        setAction(Action::Curious,900);
+        return;
+    }
+
+    const QRect area=screen->availableGeometry();
+    const QRect visibleWindow=windowRect.intersected(area);
+    if(visibleWindow.width()<width()+80 || visibleWindow.height()<120) {
+        emotion_="curious";
+        setAction(Action::Curious,900);
+        return;
+    }
+
+    const int shadowY=196;
+    const int maxX=qMax(area.left(),area.right()-width()+1);
+    const int topPerch=visibleWindow.top()-shadowY;
+    const int bottomPerch=visibleWindow.bottom()-shadowY;
+    const int y=topPerch>=area.top() ? qMin(topPerch,area.bottom()-height()+1)
+                                     : qBound(area.top(),bottomPerch,area.bottom()-height()+1);
+    const int leftX=qBound(area.left(),visibleWindow.left()+12,maxX);
+    const int rightX=qBound(area.left(),visibleWindow.right()-width()+1-12,maxX);
+    if(rightX-leftX<70) return;
+
+    // Start from the nearest valid point on the same ledge, then head toward the
+    // opposite half of the active window. This makes the movement read as walking
+    // along a surface rather than teleporting between arbitrary desktop points.
+    QPoint start=qBound(leftX,pos().x(),rightX)==pos().x() ? QPoint(pos().x(),y)
+                                                          : QPoint(qBound(leftX,pos().x(),rightX),y);
+    move(start);
+    const int midpoint=(leftX+rightX)/2;
+    const int targetX=start.x()<=midpoint ? rightX : leftX;
+    windowWalkArea_=QRect(leftX,y,rightX-leftX+1,1);
+    walkTarget_=QPoint(targetX,y);
+    hasWalkTarget_=true;
+    walkingOnWindow_=true;
+    walkDirection_=targetX>=start.x() ? 1 : -1;
+    emotion_="playful";
+    setAction(Action::Walk,qBound(1800,qAbs(targetX-start.x())*12,7000));
+    hasWalkTarget_=true;
+    walkingOnWindow_=true;
+    walkTarget_=QPoint(targetX,y);
+}
+
+bool PetWindow::wouldHitForegroundWindow(const QRect &nextFrame) const {
+    if(walkingOnWindow_) return false;
+    QRect obstacle;
+    QScreen *screen=nullptr;
+    bool fullscreen=false;
+    if(!foregroundWindowInfo(&obstacle,&screen,&fullscreen) || fullscreen) return false;
+    obstacle=obstacle.adjusted(-6,-6,6,6);
+    const QRect currentBody=frameGeometry().adjusted(32,30,-32,-22);
+    const QRect nextBody=nextFrame.adjusted(32,30,-32,-22);
+    // If Tony already overlaps the active app, do not trap him there. Collision
+    // avoidance only applies when a walk would newly enter the window.
+    return !currentBody.intersects(obstacle) && nextBody.intersects(obstacle);
+}
+
 void PetWindow::startCursorWalk(const QPoint &cursor){
     QScreen *targetScreen=screenForPoint(cursor);
     if(!targetScreen) return;
@@ -808,6 +922,112 @@ void PetWindow::startCursorWalk(const QPoint &cursor){
     // setAction keeps explicit Walk targets; assign once more to make that invariant obvious.
     hasWalkTarget_=true;
     walkTarget_=target;
+}
+
+void PetWindow::startFall(bool rough){
+    QScreen *screen=screenForPoint(frameGeometry().center());
+    if(!screen) {
+        settleOnDesktop();
+        savePosition();
+        emotion_=rough ? "dizzy" : "playful";
+        setAction(rough ? Action::Dizzy : Action::Land, rough ? 1500 : 650);
+        return;
+    }
+
+    const QRect area=screen->availableGeometry();
+    QPoint p=pos();
+    p.setX(qBound(area.left(),p.x(),qMax(area.left(),area.right()-width()+1)));
+    p.setY(qMin(p.y(),area.bottom()-height()+1));
+    move(p);
+
+    dockMode_=DockMode::Free;
+    dockScreenName_=screen->name();
+    hasWalkTarget_=false;
+    walkingOnWindow_=false;
+    falling_=true;
+    pendingDizzyAfterFall_=rough;
+    fallVelocity_=0;
+    bounceCount_=0;
+    fallTargetY_=area.bottom()-height()+1;
+    actionTimer_.stop();
+    action_=Action::Carried;
+    frame_=0;
+    physicsTimer_.start();
+    update();
+}
+
+void PetWindow::tickPhysics(){
+    if(!falling_) {
+        physicsTimer_.stop();
+        return;
+    }
+
+    QScreen *screen=screenForPoint(frameGeometry().center());
+    if(!screen) return;
+    const QRect area=screen->availableGeometry();
+    fallTargetY_=area.bottom()-height()+1;
+
+    fallVelocity_ += 2;
+    int nextY=pos().y()+fallVelocity_;
+    if(nextY>=fallTargetY_) {
+        move(pos().x(),fallTargetY_);
+        if(bounceCount_<2 && qAbs(fallVelocity_)>=7) {
+            ++bounceCount_;
+            fallVelocity_=-qMax(3,qAbs(fallVelocity_)*35/100);
+            action_=Action::Land;
+            frame_=0;
+            update();
+            return;
+        }
+
+        falling_=false;
+        physicsTimer_.stop();
+        dockMode_=DockMode::Bottom;
+        dockScreenName_=screen->name();
+        savePosition();
+        const bool dizzy=pendingDizzyAfterFall_;
+        pendingDizzyAfterFall_=false;
+        if(dizzy) {
+            emotion_="dizzy";
+            setAction(Action::Dizzy,1500);
+            showBubble(uiText("Fast trip. My curls are still catching up.","飞得有点快，我的卷毛还没反应过来。"),3200);
+        } else {
+            emotion_="playful";
+            setAction(Action::Land,700);
+        }
+        return;
+    }
+
+    move(pos().x(),nextY);
+    const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+    bubble_.follow(anchor);
+    composer_.follow(anchor);
+}
+
+void PetWindow::moveToRestCorner(){
+    QScreen *screen=screenForPoint(frameGeometry().center());
+    if(!screen) screen=QGuiApplication::primaryScreen();
+    if(!screen) return;
+
+    const QRect area=screen->availableGeometry();
+    const int leftX=area.left()+8;
+    const int rightX=qMax(leftX,area.right()-width()+1-8);
+    const int y=area.bottom()-height()+1;
+    const QPoint cursor=QCursor::pos();
+    const int leftDistance=qAbs(cursor.x()-(leftX+width()/2));
+    const int rightDistance=qAbs(cursor.x()-(rightX+width()/2));
+    const int x=leftDistance>rightDistance ? leftX : rightX;
+
+    perchOnActiveWindow_=false;
+    QSettings().setValue("desktop/perch_on_active_window",false);
+    dockMode_=DockMode::Bottom;
+    dockScreenName_=screen->name();
+    move(x,y);
+    savePosition();
+    autoRested_=true;
+    emotion_="sleepy";
+    setAction(Action::Sleep,0);
+    tray_.setToolTip("Tony · sleeping in a quiet corner");
 }
 
 QScreen *PetWindow::screenForPoint(const QPoint &globalPoint) const {
@@ -932,11 +1152,32 @@ void PetWindow::stepWalkAcrossDesktop(){
     if(!screen) screen=screenForPoint(frameGeometry().center());
     if(!screen) return;
 
+    if(walkingOnWindow_) {
+        const int remaining=walkTarget_.x()-pos().x();
+        if(qAbs(remaining)<=4) {
+            move(walkTarget_);
+            hasWalkTarget_=false;
+            walkingOnWindow_=false;
+            actionTimer_.stop();
+            emotion_="content";
+            setAction(Action::Curious,900);
+            return;
+        }
+        walkDirection_=remaining>0 ? 1 : -1;
+        const int step=qMin(4,qAbs(remaining));
+        QPoint next=pos()+QPoint(walkDirection_*step,0);
+        next.setY(windowWalkArea_.top());
+        next.setX(qBound(windowWalkArea_.left(),next.x(),windowWalkArea_.right()));
+        move(next);
+        dockScreenName_=screen->name();
+        return;
+    }
+
     if(hasWalkTarget_) {
         const int remaining=walkTarget_.x()-pos().x();
         if(qAbs(remaining)<=5) {
             move(walkTarget_);
-            dockScreenName_=screenForPoint(frameGeometry().center()) ? screenForPoint(frameGeometry().center())->name() : dockScreenName_;
+            if(auto *arrived=screenForPoint(frameGeometry().center())) dockScreenName_=arrived->name();
             hasWalkTarget_=false;
             actionTimer_.stop();
             savePosition();
@@ -949,9 +1190,23 @@ void PetWindow::stepWalkAcrossDesktop(){
     const QRect area=screen->availableGeometry();
     const int stepPixels=hasWalkTarget_ ? 5 : 2;
     QPoint next=pos()+QPoint(walkDirection_*stepPixels,0);
+    const QRect nextFrame(next,QSize(width(),height()));
+
+    if(wouldHitForegroundWindow(nextFrame)) {
+        if(hasWalkTarget_) {
+            hasWalkTarget_=false;
+            actionTimer_.stop();
+            emotion_="curious";
+            setAction(Action::Curious,900);
+        } else {
+            walkDirection_=-walkDirection_;
+            emotion_="curious";
+        }
+        return;
+    }
+
     const int nextLeft=next.x();
     const int nextRight=next.x()+width()-1;
-
     if(nextLeft>=area.left() && nextRight<=area.right()) {
         move(next);
         dockScreenName_=screen->name();
@@ -983,8 +1238,6 @@ void PetWindow::stepWalkAcrossDesktop(){
     }
 
     if(hasWalkTarget_) {
-        // There is no reachable display in the requested direction. Stop at the
-        // current screen edge instead of oscillating forever.
         hasWalkTarget_=false;
         actionTimer_.stop();
         settleOnDesktop();
@@ -1051,6 +1304,14 @@ void PetWindow::moveToNextScreen(){
 void PetWindow::markInteraction(){
     if(activityClock_.isValid()) activityClock_.restart();
     else activityClock_.start();
+    if(autoRested_) {
+        autoRested_=false;
+        tray_.setToolTip(agent_.connected() ? "Tony · connected" : "Tony · waiting for server");
+        if(action_==Action::Sleep && agentState_=="idle") {
+            emotion_="sleepy";
+            setAction(Action::Yawn,1100);
+        }
+    }
 }
 
 bool PetWindow::isHeadHit(const QPoint &localPos) const {
@@ -1108,7 +1369,7 @@ void PetWindow::showLifeStatus(){
 
 QString PetWindow::actionName() const {
     switch(action_){
-    case Action::Idle:return "idle"; case Action::Curious:return "curious"; case Action::Pet:return "being petted";
+    case Action::Idle:return "idle"; case Action::Curious:return "curious"; case Action::Peek:return "peeking from the edge"; case Action::Pet:return "being petted";
     case Action::Carried:return "being carried"; case Action::Land:return "landing"; case Action::Dizzy:return "dizzy";
     case Action::Stretch:return "stretching"; case Action::Yawn:return "yawning";
     case Action::Bob:return "working"; case Action::Walk:return "walking";
@@ -1183,15 +1444,19 @@ void PetWindow::mouseReleaseEvent(QMouseEvent *e){
         const bool rough=dragTravel_>850 || (pressClock_.isValid() && pressClock_.elapsed()<450 && dragTravel_>360);
         behavior_.onDragged(rough);
         dragging_=false;
-        settleOnDesktop();
-        savePosition();
-        if(rough) {
-  emotion_="dizzy";
-  setAction(Action::Dizzy,1500);
-  showBubble(uiText("Fast trip. My curls are still catching up.","飞得有点快，我的卷毛还没反应过来。"),3200);
+        if(gravityEnabled_) {
+            startFall(rough);
         } else {
-  emotion_="playful";
-  setAction(Action::Land,650);
+            settleOnDesktop();
+            savePosition();
+            if(rough) {
+                emotion_="dizzy";
+                setAction(Action::Dizzy,1500);
+                showBubble(uiText("Fast trip. My curls are still catching up.","飞得有点快，我的卷毛还没反应过来。"),3200);
+            } else {
+                emotion_="playful";
+                setAction(Action::Land,650);
+            }
         }
     } else {
         handleTap(e->position().toPoint());
@@ -1206,6 +1471,7 @@ void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){
 }
 
 void PetWindow::contextMenuEvent(QContextMenuEvent *e){
+    markInteraction();
     QMenu m;
     auto ask=m.addAction(uiText("Chat with Tony…","和 Tony 聊天…"));
     auto hug=m.addAction(uiText("Hug Tony","抱抱 Tony"));
@@ -1238,7 +1504,20 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto perchWindow=desktopMenu->addAction(uiText("Perch on the active window edge","坐在当前窗口边缘"));
     perchWindow->setCheckable(true);
     perchWindow->setChecked(perchOnActiveWindow_);
+    auto gravity=desktopMenu->addAction(uiText("Gravity and bounce after dragging","拖起来后有重力下落和弹跳"));
+    gravity->setCheckable(true);
+    gravity->setChecked(gravityEnabled_);
+    auto fastChase=desktopMenu->addAction(uiText("React to fast cursor sweeps","鼠标快速掠过时会追一下"));
+    fastChase->setCheckable(true);
+    fastChase->setChecked(fastCursorChase_);
+    auto edgePeek=desktopMenu->addAction(uiText("Peek from screen edges","停在屏幕边缘时会探头"));
+    edgePeek->setCheckable(true);
+    edgePeek->setChecked(edgePeek_);
+    auto autoRest=desktopMenu->addAction(uiText("Sleep in a corner after 10 quiet minutes","10 分钟无人操作后去角落睡觉"));
+    autoRest->setCheckable(true);
+    autoRest->setChecked(autoRest_);
     desktopMenu->addSeparator();
+    auto walkWindow=desktopMenu->addAction(uiText("Walk along the active window","沿当前窗口边缘走一走"));
     auto walkToCursor=desktopMenu->addAction(uiText("Walk to the cursor now","现在走到鼠标旁边"));
     auto taskbarHome=desktopMenu->addAction(uiText("Sit by the taskbar","回到任务栏旁边"));
     auto nextDisplay=desktopMenu->addAction(uiText("Move to next display","去下一个显示器"));
@@ -1306,11 +1585,32 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
         if(perchOnActiveWindow_) { hasWalkTarget_=false; perchOnForegroundWindow(); }
         else savePosition();
     }
+    else if(chosen==gravity) {
+        gravityEnabled_=gravity->isChecked();
+        QSettings().setValue("desktop/gravity",gravityEnabled_);
+    }
+    else if(chosen==fastChase) {
+        fastCursorChase_=fastChase->isChecked();
+        QSettings().setValue("desktop/fast_cursor_chase",fastCursorChase_);
+    }
+    else if(chosen==edgePeek) {
+        edgePeek_=edgePeek->isChecked();
+        QSettings().setValue("desktop/edge_peek",edgePeek_);
+    }
+    else if(chosen==autoRest) {
+        autoRest_=autoRest->isChecked();
+        QSettings().setValue("desktop/auto_rest",autoRest_);
+        if(!autoRest_) autoRested_=false;
+    }
+    else if(chosen==walkWindow) walkAlongForegroundWindow();
     else if(chosen==walkToCursor) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); startCursorWalk(QCursor::pos()); }
     else if(chosen==taskbarHome) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); dockToTaskbar(); }
     else if(chosen==nextDisplay) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); moveToNextScreen(); }
     else if(chosen==idle) setAction(Action::Idle);
-    else if(chosen==walk) { if(dockMode_==DockMode::Left || dockMode_==DockMode::Right || dockMode_==DockMode::Top) dockMode_=DockMode::Free; setAction(Action::Walk,3000); }
+    else if(chosen==walk) {
+        if(perchOnActiveWindow_) walkAlongForegroundWindow();
+        else { if(dockMode_==DockMode::Left || dockMode_==DockMode::Right || dockMode_==DockMode::Top) dockMode_=DockMode::Free; setAction(Action::Walk,3000); }
+    }
     else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);
     else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);
     else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }
