@@ -1,0 +1,46 @@
+name: Local2B Stage3C memory guard
+
+on:
+  push:
+    paths:
+      - training/local2b_mcp/.stage3c-memory-guard-trigger
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+      - name: Stop inference service only if Stage 3C trainer is active
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          if pgrep -f '/home/ubuntu/qvac-trainer-step3/llama-finetune-lora.*local2b-training/step3c/train.jsonl' >/dev/null; then
+            echo 'STAGE3C_TRAINER=ACTIVE'
+            if systemctl is-active --quiet rhocodec-llm.service; then
+              sudo systemctl stop rhocodec-llm.service
+              echo 'BASE_SERVICE_ACTION=STOPPED_TO_FREE_RAM'
+            else
+              echo 'BASE_SERVICE_ACTION=ALREADY_INACTIVE'
+            fi
+            pgrep -af '/home/ubuntu/qvac-trainer-step3/llama-finetune-lora.*local2b-training/step3c/train.jsonl'
+            free -h
+          else
+            echo 'STAGE3C_TRAINER=NOT_ACTIVE'
+            echo 'BASE_SERVICE_ACTION=UNCHANGED'
+          fi
+          REMOTE
+      - name: Cleanup
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
