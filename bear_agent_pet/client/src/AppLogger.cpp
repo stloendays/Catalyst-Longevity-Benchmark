@@ -7,6 +7,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 #include <QStandardPaths>
+#include <QStringConverter>
 #include <QTextStream>
 
 #include <cstdlib>
