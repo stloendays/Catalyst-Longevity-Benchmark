@@ -102,6 +102,8 @@ jobs:
           }
           # Public WSS is protected by per-device bearer tokens issued during pairing.
           set_env BEAR_AGENT_REQUIRE_AUTH true
+          # Reusable trusted-friend code: only its SHA-256 digest is deployed/stored.
+          set_env BEAR_FRIEND_CODE_SHA256 cd63ec788c84ed0b945f7f4a471271c82471347dc0dfeca51ae96e5221a9bedc
           set_env BEAR_TONY_PERSONA true
           set_env BEAR_LOCAL_MODEL "$MODEL_ID"
           set_env BEAR_LOCAL_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
