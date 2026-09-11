@@ -46,6 +46,12 @@ jobs:
           APP="$ROOT/app"
           VENV="$ROOT/venv"
 
+          if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv
+          fi
+
+          rm -rf "$VENV"
           python3 -m venv "$VENV"
           "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
 
