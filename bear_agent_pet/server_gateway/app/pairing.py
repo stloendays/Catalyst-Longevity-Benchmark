@@ -14,7 +14,7 @@ _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # This is only a SHA-256 digest of the reusable friend code, never the code itself.
 # The 12-character code has enough entropy to keep the public digest from being useful
 # as a practical offline guessing target. Rotate by setting BEAR_FRIEND_CODE_SHA256.
-_DEFAULT_FRIEND_CODE_SHA256 = "8d37450f5e691cfb8e5f0fa1e09361c0a0a293b824d1ae7d6eb3bd05a0dc15f2"
+_DEFAULT_FRIEND_CODE_SHA256 = "cd63ec788c84ed0b945f7f4a471271c82471347dc0dfeca51ae96e5221a9bedc"
 
 
 def _store_path() -> Path:
