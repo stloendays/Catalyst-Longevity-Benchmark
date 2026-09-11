@@ -1,4 +1,7 @@
 name: Build and release Tony Desktop Pet
+# Direct repository pushes intentionally trigger this workflow. Commits pushed by
+# GITHUB_TOKEN do not recursively start Actions, so release-driving changes must
+# also be reachable through workflow_dispatch or a direct/user-authored push.
 
 on:
   workflow_dispatch:
