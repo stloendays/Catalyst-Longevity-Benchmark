@@ -422,23 +422,15 @@ int PetWindow::frameStrideForAction(Action action) const {
 const QPixmap *PetWindow::pixmapForAction(Action action) const {
     const QString key=assetKeyForAction(action);
 
-    // Idle may use only the short face-blink sequence. Do not loop the legacy
-    // full-body animation sets: their crops/proportions vary and caused Tony to
-    // appear to lose ears, feet or arms between frames.
+    // Never use the historical assets/animations/idle frames at runtime.
+    // Runtime Windows QA proved that frame_02 as well as frame_03 contains
+    // screenshot background/text and incomplete character framing. Keep the
+    // approved full state image as the only Idle artwork; idleBlinking_ remains
+    // a subtle motion-only micro-expression until a clean same-canvas blink set
+    // is explicitly authored and visually approved.
     if(action==Action::Idle) {
-        auto framesIt=animationAssets_.constFind("idle");
         auto idleIt=stateAssets_.constFind("idle");
-        if(idleBlinking_ && framesIt!=animationAssets_.constEnd() && framesIt.value().size()>=2) {
-            // frame_03 is intentionally excluded: it is the known malformed/
-            // inconsistent blink frame. -1 means use the approved static idle pose.
-            static constexpr int blinkSequence[] = {-1, 1, 1, -1, -1};
-            const int sequenceSize=static_cast<int>(sizeof(blinkSequence)/sizeof(blinkSequence[0]));
-            const int step=qBound(0,idleBlinkTick_,sequenceSize-1);
-            const int index=blinkSequence[step];
-            if(index>=0) return &framesIt.value().at(index);
-        }
         if(idleIt!=stateAssets_.constEnd() && !idleIt.value().isNull()) return &idleIt.value();
-        if(framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) return &framesIt.value().first();
     }
 
     // Prefer the complete V0.9 state image. V0.8-only behaviors can consume the
