@@ -1,12 +1,12 @@
-# Tony Desktop Pet — Windows Quick Start
+# Tony Desktop Pet v0.6 — Windows Quick Start
 
 Tony is a C++20 + Qt 6 desktop companion backed by the Tony Gateway, local Qwen3.5-2B and the full OpenClaw Agent on the research server.
 
 ## Run
 
-Unzip the GitHub Actions artifact and start `TonyDesktopPet.exe`. Keep the `assets` directory beside the executable.
+Unzip the GitHub Actions artifact and start `TonyDesktopPet.exe`. Keep the `assets` directory beside the executable. The runtime loads both static state images and optional multi-frame animation folders from that directory.
 
-Tony is frameless, transparent and always on top. Drag him with the left mouse button, double-click to ask a question, or right-click for actions such as hug, walk, study chemistry, adjust glasses, no-glasses mode, celebrate, shiver and sleep.
+Tony is frameless, transparent and always on top. Drag him with the left mouse button, double-click to ask a question, or right-click for actions such as hug, walk, study chemistry, adjust glasses, no-glasses mode, Paula greeting, celebrate, shiver and sleep.
 
 ## Connection modes
 
@@ -22,7 +22,7 @@ Tony never embeds the server SSH private key. The Windows account must already b
 
 ### 2. Friend / normal user: WSS pairing
 
-Tony v0.4 also supports per-device pairing. Right-click Tony and choose `连接 / 配对新设备…`, then enter the WSS endpoint and the one-time code issued by the server administrator.
+Right-click Tony and choose `连接 / 配对新设备…`, then enter the WSS endpoint and the one-time code issued by the server administrator.
 
 The pairing endpoint returns a random per-device bearer token. On Windows, Tony protects that token with DPAPI before storing it in local settings. The server stores only the token hash, so the plaintext device token is not retained server-side.
 
@@ -35,8 +35,39 @@ cd /home/ubuntu/.local/share/bear-agent/app
 
 The code expires and can be consumed only once. Do not post pairing codes in public GitHub Actions logs.
 
-## Multi-state artwork
+## v0.6 artwork and frame playback
 
-Tony now supports separate PNG artwork under `assets/states/` for idle, working, walk, thinking, celebrate, sleep, shiver, ask-hug, hug, blush, study, glasses, no-glasses and wave states. Missing state files automatically fall back to `assets/tony.png`, so artwork can be added incrementally.
+Static state images live under `assets/states/`:
 
-Temporary character actions take precedence over long-running Agent states. For example, a cold-related prompt can make Tony shiver briefly; after that animation he returns to the underlying `thinking` or `working` state until the Agent finishes.
+```text
+idle.png
+thinking.png
+working.png
+walk.png
+celebrate.png
+sleep.png
+shiver.png
+ask_hug.png
+hug.png
+blush.png
+blush_wave.png
+study.png
+adjust_glasses.png
+remove_glasses.png
+wave.png
+```
+
+Tony v0.6 can also play real frame sequences. The first animated states are:
+
+```text
+assets/animations/idle/frame_01.png ...
+assets/animations/ask_hug/frame_01.png ...
+assets/animations/shiver/frame_01.png ...
+assets/animations/walk/frame_01.png ...
+```
+
+Each folder supports 2–12 contiguous frames. Missing animations automatically fall back to the matching static state image; missing state images fall back to `assets/tony.png`.
+
+Temporary character actions still take precedence over long-running Agent states. A cold reaction can therefore play the shiver frames briefly and then return to `thinking` or `working` until the Agent task finishes.
+
+The Paula-specific `blush_wave` state is separate from generic blush, so server-side persona routing can give her a distinct greeting without changing other shy interactions.
