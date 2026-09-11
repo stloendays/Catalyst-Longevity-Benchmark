@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Compile Tony's editable persona source corpus into chat-SFT JSONL splits."""
+"""Compile Tony's English persona corpus into deterministic chat-SFT splits."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
+
+from persona_expansion import build_examples as build_expansion_examples
 
 
 def stable_bucket(text: str, buckets: int = 10) -> int:
@@ -19,10 +22,16 @@ def main() -> None:
     parser.add_argument(
         "--source",
         default="bear_agent_pet/training/source/tony_persona_en_v1.json",
+        help="High-weight hand-curated persona seed JSON.",
     )
     parser.add_argument(
         "--output-dir",
-        default="bear_agent_pet/training/processed/tony_persona_en_v1",
+        default="bear_agent_pet/training/processed/tony_persona_en_v2",
+    )
+    parser.add_argument(
+        "--no-expansion",
+        action="store_true",
+        help="Compile only the hand-curated seed examples.",
     )
     args = parser.parse_args()
 
@@ -32,39 +41,47 @@ def main() -> None:
 
     data = json.loads(source_path.read_text(encoding="utf-8"))
     system = data["system"].strip()
-    examples = data["examples"]
+    base_examples = data["examples"]
+    expansion_examples = [] if args.no_expansion else build_expansion_examples()
 
-    seen = set()
-    rows = []
-    for index, example in enumerate(examples):
-        user = example["user"].strip()
-        assistant = example["assistant"].strip()
-        key = user.casefold()
-        if not user or not assistant:
-            raise ValueError(f"Empty user/assistant field at example {index}")
-        if key in seen:
-            raise ValueError(f"Duplicate user prompt: {user}")
-        seen.add(key)
+    seen: set[str] = set()
+    rows: list[dict] = []
+    skipped_duplicates: list[str] = []
 
-        row = {
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-                {"role": "assistant", "content": assistant},
-            ],
-            "tags": example.get("tags", []),
-            "action": example.get("action", "idle"),
-            "emotion": example.get("emotion", "neutral"),
-            "source": "tony_persona_en_v1",
-            "weight": 1.0,
-        }
-        rows.append(row)
+    def ingest(examples: list[dict], source_name: str, default_weight: float) -> None:
+        for index, example in enumerate(examples):
+            user = example["user"].strip()
+            assistant = example["assistant"].strip()
+            key = user.casefold()
+            if not user or not assistant:
+                raise ValueError(f"Empty user/assistant field at {source_name}:{index}")
+            if key in seen:
+                # The curated seed always wins over a synthetic expansion phrasing.
+                skipped_duplicates.append(user)
+                continue
+            seen.add(key)
 
-    train_rows = []
-    eval_rows = []
+            rows.append({
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                    {"role": "assistant", "content": assistant},
+                ],
+                "tags": example.get("tags", []),
+                "action": example.get("action", "idle"),
+                "emotion": example.get("emotion", "neutral"),
+                "source": source_name,
+                "weight": float(example.get("weight", default_weight)),
+            })
+
+    ingest(base_examples, "tony_persona_en_v1_curated", 1.0)
+    ingest(expansion_examples, "tony_persona_en_v2_expansion", 0.8)
+
+    train_rows: list[dict] = []
+    eval_rows: list[dict] = []
     for row in rows:
         prompt = row["messages"][1]["content"]
-        # Deterministic ~12.5% holdout. The split stays stable as files move.
+        # Deterministic 1/8 holdout. The split remains stable across machines/runs.
         if stable_bucket(prompt, 8) == 0:
             eval_rows.append(row)
         else:
@@ -79,15 +96,23 @@ def main() -> None:
     write_jsonl(output_dir / "train.jsonl", train_rows)
     write_jsonl(output_dir / "eval.jsonl", eval_rows)
 
+    action_counts = Counter(row["action"] for row in rows)
+    tag_counts = Counter(tag for row in rows for tag in row.get("tags", []))
+    source_counts = Counter(row["source"] for row in rows)
     manifest = {
-        "name": data.get("name"),
-        "version": data.get("version"),
-        "language": data.get("language"),
+        "name": "Tony English Persona Corpus",
+        "version": "2.0",
+        "language": data.get("language", "en"),
         "total": len(rows),
         "train": len(train_rows),
         "eval": len(eval_rows),
         "split": "deterministic_sha256_bucket_1_of_8_eval",
         "source_file": source_path.as_posix(),
+        "source_counts": dict(sorted(source_counts.items())),
+        "action_counts": dict(sorted(action_counts.items())),
+        "tag_counts": dict(sorted(tag_counts.items())),
+        "skipped_duplicate_prompts": skipped_duplicates,
+        "notes": "Curated v1 examples have weight 1.0; deterministic v2 expansion examples have weight 0.8.",
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
