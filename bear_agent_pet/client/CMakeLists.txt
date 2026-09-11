@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(TonyDesktopPet VERSION 0.8.0 LANGUAGES CXX)
+project(TonyDesktopPet VERSION 0.9.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -7,6 +7,7 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets WebSockets Network)
 qt_add_executable(TonyDesktopPet WIN32
     src/main.cpp
     src/PetWindowV7.cpp
+    src/PetWindowSettings.cpp
     src/PetWindow.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
@@ -18,8 +19,15 @@ qt_add_executable(TonyDesktopPet WIN32
     src/LocalBridge.h
     src/SshTunnel.cpp
     src/SshTunnel.h
+    src/AppLogger.cpp
+    src/AppLogger.h
+    src/UpdateManager.cpp
+    src/UpdateManager.h
+    src/SettingsDialog.cpp
+    src/SettingsDialog.h
 )
 target_link_libraries(TonyDesktopPet PRIVATE Qt6::Widgets Qt6::WebSockets Qt6::Network)
+target_compile_definitions(TonyDesktopPet PRIVATE TONY_APP_VERSION="${PROJECT_VERSION}")
 if(WIN32)
   target_compile_definitions(TonyDesktopPet PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_link_libraries(TonyDesktopPet PRIVATE Crypt32)
