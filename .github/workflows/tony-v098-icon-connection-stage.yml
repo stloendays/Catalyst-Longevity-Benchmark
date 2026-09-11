@@ -41,12 +41,19 @@ jobs:
           $bg = Join-Path $env:RUNNER_TEMP 'tony-icon-bg.png'
           $character = Join-Path $env:RUNNER_TEMP 'tony-icon-character.png'
           $master = Join-Path $env:RUNNER_TEMP 'tony-icon-master.png'
+          $clean = Join-Path $env:RUNNER_TEMP 'tony-icon-master-clean.png'
           & magick -size 256x256 xc:none -fill '#F1E7D5' -draw 'roundrectangle 8,8 248,248 46,46' $bg
           if ($LASTEXITCODE -ne 0) { throw 'Could not create Tony icon background' }
           & magick $source -trim +repage -resize '196x196>' $character
           if ($LASTEXITCODE -ne 0) { throw 'Could not prepare Tony icon character artwork' }
           & magick $bg $character -gravity center -geometry '+0+6' -composite $master
           if ($LASTEXITCODE -ne 0) { throw 'Could not compose Tony icon master' }
+          # The approved idle source contains two tiny legacy specks far left of Tony's
+          # visible body. Clean only that empty background region; no character pixels
+          # are cropped, redrawn or restyled.
+          & magick $master -fill '#F1E7D5' -draw 'rectangle 44,35 78,50' $clean
+          if ($LASTEXITCODE -ne 0) { throw 'Could not clean Tony icon background specks' }
+          Move-Item $clean $master -Force
           & magick $master -define icon:auto-resize=256,64,48,32,16 $iconPath
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $iconPath)) { throw 'Could not create Tony Windows icon' }
           Write-Host 'TONY_ICON_SOURCE=approved states/idle.png; no character crop or redesign'
@@ -82,7 +89,13 @@ jobs:
 
       - name: Apply guarded runtime patch
         shell: pwsh
-        run: python .github/scripts/apply_tony_v098_icon_connection.py
+        run: |
+          $source = Get-Content bear_agent_pet/client/src/AgentClient.cpp -Raw
+          if ($source.Contains('friendlyTransportMessage') -and $source.Contains('connectWatchdog_')) {
+            Write-Host 'TONY_V098_PATCH=ALREADY_APPLIED'
+          } else {
+            python .github/scripts/apply_tony_v098_icon_connection.py
+          }
 
       - uses: jurplel/install-qt-action@v4
         with:
@@ -156,5 +169,5 @@ jobs:
             Write-Host 'No staged source changes; guarded patch was already committed.'
             exit 0
           }
-          git commit -m 'Integrate Tony app icon and harden Agent connection'
+          git commit -m 'Polish Tony app icon background'
           git push origin HEAD:fix/tony-v098-icon-connection
