@@ -1,4 +1,5 @@
 name: Validate Tony V0.8.2 Windows desktop behavior
+# Re-run after hardened fullscreen detection.
 
 on:
   workflow_dispatch:
