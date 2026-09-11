@@ -25,14 +25,28 @@ jobs:
         run: |
           python3 - <<'PY'
           import json
+          from collections import Counter
           from pathlib import Path
 
-          root = Path('bear_agent_pet/training/processed/tony_persona_en_v1')
+          root = Path('bear_agent_pet/training/processed/tony_persona_en_v2')
           manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
-          assert manifest['total'] == 48, manifest
-          assert manifest['train'] > 0, manifest
-          assert manifest['eval'] > 0, manifest
+          assert manifest['total'] >= 240, manifest
+          assert manifest['train'] > 180, manifest
+          assert manifest['eval'] >= 20, manifest
+          assert manifest['source_counts']['tony_persona_en_v1_curated'] == 48, manifest
 
+          required_actions = {
+              'idle', 'ear_wiggle', 'paw_wave', 'shiver', 'study',
+              'adjust_glasses', 'remove_glasses', 'ask_hug', 'hug',
+              'blush', 'blush_wave', 'walk', 'sleep', 'working', 'celebrate'
+          }
+          assert required_actions.issubset(manifest['action_counts']), manifest['action_counts']
+
+          required_tags = {'cute', 'teddy', 'cold', 'china', 'chemistry', 'paula', 'hug', 'agent'}
+          assert required_tags.issubset(manifest['tag_counts']), manifest['tag_counts']
+
+          prompts = set()
+          actions = Counter()
           for name in ('all.jsonl', 'train.jsonl', 'eval.jsonl'):
               path = root / name
               rows = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
@@ -42,10 +56,19 @@ jobs:
                   assert row['messages'][2]['content'].strip()
                   assert row['action']
                   assert row['emotion']
-          print('TONY_PERSONA_CORPUS=PASS')
-          print(json.dumps(manifest, indent=2))
+                  assert 0 < float(row['weight']) <= 1.0
+                  if name == 'all.jsonl':
+                      prompt = row['messages'][1]['content'].casefold()
+                      assert prompt not in prompts, prompt
+                      prompts.add(prompt)
+                      actions[row['action']] += 1
+
+          print('TONY_PERSONA_CORPUS_V2=PASS')
+          print('TOTAL=', manifest['total'])
+          print('TRAIN=', manifest['train'], 'EVAL=', manifest['eval'])
+          print('ACTIONS=', json.dumps(dict(actions), sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: tony-persona-en-v1
-          path: bear_agent_pet/training/processed/tony_persona_en_v1
+          name: tony-persona-en-v2
+          path: bear_agent_pet/training/processed/tony_persona_en_v2
