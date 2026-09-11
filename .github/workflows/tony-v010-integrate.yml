@@ -1,0 +1,62 @@
+name: Integrate Tony v0.10 interaction artwork
+
+on:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/tony_assets_bootstrap/**'
+      - '.github/workflows/tony-v010-integrate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v010-artwork
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Decode and validate Tony interaction artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD='.github/tony_assets_bootstrap/chunk_00'
+          if [ ! -f "$PAYLOAD" ]; then
+            echo 'TONY_V010_ARTWORK_ALREADY_INTEGRATED=PASS'
+            exit 0
+          fi
+          tr -d '\r\n ' < "$PAYLOAD" | base64 -d > /tmp/tony-v010-assets.zip
+          unzip -t /tmp/tony-v010-assets.zip
+          unzip -o /tmp/tony-v010-assets.zip -d .
+          python bear_agent_pet/client/tools/apply_v010_interactions.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          echo 'TONY_V010_ARTWORK_DECODE=PASS'
+
+      - name: Commit real PNG frames and v0.10 interaction code
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f '.github/tony_assets_bootstrap/chunk_00' ]; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/assets/animations
+          git add bear_agent_pet/client/src/PetWindow.h bear_agent_pet/client/src/PetWindowV7.cpp
+          git add bear_agent_pet/client/CMakeLists.txt bear_agent_pet/client/tools/validate_state_assets.py
+          git rm -f .github/tony_assets_bootstrap/chunk_00
+          if git diff --cached --quiet; then
+            echo 'No Tony artwork changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Add seven living Tony interaction animations'
+          git push origin HEAD:feature/bear-agent-pet
