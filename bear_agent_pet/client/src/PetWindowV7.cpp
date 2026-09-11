@@ -261,8 +261,17 @@ PetWindow::PetWindow(QWidget *parent)
         agent_.connectTo(endpoint,token);
     } else {
         tray_.setToolTip("Tony · not paired");
-        if(visualTestAction.isEmpty())
-            showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);
+        if(visualTestAction.isEmpty()) {
+            // Do not start the bubble's 6.5 s lifetime while main() is still in
+            // cold-start work. Queue it onto the event loop so slow Windows hosts
+            // actually get the full visible hint after Tony can paint.
+            QTimer::singleShot(650,this,[this]{
+                QSettings current;
+                const QString stored=unprotectSecret(current.value("agent/token","").toString());
+                if(stored.isEmpty() && !agent_.connected())
+                    showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);
+            });
+        }
     }
 
     // CI-only pose mode: no dialog/bubble may cover Tony during visual checks.
@@ -400,18 +409,12 @@ int PetWindow::frameStrideForAction(Action action) const {
 const QPixmap *PetWindow::pixmapForAction(Action action) const {
     const QString key=assetKeyForAction(action);
 
-    // Idle may use only the short face-blink sequence. Do not loop the legacy
-    // full-body animation sets: their crops/proportions vary and caused Tony to
-    // appear to lose ears, feet or arms between frames.
+    // Never consume the legacy idle frame directory at runtime. Those files are
+    // historical screenshot-derived assets with inconsistent crops/backgrounds;
+    // a blink must never replace the complete approved Tony artwork with one of
+    // those partial frames. idleBlinking_ is therefore motion-only until a clean,
+    // same-canvas blink set is explicitly authored and approved.
     if(action==Action::Idle) {
-        auto framesIt=animationAssets_.constFind("idle");
-        if(idleBlinking_ && framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) {
-            static constexpr int blinkSequence[] = {0, 1, 2, 2, 1, 0, 0};
-            const int sequenceSize=static_cast<int>(sizeof(blinkSequence)/sizeof(blinkSequence[0]));
-            const int step=qBound(0,idleBlinkTick_,sequenceSize-1);
-            const int index=blinkSequence[step] % framesIt.value().size();
-            return &framesIt.value().at(index);
-        }
         auto idleIt=stateAssets_.constFind("idle");
         if(idleIt!=stateAssets_.constEnd() && !idleIt.value().isNull()) return &idleIt.value();
     }
@@ -490,7 +493,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
     case Action::Sleep: dy=int(qSin(t*.35)); scale=.99+0.008*qSin(t*.35); rotation=-1.5; break;
     case Action::Shiver: dx=(frame_%4<2)?-2:2; dy=int(qSin(t)); scale=.995; break;
     case Action::AskHug: dy=-qAbs(int(3*qSin(t*1.2))); scale=1.01+0.018*qSin(t*.9); rotation=1.0*qSin(t*.7); break;
-    case Action::Hug: scale=1.055+0.02*qSin(t*.8); dy=-3; rotation=1.5*qSin(t*.65); break;
+    case Action::Hug: scale=1.004+0.004*qSin(t*.8); dy=-2; rotation=.8*qSin(t*.65); break;
     case Action::Blush: dy=int(2*qSin(t*.8)); rotation=1.8*qSin(t*.55); scale=1.012; break;
     case Action::BlushWave: dy=-qAbs(int(3*qSin(t*1.2))); rotation=2.5*qSin(t*.9); scale=1.018; break;
     case Action::Study: dy=int(2*qSin(t*1.0)); rotation=-.8; break;
@@ -548,7 +551,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
         const int visibleW=qMax(1,maxX-minX+1);
         const int visibleH=qMax(1,maxY-minY+1);
-        const qreal maxMotionScale=(action_==Action::Hug) ? 1.035 : 1.02;
+        const qreal maxMotionScale=(action_==Action::Hug) ? 1.012 : 1.02;
         const qreal safeMotionScale=qBound<qreal>(0.97,scale,maxMotionScale);
         const qreal maxVisibleW=252.0;
         const qreal maxVisibleH=192.0;
