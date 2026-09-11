@@ -1,0 +1,869 @@
+name: Apply Tony V0.8 life engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/teddy-agent-pet
+    paths:
+      - '.github/workflows/_temporary-tony-life-v08.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+
+      - name: Add Tony behavior engine and living interactions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('bear_agent_pet/client')
+          src = root / 'src'
+
+          behavior_h = r'''#pragma once
+          #include <QString>
+          #include <QtGlobal>
+
+          class QSettings;
+
+          class TonyBehaviorEngine {
+          public:
+              enum class Impulse {
+                  None,
+                  Sleep,
+                  Shiver,
+                  AskHug,
+                  Wave,
+                  Walk,
+                  Study,
+                  AdjustGlasses,
+                  Stretch,
+                  Yawn,
+                  RemoveGlasses
+              };
+
+              struct Snapshot {
+                  int energy{0};
+                  int warmth{0};
+                  int affection{0};
+                  int loneliness{0};
+                  int curiosity{0};
+                  QString mood;
+              };
+
+              void restore(QSettings &settings);
+              void save(QSettings &settings) const;
+              void tick(qint64 elapsedMs, bool agentBusy, bool userNearby, int hour);
+
+              void onPetted();
+              void onHugged();
+              void onConversation();
+              void onDragged(bool rough);
+              void onPaulaMention();
+
+              Impulse chooseIdleImpulse(int hour);
+              Snapshot snapshot() const;
+
+          private:
+              static double clamp100(double value);
+
+              double energy_{78.0};
+              double warmth_{68.0};
+              double affection_{62.0};
+              double loneliness_{18.0};
+              double curiosity_{58.0};
+          };
+          '''.replace('          ', '')
+
+          behavior_cpp = r'''#include "TonyBehaviorEngine.h"
+
+          #include <QRandomGenerator>
+          #include <QSettings>
+          #include <QtMath>
+
+          namespace {
+          constexpr auto kPrefix = "tony/life/";
+          }
+
+          double TonyBehaviorEngine::clamp100(double value) {
+              return qBound(0.0, value, 100.0);
+          }
+
+          void TonyBehaviorEngine::restore(QSettings &settings) {
+              energy_ = clamp100(settings.value(QString(kPrefix) + "energy", energy_).toDouble());
+              warmth_ = clamp100(settings.value(QString(kPrefix) + "warmth", warmth_).toDouble());
+              affection_ = clamp100(settings.value(QString(kPrefix) + "affection", affection_).toDouble());
+              loneliness_ = clamp100(settings.value(QString(kPrefix) + "loneliness", loneliness_).toDouble());
+              curiosity_ = clamp100(settings.value(QString(kPrefix) + "curiosity", curiosity_).toDouble());
+          }
+
+          void TonyBehaviorEngine::save(QSettings &settings) const {
+              settings.setValue(QString(kPrefix) + "energy", energy_);
+              settings.setValue(QString(kPrefix) + "warmth", warmth_);
+              settings.setValue(QString(kPrefix) + "affection", affection_);
+              settings.setValue(QString(kPrefix) + "loneliness", loneliness_);
+              settings.setValue(QString(kPrefix) + "curiosity", curiosity_);
+          }
+
+          void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby, int hour) {
+              if(elapsedMs <= 0) return;
+              const double minutes = qMin(1.0, static_cast<double>(elapsedMs) / 60000.0);
+              const bool night = hour >= 23 || hour < 7;
+
+              energy_ += (agentBusy ? -0.32 : (night ? -0.13 : -0.06)) * minutes;
+              warmth_ += (night ? -0.20 : -0.12) * minutes;
+              loneliness_ += (userNearby ? -0.30 : 0.18) * minutes;
+              curiosity_ += (agentBusy ? -0.12 : 0.18) * minutes;
+              if(userNearby) {
+                  affection_ += 0.025 * minutes;
+                  warmth_ += 0.025 * minutes;
+              }
+
+              energy_ = clamp100(energy_);
+              warmth_ = clamp100(warmth_);
+              affection_ = clamp100(affection_);
+              loneliness_ = clamp100(loneliness_);
+              curiosity_ = clamp100(curiosity_);
+          }
+
+          void TonyBehaviorEngine::onPetted() {
+              affection_ = clamp100(affection_ + 4.0);
+              loneliness_ = clamp100(loneliness_ - 7.0);
+              curiosity_ = clamp100(curiosity_ - 1.0);
+          }
+
+          void TonyBehaviorEngine::onHugged() {
+              affection_ = clamp100(affection_ + 7.0);
+              loneliness_ = clamp100(loneliness_ - 14.0);
+              warmth_ = clamp100(warmth_ + 16.0);
+              energy_ = clamp100(energy_ + 1.0);
+          }
+
+          void TonyBehaviorEngine::onConversation() {
+              affection_ = clamp100(affection_ + 1.0);
+              loneliness_ = clamp100(loneliness_ - 6.0);
+              curiosity_ = clamp100(curiosity_ - 8.0);
+          }
+
+          void TonyBehaviorEngine::onDragged(bool rough) {
+              curiosity_ = clamp100(curiosity_ + (rough ? 6.0 : 3.0));
+              energy_ = clamp100(energy_ - (rough ? 4.0 : 1.0));
+              if(!rough) affection_ = clamp100(affection_ + 0.5);
+          }
+
+          void TonyBehaviorEngine::onPaulaMention() {
+              affection_ = clamp100(affection_ + 2.0);
+              loneliness_ = clamp100(loneliness_ - 2.0);
+              curiosity_ = clamp100(curiosity_ + 4.0);
+          }
+
+          TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
+              auto *rng = QRandomGenerator::global();
+              const bool night = hour >= 23 || hour < 7;
+
+              if(night && energy_ < 46.0 && rng->bounded(100) < 78) {
+                  energy_ = clamp100(energy_ + 8.0);
+                  return Impulse::Sleep;
+              }
+              if(warmth_ < 35.0 && rng->bounded(100) < 82) return Impulse::Shiver;
+              if(loneliness_ > 56.0 && rng->bounded(100) < 76) return Impulse::AskHug;
+              if(energy_ < 32.0 && rng->bounded(100) < 72) return Impulse::Yawn;
+              if(curiosity_ > 74.0 && rng->bounded(100) < 70) {
+                  curiosity_ = clamp100(curiosity_ - 11.0);
+                  energy_ = clamp100(energy_ - 1.0);
+                  return Impulse::Study;
+              }
+
+              const int r = rng->bounded(100);
+              if(r < 68) return Impulse::None;
+              if(r < 75) return Impulse::Stretch;
+              if(r < 82) return Impulse::Wave;
+              if(r < 87) return Impulse::AdjustGlasses;
+              if(r < 92) return Impulse::Walk;
+              if(r < 96) return Impulse::Study;
+              if(r < 98) return Impulse::Yawn;
+              return Impulse::RemoveGlasses;
+          }
+
+          TonyBehaviorEngine::Snapshot TonyBehaviorEngine::snapshot() const {
+              Snapshot out;
+              out.energy = qRound(energy_);
+              out.warmth = qRound(warmth_);
+              out.affection = qRound(affection_);
+              out.loneliness = qRound(loneliness_);
+              out.curiosity = qRound(curiosity_);
+
+              if(warmth_ < 35.0) out.mood = "cold";
+              else if(energy_ < 32.0) out.mood = "sleepy";
+              else if(loneliness_ > 56.0) out.mood = "cuddly";
+              else if(curiosity_ > 74.0) out.mood = "curious";
+              else if(affection_ > 82.0) out.mood = "happy";
+              else out.mood = "content";
+              return out;
+          }
+          '''.replace('          ', '')
+
+          header = r'''#pragma once
+          #include <QElapsedTimer>
+          #include <QHash>
+          #include <QPixmap>
+          #include <QPoint>
+          #include <QSystemTrayIcon>
+          #include <QTimer>
+          #include <QVector>
+          #include <QWidget>
+          #include "AgentClient.h"
+          #include "ChatComposer.h"
+          #include "LocalBridge.h"
+          #include "SpeechBubble.h"
+          #include "SshTunnel.h"
+          #include "TonyBehaviorEngine.h"
+
+          class QEnterEvent;
+
+          class PetWindow : public QWidget {
+              Q_OBJECT
+          public:
+              explicit PetWindow(QWidget *parent=nullptr);
+              ~PetWindow() override;
+          protected:
+              void paintEvent(QPaintEvent*) override;
+              void mousePressEvent(QMouseEvent*) override;
+              void mouseMoveEvent(QMouseEvent*) override;
+              void mouseReleaseEvent(QMouseEvent*) override;
+              void mouseDoubleClickEvent(QMouseEvent*) override;
+              void contextMenuEvent(QContextMenuEvent*) override;
+              void enterEvent(QEnterEvent*) override;
+              void leaveEvent(QEvent*) override;
+          private:
+              enum class Action {
+                  Idle, Curious, Pet, Carried, Land, Dizzy, Stretch, Yawn,
+                  Bob, Walk, Think, Celebrate, Sleep,
+                  Shiver, AskHug, Hug, Blush, BlushWave, Study,
+                  AdjustGlasses, RemoveGlasses, Wave
+              };
+
+              void loadAssets();
+              QString assetKeyForAction(Action action) const;
+              int frameStrideForAction(Action action) const;
+              const QPixmap *pixmapForAction(Action action) const;
+              void setAction(Action action, int durationMs=0);
+              Action actionFromWire(const QString &name) const;
+              Action baseActionForAgentState() const;
+              void restoreAgentAction();
+              void tickAnimation();
+              void tickLife();
+              void scheduleBlink();
+              void scheduleIdleMoment();
+              void runIdleMoment();
+              void markInteraction();
+              void handleTap(const QPoint &localPos);
+              bool isHeadHit(const QPoint &localPos) const;
+              void showLifeStatus();
+              void askTony();
+              void submitTonyPrompt(const QString &text);
+              void hugTony();
+              void configureConnection();
+              void useLocalSshConnection();
+              void showBubble(const QString &text, int timeoutMs=5200);
+              void restorePosition();
+              void savePosition();
+              QString actionName() const;
+
+              QPixmap pet_;
+              QHash<QString,QPixmap> stateAssets_;
+              QHash<QString,QVector<QPixmap>> animationAssets_;
+              QTimer animTimer_;
+              QTimer blinkTimer_;
+              QTimer idleTimer_;
+              QTimer actionTimer_;
+              QTimer lifeTimer_;
+              QTimer hoverTimer_;
+              SshTunnel tunnel_;
+              AgentClient agent_;
+              QSystemTrayIcon tray_;
+              LocalBridge localBridge_;
+              SpeechBubble bubble_;
+              ChatComposer composer_;
+              TonyBehaviorEngine behavior_;
+              Action action_{Action::Idle};
+              QPoint dragOffset_;
+              QPoint basePos_;
+              QPoint pressGlobal_;
+              QPoint lastDragGlobal_;
+              QElapsedTimer lifeClock_;
+              QElapsedTimer activityClock_;
+              QElapsedTimer pressClock_;
+              QElapsedTimer rapidClickClock_;
+              bool dragging_{false};
+              bool mouseDown_{false};
+              bool hovered_{false};
+              bool idleBlinking_{false};
+              int idleBlinkTick_{0};
+              int frame_{0};
+              int walkDirection_{1};
+              int dragTravel_{0};
+              int rapidClicks_{0};
+              int lifeSaveTicks_{0};
+              QString answer_;
+              QString emotion_{"neutral"};
+              QString agentState_{"idle"};
+          };
+          '''.replace('          ', '')
+
+          (src / 'TonyBehaviorEngine.h').write_text(behavior_h, encoding='utf-8')
+          (src / 'TonyBehaviorEngine.cpp').write_text(behavior_cpp, encoding='utf-8')
+          (src / 'PetWindow.h').write_text(header, encoding='utf-8')
+
+          cmake_path = root / 'CMakeLists.txt'
+          cmake = cmake_path.read_text(encoding='utf-8')
+          cmake = cmake.replace('project(TonyDesktopPet VERSION 0.7.1 LANGUAGES CXX)',
+                                'project(TonyDesktopPet VERSION 0.8.0 LANGUAGES CXX)')
+          marker = '    src/LocalBridge.h\n    src/SshTunnel.cpp\n'
+          if marker not in cmake:
+              raise SystemExit('CMake insertion marker not found')
+          cmake = cmake.replace(marker,
+              '    src/LocalBridge.h\n    src/TonyBehaviorEngine.cpp\n    src/TonyBehaviorEngine.h\n    src/SshTunnel.cpp\n', 1)
+          cmake_path.write_text(cmake, encoding='utf-8')
+
+          cpp_path = src / 'PetWindowV7.cpp'
+          cpp = cpp_path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global cpp
+              if old not in cpp:
+                  raise SystemExit(f'Patch marker not found: {label}')
+              cpp = cpp.replace(old, new, 1)
+
+          replace_once('#include <QCoreApplication>\n#include <QDir>\n',
+                       '#include <QCoreApplication>\n#include <QCursor>\n#include <QDir>\n', 'QCursor include')
+
+          replace_once(
+              '    if(!initialSettings.contains("ui/language")) initialSettings.setValue("ui/language","en");\n'
+              '    agent_.setLanguage(uiLanguage());\n'
+              '    composer_.setLanguage(uiLanguage());\n',
+              '    if(!initialSettings.contains("ui/language")) initialSettings.setValue("ui/language","en");\n'
+              '    behavior_.restore(initialSettings);\n'
+              '    lifeClock_.start();\n'
+              '    activityClock_.start();\n'
+              '    pressClock_.invalidate();\n'
+              '    rapidClickClock_.invalidate();\n'
+              '    agent_.setLanguage(uiLanguage());\n'
+              '    composer_.setLanguage(uiLanguage());\n',
+              'restore life state')
+
+          replace_once(
+              '    actionTimer_.setSingleShot(true);\n'
+              '    connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);\n\n'
+              '    connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){\n',
+              '    actionTimer_.setSingleShot(true);\n'
+              '    connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);\n\n'
+              '    hoverTimer_.setSingleShot(true);\n'
+              '    connect(&hoverTimer_, &QTimer::timeout, this, [this]{\n'
+              '        if(hovered_ && !dragging_ && action_==Action::Idle && agentState_=="idle" && !composer_.isVisible()) {\n'
+              '            emotion_="curious";\n'
+              '            setAction(Action::Curious,1100);\n'
+              '        }\n'
+              '    });\n\n'
+              '    lifeTimer_.setInterval(5000);\n'
+              '    connect(&lifeTimer_, &QTimer::timeout, this, &PetWindow::tickLife);\n'
+              '    lifeTimer_.start();\n\n'
+              '    connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){\n',
+              'life timers')
+
+          replace_once(
+              'PetWindow::~PetWindow() {\n'
+              '    composer_.dismiss();\n'
+              '    bubble_.dismiss();\n'
+              '    tunnel_.stop();\n'
+              '}\n',
+              'PetWindow::~PetWindow() {\n'
+              '    QSettings lifeSettings;\n'
+              '    behavior_.save(lifeSettings);\n'
+              '    composer_.dismiss();\n'
+              '    bubble_.dismiss();\n'
+              '    tunnel_.stop();\n'
+              '}\n',
+              'save life state')
+
+          replace_once(
+              '    const QStringList keys{\n'
+              '        "idle","working","walk","thinking","celebrate","sleep","shiver",\n'
+              '        "ask_hug","hug","blush","blush_wave","study","adjust_glasses","remove_glasses","wave"\n'
+              '    };\n',
+              '    const QStringList keys{\n'
+              '        "idle","curious","pet","carried","land","dizzy","stretch","yawn",\n'
+              '        "working","walk","thinking","celebrate","sleep","shiver",\n'
+              '        "ask_hug","hug","blush","blush_wave","study","adjust_glasses","remove_glasses","wave"\n'
+              '    };\n',
+              'asset keys')
+
+          replace_once(
+              '    case Action::Idle:return "idle";\n'
+              '    case Action::Bob:return "working";\n',
+              '    case Action::Idle:return "idle";\n'
+              '    case Action::Curious:return "curious";\n'
+              '    case Action::Pet:return "pet";\n'
+              '    case Action::Carried:return "carried";\n'
+              '    case Action::Land:return "land";\n'
+              '    case Action::Dizzy:return "dizzy";\n'
+              '    case Action::Stretch:return "stretch";\n'
+              '    case Action::Yawn:return "yawn";\n'
+              '    case Action::Bob:return "working";\n',
+              'asset action cases')
+
+          replace_once(
+              '    switch(action) {\n'
+              '    case Action::Shiver:return 2;\n',
+              '    switch(action) {\n'
+              '    case Action::Carried:return 3;\n'
+              '    case Action::Land:return 3;\n'
+              '    case Action::Dizzy:return 2;\n'
+              '    case Action::Curious:return 5;\n'
+              '    case Action::Pet:return 4;\n'
+              '    case Action::Stretch:return 5;\n'
+              '    case Action::Yawn:return 7;\n'
+              '    case Action::Shiver:return 2;\n',
+              'frame strides')
+
+          replace_once(
+              '    case Action::Idle:\n'
+              '        // Normal desktop state is intentionally motionless. The face sprite\n'
+              '        // handles the occasional blink; no perpetual bobbing or breathing zoom.\n'
+              '        break;\n'
+              '    case Action::Bob: dy=int(2*qSin(t*.65)); scale=1.0+0.003*qSin(t*.45); break;\n',
+              '    case Action::Idle:\n'
+              '        // Normal desktop state is intentionally motionless. The face sprite\n'
+              '        // handles the occasional blink; no perpetual bobbing or breathing zoom.\n'
+              '        break;\n'
+              '    case Action::Curious: dy=-1; rotation=1.4*qSin(t*.45); scale=1.008; break;\n'
+              '    case Action::Pet: dy=2; scale=1.018+0.006*qSin(t*.75); rotation=1.0*qSin(t*.5); break;\n'
+              '    case Action::Carried: dy=-7; scale=.985; rotation=2.2*qSin(t*.9); break;\n'
+              '    case Action::Land: dy=-qAbs(int(5*qSin(t*1.55))); scale=1.0+0.012*qSin(t*1.55); break;\n'
+              '    case Action::Dizzy: dx=int(3*qSin(t*2.2)); rotation=4.5*qSin(t*1.7); scale=.985; break;\n'
+              '    case Action::Stretch: dy=-qAbs(int(3*qSin(t*.8))); scale=1.02+0.012*qSin(t*.65); break;\n'
+              '    case Action::Yawn: dy=2; rotation=-2.0; scale=.992+0.006*qSin(t*.35); break;\n'
+              '    case Action::Bob: dy=int(2*qSin(t*.65)); scale=1.0+0.003*qSin(t*.45); break;\n',
+              'paint life actions')
+
+          replace_once(
+              '    }\n\n    p.save();\n'
+              '    p.setPen(Qt::NoPen);\n',
+              '    }\n\n'
+              '    // Tony notices the cursor even while idle. With no dedicated eye sprite yet,\n'
+              '    // a tiny body lean gives the impression that he is following the user.\n'
+              '    if(!dragging_ && (action_==Action::Idle || action_==Action::Curious)) {\n'
+              '        const QPoint cursorLocal=mapFromGlobal(QCursor::pos());\n'
+              '        const QRect interest(-70,-70,width()+140,height()+140);\n'
+              '        if(interest.contains(cursorLocal)) {\n'
+              '            const qreal nx=qBound(-1.0,(cursorLocal.x()-width()/2.0)/(width()/2.0),1.0);\n'
+              '            dx += qRound(nx*3.0);\n'
+              '            rotation += nx*1.5;\n'
+              '        }\n'
+              '    }\n\n'
+              '    p.save();\n'
+              '    p.setPen(Qt::NoPen);\n',
+              'cursor awareness')
+
+          replace_once(
+              '    const qreal shadowScale=(action_==Action::Celebrate ? .78 : action_==Action::Walk ? .9 : 1.0);\n',
+              '    const qreal shadowScale=(action_==Action::Celebrate ? .78 : action_==Action::Carried ? .62 : action_==Action::Walk ? .9 : 1.0);\n',
+              'carried shadow')
+
+          replace_once(
+              '    if(n=="working") return Action::Bob;\n',
+              '    if(n=="curious" || n=="look_mouse") return Action::Curious;\n'
+              '    if(n=="pet" || n=="petted") return Action::Pet;\n'
+              '    if(n=="dizzy") return Action::Dizzy;\n'
+              '    if(n=="stretch") return Action::Stretch;\n'
+              '    if(n=="yawn") return Action::Yawn;\n'
+              '    if(n=="working") return Action::Bob;\n',
+              'wire actions')
+
+          old_idle = '''void PetWindow::scheduleIdleMoment(){
+              // Autonomous gestures are now rare; the usual state is simply sitting and blinking.
+              idleTimer_.start(QRandomGenerator::global()->bounded(90000,210001));
+          }
+
+          void PetWindow::runIdleMoment(){
+              if(action_!=Action::Idle || dragging_ || agentState_!="idle" || composer_.isVisible()) {
+                  scheduleIdleMoment(); return;
+              }
+              const int hour=QTime::currentTime().hour();
+              const bool night=(hour>=23 || hour<7);
+              const int r=QRandomGenerator::global()->bounded(100);
+              // Most checks intentionally do nothing. Tony should feel present, not restless.
+              if(night && r<10) { emotion_="sleepy"; setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,9501)); }
+              else if(r<4) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble("Brrr... stay warm with me?",3600); }
+              else if(r<8) { emotion_="hopeful"; setAction(Action::AskHug,2600); showBubble("Can I have a tiny hug?",3600); }
+              else if(r<12) { emotion_="friendly"; setAction(Action::Wave,1400); }
+              else if(r<15) { emotion_="focused"; setAction(Action::AdjustGlasses,1600); }
+              else if(r<17) { emotion_="playful"; setAction(Action::Walk,3200); }
+              scheduleIdleMoment();
+          }
+          '''.replace('          ', '')
+
+          new_idle = '''void PetWindow::scheduleIdleMoment(){
+              // Check often enough to feel alive, but the behavior engine returns None most of the time.
+              idleTimer_.start(QRandomGenerator::global()->bounded(22000,55001));
+          }
+
+          void PetWindow::runIdleMoment(){
+              if(action_!=Action::Idle || dragging_ || agentState_!="idle" || composer_.isVisible()) {
+                  scheduleIdleMoment(); return;
+              }
+
+              using Impulse=TonyBehaviorEngine::Impulse;
+              const auto impulse=behavior_.chooseIdleImpulse(QTime::currentTime().hour());
+              switch(impulse) {
+              case Impulse::None:
+                  break;
+              case Impulse::Sleep:
+                  emotion_="sleepy";
+                  setAction(Action::Sleep,QRandomGenerator::global()->bounded(7000,12001));
+                  break;
+              case Impulse::Shiver:
+                  emotion_="cold";
+                  setAction(Action::Shiver,2300);
+                  if(QRandomGenerator::global()->bounded(100)<55)
+                      showBubble(uiText("Brrr... could I borrow a little warmth?","有点冷……可以借我一点温度吗？"),3600);
+                  break;
+              case Impulse::AskHug:
+                  emotion_="hopeful";
+                  setAction(Action::AskHug,2800);
+                  if(QRandomGenerator::global()->bounded(100)<65)
+                      showBubble(uiText("Can I have a tiny hug?","可以抱我一下吗？就一下。"),3600);
+                  break;
+              case Impulse::Wave:
+                  emotion_="friendly"; setAction(Action::Wave,1300); break;
+              case Impulse::Walk:
+                  emotion_="playful"; setAction(Action::Walk,3200); break;
+              case Impulse::Study:
+                  emotion_="focused"; setAction(Action::Study,3000); break;
+              case Impulse::AdjustGlasses:
+                  emotion_="focused"; setAction(Action::AdjustGlasses,1500); break;
+              case Impulse::Stretch:
+                  emotion_="content"; setAction(Action::Stretch,1800); break;
+              case Impulse::Yawn:
+                  emotion_="sleepy"; setAction(Action::Yawn,2200); break;
+              case Impulse::RemoveGlasses:
+                  emotion_="confident"; setAction(Action::RemoveGlasses,2400); break;
+              }
+              scheduleIdleMoment();
+          }
+
+          void PetWindow::tickLife(){
+              if(!lifeClock_.isValid()) lifeClock_.start();
+              const qint64 elapsed=qMin<qint64>(lifeClock_.restart(),60000);
+              const QPoint cursorLocal=mapFromGlobal(QCursor::pos());
+              const QRect nearbyArea(-90,-90,width()+180,height()+180);
+              const bool recentInteraction=activityClock_.isValid() && activityClock_.elapsed()<60000;
+              const bool userNearby=nearbyArea.contains(cursorLocal) || recentInteraction;
+              behavior_.tick(elapsed,agentState_!="idle",userNearby,QTime::currentTime().hour());
+
+              if(++lifeSaveTicks_>=12) {
+                  QSettings s;
+                  behavior_.save(s);
+                  lifeSaveTicks_=0;
+              }
+              if((action_==Action::Idle || action_==Action::Curious) && nearbyArea.contains(cursorLocal)) update();
+          }
+
+          void PetWindow::markInteraction(){
+              if(activityClock_.isValid()) activityClock_.restart();
+              else activityClock_.start();
+          }
+
+          bool PetWindow::isHeadHit(const QPoint &localPos) const {
+              return QRect(width()/2-72,18,144,118).contains(localPos);
+          }
+
+          void PetWindow::handleTap(const QPoint &localPos){
+              markInteraction();
+              if(!rapidClickClock_.isValid() || rapidClickClock_.elapsed()>850) rapidClicks_=0;
+              rapidClickClock_.restart();
+              ++rapidClicks_;
+
+              if(rapidClicks_>=4) {
+                  rapidClicks_=0;
+                  emotion_="dizzy";
+                  setAction(Action::Dizzy,1450);
+                  showBubble(uiText("Whoa... tiny paws need a second.","晕乎乎的……让我缓一下。"),2800);
+                  return;
+              }
+
+              if(isHeadHit(localPos)) {
+                  behavior_.onPetted();
+                  emotion_="happy";
+                  setAction(Action::Pet,900);
+                  if(QRandomGenerator::global()->bounded(100)<24)
+                      showBubble(uiText("Hehe. Head pats accepted.","嘿嘿，摸头批准。"),2400);
+              } else {
+                  emotion_="curious";
+                  setAction(Action::Curious,850);
+              }
+          }
+
+          void PetWindow::showLifeStatus(){
+              const auto s=behavior_.snapshot();
+              if(s.mood=="cold") {
+                  emotion_="cold"; setAction(Action::Shiver,1900);
+                  showBubble(uiText("I'm a little cold. A hug would fix that.","我有一点冷。抱一下大概就好了。"),4200);
+              } else if(s.mood=="sleepy") {
+                  emotion_="sleepy"; setAction(Action::Yawn,1900);
+                  showBubble(uiText("A little sleepy... but I'm still here.","有一点困……不过我还在陪你。"),4200);
+              } else if(s.mood=="cuddly") {
+                  emotion_="hopeful"; setAction(Action::AskHug,2200);
+                  showBubble(uiText("I may be in hug-request mode.","我现在可能处于求抱抱模式。"),4200);
+              } else if(s.mood=="curious") {
+                  emotion_="curious"; setAction(Action::Curious,1600);
+                  showBubble(uiText("Curious. What are we working on?","有点好奇。我们今天在研究什么？"),4200);
+              } else if(s.mood=="happy") {
+                  emotion_="happy"; setAction(Action::Wave,1400);
+                  showBubble(uiText("Pretty happy. Staying close.","挺开心的。就在你旁边待着。"),4200);
+              } else {
+                  emotion_="content"; setAction(Action::Stretch,1500);
+                  showBubble(uiText("I'm good. Just keeping you company.","我挺好的，就在桌面上陪你。"),4200);
+              }
+          }
+          '''.replace('          ', '')
+
+          replace_once(old_idle, new_idle, 'behavior driven idle')
+
+          replace_once(
+              '    case Action::Idle:return "idle"; case Action::Bob:return "working"; case Action::Walk:return "walking";\n',
+              '    case Action::Idle:return "idle"; case Action::Curious:return "curious"; case Action::Pet:return "being petted";\n'
+              '    case Action::Carried:return "being carried"; case Action::Land:return "landing"; case Action::Dizzy:return "dizzy";\n'
+              '    case Action::Stretch:return "stretching"; case Action::Yawn:return "yawning";\n'
+              '    case Action::Bob:return "working"; case Action::Walk:return "walking";\n',
+              'action names')
+
+          old_mouse = '''void PetWindow::enterEvent(QEnterEvent*){
+              // Hovering should not make Tony constantly wave. Stay calm and let the blink timer work.
+              if(agentState_=="idle" && action_==Action::Idle && !blinkTimer_.isActive()) scheduleBlink();
+          }
+          void PetWindow::leaveEvent(QEvent*){}
+
+          void PetWindow::mousePressEvent(QMouseEvent *e){
+              if(e->button()==Qt::LeftButton){ dragging_=true; dragOffset_=e->globalPosition().toPoint()-frameGeometry().topLeft(); }
+          }
+          void PetWindow::mouseMoveEvent(QMouseEvent *e){
+              if(dragging_ && (e->buttons()&Qt::LeftButton)){
+                  move(e->globalPosition().toPoint()-dragOffset_);
+                  action_=Action::Bob; frame_=0;
+                  const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+                  bubble_.follow(anchor); composer_.follow(anchor); update();
+              }
+          }
+          void PetWindow::mouseReleaseEvent(QMouseEvent *e){
+              if(e->button()==Qt::LeftButton){ dragging_=false; savePosition(); restoreAgentAction(); }
+          }
+          void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){ if(e->button()==Qt::LeftButton) askTony(); }
+          '''.replace('          ', '')
+
+          new_mouse = '''void PetWindow::enterEvent(QEnterEvent*){
+              hovered_=true;
+              if(agentState_=="idle" && action_==Action::Idle) {
+                  if(!blinkTimer_.isActive()) scheduleBlink();
+                  hoverTimer_.start(700);
+              }
+              update();
+          }
+
+          void PetWindow::leaveEvent(QEvent*){
+              hovered_=false;
+              hoverTimer_.stop();
+              update();
+          }
+
+          void PetWindow::mousePressEvent(QMouseEvent *e){
+              if(e->button()!=Qt::LeftButton) return;
+              mouseDown_=true;
+              dragging_=false;
+              dragTravel_=0;
+              pressGlobal_=e->globalPosition().toPoint();
+              lastDragGlobal_=pressGlobal_;
+              dragOffset_=pressGlobal_-frameGeometry().topLeft();
+              pressClock_.restart();
+              markInteraction();
+          }
+
+          void PetWindow::mouseMoveEvent(QMouseEvent *e){
+              const QPoint global=e->globalPosition().toPoint();
+              if(mouseDown_ && (e->buttons()&Qt::LeftButton)) {
+                  if(!dragging_ && (global-pressGlobal_).manhattanLength()>=QApplication::startDragDistance()) {
+                      dragging_=true;
+                      actionTimer_.stop();
+                      action_=Action::Carried;
+                      frame_=0;
+                      lastDragGlobal_=global;
+                  }
+                  if(dragging_) {
+                      dragTravel_ += (global-lastDragGlobal_).manhattanLength();
+                      lastDragGlobal_=global;
+                      move(global-dragOffset_);
+                      const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+                      bubble_.follow(anchor);
+                      composer_.follow(anchor);
+                  }
+              }
+              update();
+          }
+
+          void PetWindow::mouseReleaseEvent(QMouseEvent *e){
+              if(e->button()!=Qt::LeftButton || !mouseDown_) return;
+              mouseDown_=false;
+              if(dragging_) {
+                  const bool rough=dragTravel_>850 || (pressClock_.isValid() && pressClock_.elapsed()<450 && dragTravel_>360);
+                  behavior_.onDragged(rough);
+                  dragging_=false;
+                  savePosition();
+                  if(rough) {
+                      emotion_="dizzy";
+                      setAction(Action::Dizzy,1500);
+                      showBubble(uiText("Fast trip. My curls are still catching up.","飞得有点快，我的卷毛还没反应过来。"),3200);
+                  } else {
+                      emotion_="playful";
+                      setAction(Action::Land,650);
+                  }
+              } else {
+                  handleTap(e->position().toPoint());
+              }
+          }
+
+          void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){
+              if(e->button()==Qt::LeftButton) {
+                  rapidClicks_=0;
+                  askTony();
+              }
+          }
+          '''.replace('          ', '')
+
+          replace_once(old_mouse, new_mouse, 'mouse interactions')
+
+          replace_once(
+              '    auto hug=m.addAction(uiText("Hug Tony","抱抱 Tony"));\n'
+              '    auto paula=m.addAction(uiText("Paula is here","Paula 来了"));\n',
+              '    auto hug=m.addAction(uiText("Hug Tony","抱抱 Tony"));\n'
+              '    auto feeling=m.addAction(uiText("How are you feeling?","Tony 现在怎么样？"));\n'
+              '    auto paula=m.addAction(uiText("Paula is here","Paula 来了"));\n',
+              'feeling menu')
+
+          replace_once(
+              '    if(chosen==ask) askTony();\n'
+              '    else if(chosen==hug) hugTony();\n'
+              '    else if(chosen==paula) { emotion_="bashful"; setAction(Action::BlushWave,2600); showBubble(uiText("Paula? Wait—do I look okay?","Paula？等等——我看起来还好吗？"),4200); }\n',
+              '    if(chosen==ask) askTony();\n'
+              '    else if(chosen==hug) hugTony();\n'
+              '    else if(chosen==feeling) showLifeStatus();\n'
+              '    else if(chosen==paula) { behavior_.onPaulaMention(); markInteraction(); emotion_="bashful"; setAction(Action::BlushWave,2600); showBubble(uiText("Paula? Wait—do I look okay?","Paula？等等——我看起来还好吗？"),4200); }\n',
+              'menu behavior hooks')
+
+          replace_once(
+              'void PetWindow::askTony(){\n'
+              '    bubble_.dismiss(); emotion_="curious";\n',
+              'void PetWindow::askTony(){\n'
+              '    markInteraction();\n'
+              '    bubble_.dismiss(); emotion_="curious";\n',
+              'ask interaction')
+
+          replace_once(
+              '    if(prompt.isEmpty()) return;\n'
+              '    answer_.clear(); emotion_="curious"; agentState_="thinking"; restoreAgentAction();\n',
+              '    if(prompt.isEmpty()) return;\n'
+              '    markInteraction();\n'
+              '    behavior_.onConversation();\n'
+              '    if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();\n'
+              '    answer_.clear(); emotion_="curious"; agentState_="thinking"; restoreAgentAction();\n',
+              'conversation behavior')
+
+          replace_once(
+              'void PetWindow::hugTony(){ emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }\n',
+              'void PetWindow::hugTony(){ markInteraction(); behavior_.onHugged(); emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }\n',
+              'hug behavior')
+
+          cpp_path.write_text(cpp, encoding='utf-8')
+
+          readme_path = root / 'README.md'
+          readme_path.write_text('''# Tony Desktop Pet\n\nC++20 + Qt 6 desktop client for the server-side agent. Tony is a **Teddy dog / toy poodle**, not a bear.\n\n## V0.8 life layer\n\nTony now has a persistent behavior model rather than a purely random animation loop. The client tracks energy, warmth, affection, loneliness and curiosity and uses those values to bias autonomous actions such as sleeping, shivering, asking for a hug, studying, walking, stretching and yawning.\n\nDesktop interaction is also stateful: Tony notices cursor proximity, leans toward the pointer, reacts to a head pat, distinguishes a click from drag-to-move, has a carried/landing response, and gets briefly dizzy after rough dragging. Right-click **How are you feeling?** gives a natural-language view of the current internal state without exposing game-like meters.\n\nAgent state events still override autonomous behavior while Tony is thinking or working, so the life layer does not fight server-side tool execution.\n\n## Character asset\n\nPut the supplied Tony artwork at `assets/tony.png` next to the executable. New V0.8 actions gracefully fall back to the idle artwork until dedicated frames are added under `assets/states/` or `assets/animations/`.\n\n## Build\n\nRequires Qt 6.5+ with Widgets, WebSockets and Network.\n\n```powershell\ncmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64\ncmake --build build --config Release\n```\n\nDouble-click Tony to talk to the server agent. Right-click Tony for manual actions.\n''', encoding='utf-8')
+
+          # Lightweight structural checks before committing.
+          required = [
+              'TonyBehaviorEngine behavior_',
+              'void PetWindow::tickLife()',
+              'Action::Carried',
+              'behavior_.onHugged()',
+              'project(TonyDesktopPet VERSION 0.8.0',
+          ]
+          joined = (src/'PetWindow.h').read_text(encoding='utf-8') + cpp_path.read_text(encoding='utf-8') + cmake_path.read_text(encoding='utf-8')
+          for marker in required:
+              if marker not in joined:
+                  raise SystemExit(f'Missing required V0.8 marker: {marker}')
+          print('TONY_V08_PATCH=PASS')
+          PY
+
+      - name: Commit V0.8 client changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bear_agent_pet/client
+          if git diff --cached --quiet; then
+            echo "No client changes needed."
+            exit 0
+          fi
+          git commit -m "Add Tony V0.8 living behavior engine"
+          git push origin HEAD:feature/teddy-agent-pet
+
+  build_windows:
+    needs: patch
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+      - name: Package and smoke test
+        shell: pwsh
+        run: |
+          cmake --install bear_agent_pet/client/build --config Release --prefix bear_agent_pet/client/package
+          windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
+          $process = Start-Process -FilePath "bear_agent_pet/client/package/TonyDesktopPet.exe" -WorkingDirectory "bear_agent_pet/client/package" -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V08_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.8-life-windows-x64
+          path: bear_agent_pet/client/package
+          if-no-files-found: error
