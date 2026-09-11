@@ -64,15 +64,21 @@ jobs:
             cat > "$ENVFILE" <<'ENV'
           BEAR_AGENT_REQUIRE_AUTH=false
           BEAR_OPENCLAW_AGENT=main
-          BEAR_LOCAL_AGENT=local2b
           BEAR_OPENCLAW_TIMEOUT=240
           BEAR_TONY_PERSONA=true
+          BEAR_LOCAL_MODEL=qwen3.5-2b-q4
+          BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions
+          BEAR_LOCAL_MODEL_TIMEOUT=90
+          BEAR_LOCAL_MAX_TOKENS=420
           OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
           ENV
             chmod 600 "$ENVFILE"
           fi
           grep -q '^BEAR_TONY_PERSONA=' "$ENVFILE" || printf '%s\n' 'BEAR_TONY_PERSONA=true' >> "$ENVFILE"
-          grep -q '^BEAR_LOCAL_AGENT=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_AGENT=local2b' >> "$ENVFILE"
+          grep -q '^BEAR_LOCAL_MODEL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL=qwen3.5-2b-q4' >> "$ENVFILE"
+          grep -q '^BEAR_LOCAL_MODEL_URL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions' >> "$ENVFILE"
+          grep -q '^BEAR_LOCAL_MODEL_TIMEOUT=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_TIMEOUT=90' >> "$ENVFILE"
+          grep -q '^BEAR_LOCAL_MAX_TOKENS=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MAX_TOKENS=420' >> "$ENVFILE"
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
@@ -117,26 +123,48 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.5.0', d
+          assert d['version'] == '0.6.0', d
           assert d['tony_persona'] is True, d
           assert d['technical_agent'] == 'main', d
-          assert d['local_agent'] == 'local2b', d
+          assert d['local_model'] == 'qwen3.5-2b-q4', d
           print('TONY_GATEWAY_HEALTH=PASS')
           PY
 
           echo '=== ROUTER CONTRACT ==='
           cd "$APP"
           "$VENV/bin/python" - <<'PY'
-          from app.main import action_for_text, route_agents
-          assert route_agents('Can I have a hug?')[0] == 'local2b'
-          assert route_agents('Check my VASP server job')[0] == 'main'
+          from app.main import action_for_text, route_backends
+          assert route_backends('Can I have a hug?')[0] == 'local-qwen'
+          assert route_backends('Check my VASP server job')[0] == 'openclaw-main'
           assert action_for_text('Paula is here')[0] == 'blush_wave'
           assert action_for_text('It is freezing')[0] == 'shiver'
           assert action_for_text('Can I have a hug?')[0] == 'ask_hug'
           print('TONY_ROUTER_CONTRACT=PASS')
           PY
 
-          echo '=== OPENCLAW BACKEND ==='
+          echo '=== LOCAL QWEN DIRECT COMPLETION ==='
+          "$VENV/bin/python" - <<'PY'
+          import json, urllib.request
+          payload={
+            'model':'qwen3.5-2b-q4',
+            'messages':[{'role':'user','content':'Reply exactly with: TONY_LOCAL_QWEN_OK'}],
+            'temperature':0,
+            'max_tokens':32,
+            'stream':False,
+          }
+          req=urllib.request.Request(
+            'http://127.0.0.1:18080/v1/chat/completions',
+            data=json.dumps(payload).encode(),
+            headers={'Content-Type':'application/json'},
+            method='POST')
+          with urllib.request.urlopen(req, timeout=60) as r:
+            d=json.load(r)
+          text=((d.get('choices') or [{}])[0].get('message') or {}).get('content','')
+          assert 'TONY_LOCAL_QWEN_OK' in text, d
+          print('TONY_LOCAL_QWEN_DIRECT=PASS')
+          PY
+
+          echo '=== OPENCLAW CONTROL PLANE ==='
           export PATH="/home/ubuntu/.npm-global/bin:$PATH"
           /home/ubuntu/.npm-global/bin/openclaw gateway status --deep --json >/tmp/tony-openclaw-status.json
           python3 - <<'PY'
@@ -144,7 +172,7 @@ jobs:
           d=json.load(open('/tmp/tony-openclaw-status.json'))
           assert ((d.get('service') or {}).get('runtime') or {}).get('status') == 'running', d
           assert (d.get('rpc') or {}).get('ok') is True, d
-          print('TONY_OPENCLAW_BACKEND=PASS')
+          print('TONY_OPENCLAW_CONTROL_PLANE=PASS')
           PY
 
           echo '=== WEBSOCKET CONTRACT ==='
