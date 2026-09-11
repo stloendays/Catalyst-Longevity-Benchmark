@@ -1,0 +1,112 @@
+name: Tony 0.9.5 visual QA
+
+on:
+  push:
+    branches:
+      - qa/tony-095-visual
+    paths:
+      - '.github/workflows/tony-095-visual-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual-qa:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact Tony 0.9.5 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release download tony-v0.9.5 `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern TonyDesktopPet-0.9.5-windows-x64.zip `
+            --clobber
+          Expand-Archive TonyDesktopPet-0.9.5-windows-x64.zip -DestinationPath runtime -Force
+          if (-not (Test-Path runtime/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing' }
+          $v = Get-Content runtime/VERSION.txt -Raw
+          if (-not $v.Contains('0.9.5')) { throw "Wrong Tony version: $v" }
+          if (-not $v.Contains('63a469555cffb35917b0c10c2fd9b5dc2a8e7077')) { throw "Wrong Tony commit: $v" }
+          Write-Host "TONY_RELEASE_IDENTITY=$($v.Trim())"
+
+      - name: Capture old and new behavior poses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path visual-qa | Out-Null
+
+          function Save-Desktop([string]$path) {
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bmp.Save((Join-Path $PWD $path), [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              $gfx.Dispose()
+              $bmp.Dispose()
+            }
+            Write-Host "TONY_VISUAL_CAPTURE=$path"
+          }
+
+          function Run-TonyCapture([string]$label, [string]$action) {
+            $env:TONY_VISUAL_ACTION = $action
+            $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
+            $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+            try {
+              Start-Sleep -Milliseconds 2600
+              if ($proc.HasExited) { throw "Tony exited before capture '$label': $($proc.ExitCode)" }
+              Save-Desktop "visual-qa/$label.png"
+            } finally {
+              if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+              Start-Sleep -Milliseconds 300
+            }
+          }
+
+          $poses = [ordered]@{
+            '01-idle' = 'idle'
+            '02-curious' = 'curious'
+            '03-pet' = 'pet'
+            '04-dizzy' = 'dizzy'
+            '05-stretch' = 'stretch'
+            '06-yawn' = 'yawn'
+            '07-working' = 'working'
+            '08-study' = 'study'
+            '09-thinking' = 'thinking'
+            '10-sleep' = 'sleep'
+            '11-ask-hug' = 'ask_hug'
+            '12-hug' = 'hug'
+            '13-walk' = 'walk'
+            '14-adjust-glasses' = 'adjust_glasses'
+            '15-remove-glasses' = 'remove_glasses'
+            '16-wave' = 'wave'
+            '17-shiver' = 'shiver'
+            '18-celebrate' = 'celebrate'
+            '19-blush' = 'blush'
+            '20-blush-wave' = 'blush_wave'
+          }
+          foreach ($entry in $poses.GetEnumerator()) {
+            Run-TonyCapture $entry.Key $entry.Value
+          }
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+
+      - name: Confirm screenshot set
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem visual-qa -Filter '*.png' | Sort-Object Name
+          $files | ForEach-Object { Write-Host $_.Name $_.Length }
+          if ($files.Count -ne 20) { throw "Expected 20 screenshots, found $($files.Count)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-0.9.5-visual-qa
+          path: visual-qa/*.png
+          if-no-files-found: error
