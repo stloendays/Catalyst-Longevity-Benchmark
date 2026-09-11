@@ -8,7 +8,7 @@ on:
     paths:
       - 'bear_agent_pet/client/**'
       - 'bear_agent_pet/server_gateway/**'
-      - '.github/scripts/apply_tony_v096_pairing_ui.py'
+      - '.github/scripts/apply_tony_v096_visual_safety.py'
       - '.github/workflows/_temporary-tony-v096-device-code.yml'
 
 permissions:
@@ -27,8 +27,8 @@ jobs:
           ref: feature/tony-v096-device-code
           fetch-depth: 0
 
-      - name: Apply automatic pairing UI migration
-        run: python .github/scripts/apply_tony_v096_pairing_ui.py
+      - name: Apply visual safety and first-run regression fixes
+        run: python .github/scripts/apply_tony_v096_visual_safety.py
 
       - name: Compile server pairing modules
         run: python -m compileall -q bear_agent_pet/server_gateway/app bear_agent_pet/server_gateway/tools
@@ -38,7 +38,7 @@ jobs:
           PYTHONPATH: bear_agent_pet/server_gateway
         run: python bear_agent_pet/server_gateway/tools/test_device_code_pairing.py
 
-      - name: Verify client pairing contract before Windows build
+      - name: Verify pairing and desktop regression contract
         shell: bash
         run: |
           set -euo pipefail
@@ -46,8 +46,17 @@ jobs:
           grep -q 'pairingCodeReady' bear_agent_pet/client/src/AgentClient.h
           grep -q 'startAutomaticPairing' bear_agent_pet/client/src/PetWindowV7.cpp
           grep -q '连接码：%1' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'blinkSequence\[\].*{-1, 1, 1, -1, -1}' bear_agent_pet/client/src/PetWindowV7.cpp
+          if grep -q 'blinkSequence\[\].*2' bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'Bad idle blink frame is still referenced' >&2
+            exit 1
+          fi
+          grep -q 'bounded(140000,320001)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'QTimer::singleShot(2200' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'topSafety=(action_==Action::Hug) ? 16.0 : 8.0' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'rotatedUnitH' bear_agent_pet/client/src/PetWindowV7.cpp
           test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '0.9.6'
-          echo 'TONY_DEVICE_CODE_STATIC_CONTRACT=PASS'
+          echo 'TONY_V096_REGRESSION_CONTRACT=PASS'
 
       - name: Commit integrated source
         shell: bash
@@ -55,12 +64,12 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/VERSION
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
           if git diff --cached --quiet; then
             echo 'TONY_V096_SOURCE_ALREADY_INTEGRATED=PASS'
             exit 0
           fi
-          git commit -m 'Expose Tony device connection code automatically'
+          git commit -m 'Fix Tony blink timing and hug safety regressions'
           git push origin HEAD:feature/tony-v096-device-code
 
   windows:
@@ -117,7 +126,22 @@ jobs:
           try {
             Start-Sleep -Seconds 6
             if ($process.HasExited) { throw "Tony exited: $($process.ExitCode)" }
-            Write-Host 'TONY_V096_STARTUP_SMOKE=PASS'
+            Write-Host 'TONY_V096_IDLE_STARTUP_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Hug startup smoke test
+        shell: pwsh
+        env:
+          TONY_VISUAL_ACTION: hug
+        run: |
+          $exe="$PWD/bear_agent_pet/client/build/Release/TonyDesktopPet.exe"
+          $process=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony hug pose exited: $($process.ExitCode)" }
+            Write-Host 'TONY_V096_HUG_STARTUP_SMOKE=PASS'
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
           }
