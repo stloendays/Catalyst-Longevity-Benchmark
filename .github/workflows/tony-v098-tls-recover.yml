@@ -14,7 +14,7 @@ permissions:
 jobs:
   recover-tls:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     env:
       TONY_SERVER_IP: 150.158.27.206
     steps:
@@ -29,42 +29,19 @@ jobs:
           chmod 600 "$RUNNER_TEMP/tony_server_key"
           echo "TONY_SSH_KEY=$RUNNER_TEMP/tony_server_key" >> "$GITHUB_ENV"
 
-      - name: Issue trusted short-lived IP certificate and configure Caddy
+      - name: Install issued trusted IP certificate into Caddy
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/tony_ip_tls.sh" <<'REMOTE'
+          cat > "$RUNNER_TEMP/install_tony_ip_tls.sh" <<'REMOTE'
           set -euo pipefail
           IP='150.158.27.206'
           CERTBOT='/opt/tony-certbot/bin/certbot'
-
-          if [ ! -x "$CERTBOT" ]; then
-            if ! python3 -m venv /tmp/tony-venv-probe >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv
-            fi
-            sudo rm -rf /opt/tony-certbot
-            sudo python3 -m venv /opt/tony-certbot
-            sudo /opt/tony-certbot/bin/pip install --upgrade pip
-            sudo /opt/tony-certbot/bin/pip install 'certbot>=5.4'
-          fi
-
-          echo "CERTBOT_VERSION=$($CERTBOT --version)"
-          sudo systemctl stop caddy
-          restore_caddy() { sudo systemctl start caddy >/dev/null 2>&1 || true; }
-          trap restore_caddy EXIT
-
-          sudo "$CERTBOT" certonly \
-            --non-interactive \
-            --agree-tos \
-            --register-unsafely-without-email \
-            --preferred-profile shortlived \
-            --standalone \
-            --ip-address "$IP"
-
           LIVE="/etc/letsencrypt/live/$IP"
-          test -s "$LIVE/fullchain.pem"
-          test -s "$LIVE/privkey.pem"
+
+          sudo test -x "$CERTBOT"
+          sudo test -s "$LIVE/fullchain.pem"
+          sudo test -s "$LIVE/privkey.pem"
 
           sudo install -d -o caddy -g caddy -m 750 /etc/caddy/tony-tls
           sudo install -o caddy -g caddy -m 644 "$LIVE/fullchain.pem" /etc/caddy/tony-tls/fullchain.pem
@@ -77,17 +54,20 @@ jobs:
             '    reverse_proxy 127.0.0.1:18790' \
             '}' | sudo tee /etc/caddy/Caddyfile >/dev/null
 
+          sudo caddy fmt --overwrite /etc/caddy/Caddyfile
           sudo caddy validate --config /etc/caddy/Caddyfile
-          sudo systemctl start caddy
-          trap - EXIT
+          sudo systemctl restart caddy
           sleep 3
           sudo systemctl is-active caddy
+
           echo '=== CERTIFICATE ==='
           sudo openssl x509 -in /etc/caddy/tony-tls/fullchain.pem -noout -subject -issuer -dates -ext subjectAltName
           echo '=== CADDYFILE ==='
           sudo cat /etc/caddy/Caddyfile
+          echo '=== LOCAL HTTPS ==='
+          curl -fsS --max-time 10 "https://$IP/health"
           REMOTE
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/tony_ip_tls.sh"
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" 'bash -s' < "$RUNNER_TEMP/install_tony_ip_tls.sh"
 
       - name: Install automatic IP certificate renewal
         shell: bash
@@ -100,11 +80,11 @@ jobs:
           set -euo pipefail
           IP='150.158.27.206'
           CERTBOT='/opt/tony-certbot/bin/certbot'
+          LIVE="/etc/letsencrypt/live/$IP"
           systemctl stop caddy
           start_caddy() { systemctl start caddy >/dev/null 2>&1 || true; }
           trap start_caddy EXIT
           "$CERTBOT" renew --quiet
-          LIVE="/etc/letsencrypt/live/$IP"
           install -o caddy -g caddy -m 644 "$LIVE/fullchain.pem" /etc/caddy/tony-tls/fullchain.pem
           install -o caddy -g caddy -m 600 "$LIVE/privkey.pem" /etc/caddy/tony-tls/privkey.pem
           systemctl start caddy
