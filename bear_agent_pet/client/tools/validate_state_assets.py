@@ -14,7 +14,11 @@ EXPECTED = (
     "idle", "working", "walk", "thinking", "celebrate", "sleep", "shiver",
     "ask_hug", "hug", "blush", "blush_wave", "study", "adjust_glasses",
     "remove_glasses", "wave",
+    # Approved interaction aliases. They are optional at runtime: V0.9.4 maps
+    # restored legacy behavior states to these sequences only when present.
+    "pat", "lifted", "landing", "dizzy", "stretch", "yawn", "cursor_watch",
 )
+NEW_INTERACTIONS = {"pat", "lifted", "landing", "dizzy", "stretch", "yawn", "cursor_watch"}
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -88,7 +92,7 @@ def main() -> int:
             print(f"MISSING  states/{key}.png  (legal: runtime falls back)")
             continue
         present += 1
-        validate_png(path, failures)
+        validate_png(path, failures, min_size=96 if key in NEW_INTERACTIONS else 180)
 
     animated_present = 0
     for key in EXPECTED:
@@ -109,7 +113,7 @@ def main() -> int:
 
         geometry = None
         for frame in frames:
-            current = validate_png(frame, failures)
+            current = validate_png(frame, failures, min_size=96 if key in NEW_INTERACTIONS else 180)
             if current is None:
                 continue
             if geometry is None:
