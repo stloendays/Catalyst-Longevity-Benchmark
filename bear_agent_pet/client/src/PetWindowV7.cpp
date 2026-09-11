@@ -80,7 +80,9 @@ QString defaultPublicEndpoint() {
 PetWindow::PetWindow(QWidget *parent)
     : QWidget(parent), localBridge_(this), bubble_(nullptr), composer_(nullptr) {
     setWindowTitle("Tony");
-    setFixedSize(230,250);
+    // Give wide poses (study/working/sleep) enough transparent room to stay full-size.
+    // The artwork itself is never cropped; only the visible alpha bounds are used for scale/anchor math.
+    setFixedSize(280,250);
     setWindowFlags(Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint|Qt::Tool);
     setAttribute(Qt::WA_TranslucentBackground);
     setMouseTracking(true);
@@ -214,12 +216,23 @@ PetWindow::PetWindow(QWidget *parent)
         endpoint=QUrl(s.value("agent/public_url",defaultPublicEndpoint()).toString());
         s.setValue("agent/url",endpoint);
     }
+    const QString visualTestAction=qEnvironmentVariable("TONY_VISUAL_ACTION").trimmed();
     if(!token.isEmpty()) {
         if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();
         agent_.connectTo(endpoint,token);
     } else {
         tray_.setToolTip("Tony · not paired");
-        showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);
+        if(visualTestAction.isEmpty())
+            showBubble(uiText("Hi Paula. Right-click me and choose Connect to Tony.","嗨 Paula。右键点我，然后选择“连接 Tony”。"),6500);
+    }
+
+    // Optional CI-only visual mode. It lets the Windows screenshot job render
+    // every pose without dialogs or bubbles covering Tony.
+    if(!visualTestAction.isEmpty()) {
+        bubble_.dismiss();
+        action_=actionFromWire(visualTestAction);
+        frame_=0;
+        update();
     }
 }
 
@@ -352,8 +365,9 @@ void PetWindow::paintEvent(QPaintEvent*) {
     qreal scale=1.0, rotation=0.0;
     switch(action_) {
     case Action::Idle:
-        // Normal desktop state is intentionally motionless. The face sprite
-        // handles the occasional blink; no perpetual bobbing or breathing zoom.
+        // Keep the approved idle artwork unchanged. A tiny timed settle gives
+        // life without inventing a new face or changing Tony's character design.
+        if(idleBlinking_) { dy=1; scale=.995; }
         break;
     case Action::Bob: dy=int(2*qSin(t*.65)); scale=1.0+0.003*qSin(t*.45); break;
     case Action::Walk: dy=-qAbs(int(qSin(t*1.25))); rotation=.7*qSin(t*1.25); break;
@@ -381,9 +395,10 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
     p.save();
     if(const QPixmap *sprite=pixmapForAction(action_); sprite && !sprite->isNull()) {
-        // Fit the visible (alpha) subject, not the square PNG canvas. Different
-        // source files can have different transparent padding; drawing every
-        // canvas into a hard-coded box made the character jump in size.
+        // IMPORTANT: never crop Tony's source artwork. We inspect alpha bounds
+        // only to calculate a stable visible size and a common ground line, then
+        // draw the ENTIRE original PNG canvas. Transparent pixels may extend
+        // outside the widget, but every visible character/drawing pixel remains exposed.
         const QImage image=sprite->toImage().convertToFormat(QImage::Format_ARGB32);
         int minX=image.width(), minY=image.height(), maxX=-1, maxY=-1;
         for(int y=0; y<image.height(); ++y) {
@@ -395,35 +410,36 @@ void PetWindow::paintEvent(QPaintEvent*) {
                 }
             }
         }
-
-        QRect source(0,0,image.width(),image.height());
-        if(maxX>=minX && maxY>=minY) {
-            source=QRect(QPoint(minX,minY),QPoint(maxX,maxY))
-                       .adjusted(-6,-6,6,6)
-                       .intersected(QRect(0,0,image.width(),image.height()));
+        if(maxX<minX || maxY<minY) {
+            minX=0; minY=0; maxX=qMax(0,image.width()-1); maxY=qMax(0,image.height()-1);
         }
 
-        const qreal maxMotionScale=(action_==Action::Hug) ? 1.04 : 1.025;
-        const qreal safeMotionScale=qBound<qreal>(0.965,scale,maxMotionScale);
-        const qreal maxW=184.0*safeMotionScale;
-        const qreal maxH=194.0*safeMotionScale;
-        const qreal fit=qMin(maxW/qMax(1,source.width()),
-                             maxH/qMax(1,source.height()));
-        const QSizeF drawSize(source.width()*fit,source.height()*fit);
+        const int visibleW=qMax(1,maxX-minX+1);
+        const int visibleH=qMax(1,maxY-minY+1);
+        const qreal maxMotionScale=(action_==Action::Hug) ? 1.035 : 1.02;
+        const qreal safeMotionScale=qBound<qreal>(0.97,scale,maxMotionScale);
 
-        // All poses share one desktop ground line. Wide/short poses such as
-        // sleep, study and working used to be vertically centered and appeared
-        // to float 10-22 px above their shadow.
+        // 280 px host width is deliberate: wide states such as study/working no
+        // longer have to shrink by ~25% just because books/screens are present.
+        // Height remains capped so Tony never collides with the nameplate.
+        const qreal maxVisibleW=252.0;
+        const qreal maxVisibleH=192.0;
+        const qreal baseFit=qMin(maxVisibleW/visibleW,maxVisibleH/visibleH);
+        const qreal fit=baseFit*safeMotionScale;
+
+        const qreal visibleCx=(minX+maxX+1)/2.0;
+        const qreal visibleCy=(minY+maxY+1)/2.0;
         const qreal groundY=205.0+dy;
-        const QPointF spriteCenter(width()/2.0+dx,
-                                   groundY-drawSize.height()/2.0);
-        p.translate(spriteCenter);
+        const qreal pivotY=groundY-visibleH*fit/2.0;
+
+        p.translate(QPointF(width()/2.0+dx,pivotY));
         p.rotate(rotation);
         if(action_==Action::Walk && walkDirection_<0) p.scale(-1.0,1.0);
 
-        const QRectF target(-drawSize.width()/2.0,-drawSize.height()/2.0,
-                            drawSize.width(),drawSize.height());
-        p.drawPixmap(target,*sprite,QRectF(source));
+        // Full-canvas target: source rect is the complete PNG, never alpha-cropped.
+        const QRectF target(-visibleCx*fit,-visibleCy*fit,
+                            image.width()*fit,image.height()*fit);
+        p.drawPixmap(target,*sprite,QRectF(0,0,sprite->width(),sprite->height()));
     } else {
         p.translate(QPointF(width()/2.0+dx,108+dy));
         p.rotate(rotation);
@@ -510,11 +526,11 @@ void PetWindow::tickAnimation(){
         // Slow desktop walk: advance only on every second animation tick.
         // This preserves the original native-motion feel without making Tony pace.
         QPoint n=pos()+QPoint((frame_%2==0 ? 1 : 0)*walkDirection_,0);
-        if(n.x()+width()>area.right()) { walkDirection_=-1; n.setX(area.right()-width()); }
+        if(n.x()+width()>area.right()) { walkDirection_=-1; n.setX(area.right()-width()+1); }
         else if(n.x()<area.left()) { walkDirection_=1; n.setX(area.left()); }
         move(n);
     }
-    const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+    const QPoint anchor=mapToGlobal(QPoint(width()/2,4));
     bubble_.follow(anchor);
     composer_.follow(anchor);
     if(action_!=Action::Idle || idleBlinking_) update();
@@ -572,7 +588,7 @@ void PetWindow::mouseMoveEvent(QMouseEvent *e){
     if(dragging_ && (e->buttons()&Qt::LeftButton)){
         move(e->globalPosition().toPoint()-dragOffset_);
         action_=Action::Bob; frame_=0;
-        const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+        const QPoint anchor=mapToGlobal(QPoint(width()/2,4));
         bubble_.follow(anchor); composer_.follow(anchor); update();
     }
 }
@@ -652,7 +668,7 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
 void PetWindow::askTony(){
     bubble_.dismiss(); emotion_="curious";
     if(agentState_=="idle") setAction(Action::Think,0);
-    composer_.openAt(mapToGlobal(QPoint(width()/2,40)));
+    composer_.openAt(mapToGlobal(QPoint(width()/2,4)));
 }
 
 void PetWindow::submitTonyPrompt(const QString &text){
@@ -697,11 +713,23 @@ void PetWindow::useLocalSshConnection(){
     showBubble(uiText("Using the local SSH tunnel. Keep the tunnel available while Tony is running.","已切换到本机 SSH 隧道。使用 Tony 时请保持隧道可用。"),5200);
 }
 
-void PetWindow::showBubble(const QString &text, int timeoutMs){ bubble_.showMessage(text,mapToGlobal(QPoint(width()/2,20)),emotion_,timeoutMs); }
+void PetWindow::showBubble(const QString &text, int timeoutMs){ bubble_.showMessage(text,mapToGlobal(QPoint(width()/2,4)),emotion_,timeoutMs); }
 
 void PetWindow::restorePosition(){
-    QSettings s; auto v=s.value("pet/position");
-    if(v.isValid()) move(v.toPoint());
-    else { auto a=QGuiApplication::primaryScreen()->availableGeometry(); move(a.right()-width()-40,a.bottom()-height()-20); }
+    QSettings s;
+    const auto v=s.value("pet/position");
+    QPoint target;
+    if(v.isValid()) target=v.toPoint();
+    else {
+        const auto a=QGuiApplication::primaryScreen()->availableGeometry();
+        target=QPoint(a.right()-width()-39,a.bottom()-height()-19);
+    }
+
+    auto *screen=QGuiApplication::screenAt(target+QPoint(width()/2,height()/2));
+    if(!screen) screen=QGuiApplication::primaryScreen();
+    const QRect area=screen->availableGeometry();
+    target.setX(qBound(area.left(),target.x(),area.right()-width()+1));
+    target.setY(qBound(area.top(),target.y(),area.bottom()-height()+1));
+    move(target);
 }
 void PetWindow::savePosition(){ QSettings().setValue("pet/position",pos()); }

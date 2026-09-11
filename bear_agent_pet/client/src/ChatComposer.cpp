@@ -165,10 +165,23 @@ void ChatComposer::placeNear(const QPoint &anchorGlobal) {
     const int h=sizeHint().height()>0 ? sizeHint().height() : 92;
     resize(width(),h);
 
+    const int edge=8;
+    const int petHalfWidthPlusGap=156;
     int x=anchorGlobal.x()-width()/2;
-    int y=anchorGlobal.y()-height()-12;
-    if(y<area.top()+8) y=anchorGlobal.y()+26;
-    x=qBound(area.left()+8,x,area.right()-width()-8);
-    y=qBound(area.top()+8,y,area.bottom()-height()-8);
+    int y=anchorGlobal.y()-height()-14;
+
+    // Never fall back directly on top of Tony. Near the top of the screen the
+    // composer moves to whichever side has room.
+    if(y<area.top()+edge) {
+        const int leftX=anchorGlobal.x()-petHalfWidthPlusGap-width();
+        const int rightX=anchorGlobal.x()+petHalfWidthPlusGap;
+        if(leftX>=area.left()+edge) x=leftX;
+        else if(rightX+width()<=area.right()-edge) x=rightX;
+        else x=qBound(area.left()+edge,x,area.right()-width()-edge);
+        y=qBound(area.top()+edge,anchorGlobal.y()+8,area.bottom()-height()-edge);
+    }
+
+    x=qBound(area.left()+edge,x,area.right()-width()-edge);
+    y=qBound(area.top()+edge,y,area.bottom()-height()-edge);
     move(x,y);
 }

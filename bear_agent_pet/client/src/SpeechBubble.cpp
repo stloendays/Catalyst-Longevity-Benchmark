@@ -76,13 +76,26 @@ void SpeechBubble::updateGeometryForText() {
 void SpeechBubble::placeNear(const QPoint &anchorGlobal) {
     auto *screen=QGuiApplication::screenAt(anchorGlobal);
     if(!screen) screen=QGuiApplication::primaryScreen();
-    QRect area=screen ? screen->availableGeometry() : QRect(anchorGlobal-QPoint(500,400),QSize(1000,800));
+    const QRect area=screen ? screen->availableGeometry() : QRect(anchorGlobal-QPoint(500,400),QSize(1000,800));
 
+    // Prefer above Tony with a real gap. If the pet is at the top edge, move the
+    // bubble to a side instead of placing it over the character.
+    const int edge=8;
+    const int petHalfWidthPlusGap=156; // 280/2 + 16 px breathing room
     int x=anchorGlobal.x()-width()/2;
-    int y=anchorGlobal.y()-height()-8;
-    if(y<area.top()+8) y=anchorGlobal.y()+18;
-    x=qBound(area.left()+8,x,area.right()-width()-8);
-    y=qBound(area.top()+8,y,area.bottom()-height()-8);
+    int y=anchorGlobal.y()-height()-14;
+
+    if(y<area.top()+edge) {
+        const int leftX=anchorGlobal.x()-petHalfWidthPlusGap-width();
+        const int rightX=anchorGlobal.x()+petHalfWidthPlusGap;
+        if(leftX>=area.left()+edge) x=leftX;
+        else if(rightX+width()<=area.right()-edge) x=rightX;
+        else x=qBound(area.left()+edge,x,area.right()-width()-edge);
+        y=qBound(area.top()+edge,anchorGlobal.y()+8,area.bottom()-height()-edge);
+    }
+
+    x=qBound(area.left()+edge,x,area.right()-width()-edge);
+    y=qBound(area.top()+edge,y,area.bottom()-height()-edge);
     move(x,y);
 }
 
