@@ -1,0 +1,58 @@
+name: Stage Tony full exposure
+
+on:
+  push:
+    branches:
+      - cloud-tony-full-exposure-work
+    paths:
+      - '.github/workflows/tony-full-exposure-stage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cloud-tony-full-exposure-work
+          fetch-depth: 0
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Apply full-exposure patch
+        shell: pwsh
+        run: |
+          python .github/scripts/apply_tony_full_exposure.py
+          git diff --check
+          git diff -- bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/SpeechBubble.cpp bear_agent_pet/client/src/ChatComposer.cpp
+
+      - name: Validate artwork
+        shell: pwsh
+        run: python .github/scripts/validate_state_assets.py
+
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          cmake -S bear_agent_pet/client -B build/full-exposure -G "Visual Studio 17 2022" -A x64
+          cmake --build build/full-exposure --config Release --parallel
+          if (-not (Test-Path build/full-exposure/Release/TonyDesktopPet.exe)) { throw 'TonyDesktopPet.exe missing' }
+
+      - name: Commit tested source patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/SpeechBubble.cpp bear_agent_pet/client/src/ChatComposer.cpp
+          if (git diff --cached --quiet) { throw 'Full-exposure patch produced no source changes.' }
+          git commit -m "Render Tony fully without source cropping"
+          git pull --rebase origin cloud-tony-full-exposure-work
+          git push origin HEAD:cloud-tony-full-exposure-work
