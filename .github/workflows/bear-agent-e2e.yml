@@ -12,7 +12,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
       - name: Prepare SSH key
         env:
@@ -25,7 +25,7 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Exercise real Tony conversations through the deployed gateway
+      - name: Exercise real Tony boyfriend conversations
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
@@ -39,7 +39,7 @@ jobs:
           import json
           import websockets
 
-          async def recv_json(ws, timeout=280):
+          async def recv_json(ws, timeout=100):
               return json.loads(await asyncio.wait_for(ws.recv(), timeout))
 
           async def ask(ws, content, label):
@@ -47,9 +47,8 @@ jobs:
                   'type':'message',
                   'id':f'github-actions-e2e-{label}',
                   'content':content,
-              }, ensure_ascii=False))
+              }))
               events=[]
-              final=None
               while True:
                   msg=await recv_json(ws)
                   events.append(msg)
@@ -60,17 +59,16 @@ jobs:
                       break
               text=str(final.get('content','')).strip()
               assert text, (label, final)
+              assert final.get('agent') == 'local2b-tony-chat', (label, final)
+              assert final.get('fallback') is False, (label, final)
               assert final.get('action'), (label, final)
               assert final.get('emotion'), (label, final)
+              assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), (label, text)
               kinds=[e.get('type') for e in events]
               assert 'agent_state' in kinds, (label, kinds)
               assert 'text_delta' in kinds, (label, kinds)
-              print(f'{label}_AGENT=', final.get('agent'))
-              print(f'{label}_FALLBACK=', final.get('fallback'))
-              print(f'{label}_ACTION=', final.get('action'))
-              print(f'{label}_EMOTION=', final.get('emotion'))
-              print(f'{label}_TEXT=', text[:800].replace('\n',' '))
-              return text, final
+              print(f'{label}_TEXT=', text[:500].replace('\n',' '))
+              return text
 
           async def main():
               async with websockets.connect(
@@ -81,22 +79,20 @@ jobs:
                   assert first == {'type':'agent_state','state':'idle'}, first
                   assert second.get('type') == 'avatar_action', second
 
-                  en, _ = await ask(ws, 'In one short sentence, introduce yourself as Tony.', 'CASUAL_EN')
-                  assert 'tony' in en.casefold(), en
+                  intro=await ask(ws, 'Hi Tony. Tell me who you are in one short sentence.', 'INTRO')
+                  assert 'tony' in intro.casefold(), intro
 
-                  zh, _ = await ask(ws, '你怕冷吗？请只用一句自然的中文回答。', 'CASUAL_ZH')
-                  assert any('\u4e00' <= ch <= '\u9fff' for ch in zh), zh
+                  paula=await ask(ws, 'Who am I to you, Tony?', 'PAULA_RELATIONSHIP')
+                  low=paula.casefold()
+                  assert ('paula' in low) or ('girlfriend' in low), paula
+                  assert ('boyfriend' in low) or ('girlfriend' in low) or ('love' in low), paula
 
-                  chem, _ = await ask(ws, 'Chemistry check: in one short sentence, what is the oxidation state of oxygen in H2O?', 'CHEMISTRY')
-                  normalized=chem.replace('−','-').replace('–','-').replace('—','-').replace(' ','')
-                  assert '-2' in normalized or '−2' in chem, chem
-
-                  marker='CATALYST-731'
-                  await ask(ws, f'Remember this exact test marker for my next message: {marker}. Reply briefly.', 'MEMORY_SET')
-                  recalled, _ = await ask(ws, 'What exact test marker did I ask you to remember in my previous message?', 'MEMORY_GET')
+                  marker='TEDDY-417'
+                  await ask(ws, f'Remember this little secret for my next message: {marker}.', 'MEMORY_SET')
+                  recalled=await ask(ws, 'What was the little secret I just asked you to remember?', 'MEMORY_GET')
                   assert marker.casefold() in recalled.casefold(), recalled
 
-                  print('TONY_REAL_CONVERSATION_E2E=PASS')
+                  print('TONY_ENGLISH_BOYFRIEND_CHAT=PASS')
 
           asyncio.run(main())
           PY
