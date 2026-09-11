@@ -1,0 +1,67 @@
+name: Tony runtime visual smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/workflows/tony-runtime-visual-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+
+      - name: Download current Tony release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download tony-desktop-latest `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern TonyDesktopPet-windows-x64.zip `
+            --clobber
+          Expand-Archive TonyDesktopPet-windows-x64.zip -DestinationPath runtime -Force
+          Get-Content runtime/VERSION.txt
+
+      - name: Launch Tony and capture runtime desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            if ($proc.HasExited) { throw "Tony exited before visual capture: $($proc.ExitCode)" }
+
+            Add-Type -AssemblyName System.Drawing
+            Add-Type -AssemblyName System.Windows.Forms
+            $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bmp.Save((Join-Path $PWD 'tony-runtime-desktop.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              $gfx.Dispose()
+              $bmp.Dispose()
+            }
+            if (-not (Test-Path tony-runtime-desktop.png)) { throw 'Runtime screenshot was not created.' }
+            Write-Host "TONY_RUNTIME_VISUAL_CAPTURE=PASS size=$($bounds.Width)x$($bounds.Height)"
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-runtime-visual-smoke
+          path: tony-runtime-desktop.png
+          if-no-files-found: error
