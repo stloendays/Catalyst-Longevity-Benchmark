@@ -1,0 +1,132 @@
+name: Diagnose Tony public connection
+
+on:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v098-connection-diagnose.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v098-connection-diagnose
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe public DNS TLS and pairing API
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST='150-158-27-206.sslip.io'
+          BASE="https://${HOST}"
+          echo '=== DNS ==='
+          getent ahostsv4 "$HOST" | head -n 3
+          echo '=== TLS / health ==='
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 "$BASE/health" -o /tmp/public-health.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/public-health.json', encoding='utf-8'))
+          assert d.get('ok') is True, d
+          assert d.get('service') == 'Tony Desktop Companion', d
+          assert d.get('device_code_pairing') is True, d
+          print('PUBLIC_HEALTH=PASS')
+          print('gateway_version=', d.get('version'))
+          print('local_model=', d.get('local_model'))
+          print('paired_devices=', d.get('paired_devices'))
+          PY
+
+          echo '=== Device-code request ==='
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 \
+            -H 'Content-Type: application/json' \
+            -d '{"device_name":"Tony GitHub connection diagnostic"}' \
+            "$BASE/pair/request" -o /tmp/pair-request.json
+          python3 - <<'PY'
+          import json, time
+          d=json.load(open('/tmp/pair-request.json', encoding='utf-8'))
+          assert d.get('status') == 'pending', d
+          assert len(str(d.get('request_id',''))) >= 24, d
+          assert len(str(d.get('code','')).replace('-','')) == 8, d
+          assert int(d.get('expires_at',0)) > int(time.time()), d
+          print('PUBLIC_PAIR_REQUEST=PASS')
+          # Keep secrets/code out of CI logs.
+          print('poll_after_ms=', d.get('poll_after_ms'))
+          PY
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/pair-request.json', encoding='utf-8'))
+          open('/tmp/status-body.json','w',encoding='utf-8').write(json.dumps({'request_id':d['request_id']}))
+          PY
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 20 \
+            -H 'Content-Type: application/json' --data-binary @/tmp/status-body.json \
+            "$BASE/pair/status" -o /tmp/pair-status.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/pair-status.json', encoding='utf-8'))
+          assert d.get('status') == 'pending', d
+          print('PUBLIC_PAIR_STATUS=PASS')
+          PY
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Inspect gateway and reverse proxy on server
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+          echo '=== services ==='
+          systemctl is-active bear-agent-gateway.service
+          systemctl is-active rhocodec-llm.service
+          if systemctl is-active --quiet caddy; then
+            echo 'REVERSE_PROXY=caddy'
+            sudo grep -R -n -E '150-158-27-206\.sslip\.io|18790|reverse_proxy' /etc/caddy 2>/dev/null | head -n 40 || true
+          elif systemctl is-active --quiet nginx; then
+            echo 'REVERSE_PROXY=nginx'
+            sudo nginx -T 2>/dev/null | grep -n -E '150-158-27-206\.sslip\.io|18790|proxy_pass' | head -n 60 || true
+          else
+            echo 'REVERSE_PROXY=NOT_FOUND'
+            exit 1
+          fi
+
+          echo '=== loopback health ==='
+          curl -fsS --max-time 10 http://127.0.0.1:18790/health >/tmp/tony-v098-health.json
+          "$VENV/bin/python" - <<'PY'
+          import json
+          d=json.load(open('/tmp/tony-v098-health.json'))
+          assert d.get('ok') is True, d
+          print('LOOPBACK_HEALTH=PASS')
+          print('paired_devices=', d.get('paired_devices'))
+          PY
+
+          echo '=== pending pairing metadata ==='
+          cd "$APP"
+          "$VENV/bin/python" -m app.pairing_cli pending || true
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/server_key"
