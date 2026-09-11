@@ -32,7 +32,7 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     // Passive personality should feel alive without interrupting the user constantly.
     idleTimer_.setInterval(22000);
     connect(&idleTimer_, &QTimer::timeout, this, [this]{
-        if(action_!=Action::Idle || dragging_) return;
+        if(action_!=Action::Idle || dragging_ || agentState_!="idle") return;
         const int r=QRandomGenerator::global()->bounded(12);
         if(r==0) {
             setAction(Action::Shiver,2600);
@@ -50,15 +50,15 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
     });
     idleTimer_.start();
 
-    connect(&actionTimer_, &QTimer::timeout, this, [this]{ setAction(Action::Idle); });
     actionTimer_.setSingleShot(true);
+    connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);
 
     connect(&agent_, &AgentClient::stateChanged, this, [this](const QString &s){
-        if(s=="thinking") setAction(Action::Think);
-        else if(s=="working" || s=="tool_running") setAction(Action::Bob);
-        else if(s=="sleeping") setAction(Action::Sleep);
-        else if(s=="error") { emotion_="worried"; setAction(Action::Think,2200); }
-        else if(s=="idle" && !actionTimer_.isActive()) setAction(Action::Idle);
+        agentState_=s.trimmed().toLower();
+        // Temporary persona actions (hug, shiver, blush, etc.) take precedence.
+        // Once their timer expires, restoreAgentAction() returns Tony to the
+        // correct long-lived Agent phase instead of incorrectly dropping to idle.
+        if(!actionTimer_.isActive()) restoreAgentAction();
     });
     connect(&agent_, &AgentClient::avatarAction, this,
             [this](const QString &action, const QString &emotion, int durationMs){
@@ -74,9 +74,11 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
         if(!actionTimer_.isActive()) setAction(Action::Celebrate,1600);
     });
     connect(&agent_, &AgentClient::connectionChanged, this, [this](bool connected){
+        if(!connected) agentState_="idle";
         tray_.setToolTip(connected ? "Tony · connected" : "Tony · waiting for server");
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
+        agentState_="error";
         emotion_="worried";
         setAction(Action::Think,2600);
         showBubble("Tony couldn't finish that: " + text.left(260));
@@ -210,11 +212,26 @@ void PetWindow::setAction(Action a,int durationMs){
     update();
 }
 
+PetWindow::Action PetWindow::baseActionForAgentState() const {
+    if(agentState_=="thinking") return Action::Think;
+    if(agentState_=="working" || agentState_=="tool_running") return Action::Bob;
+    if(agentState_=="sleeping") return Action::Sleep;
+    if(agentState_=="error") return Action::Think;
+    return Action::Idle;
+}
+
+void PetWindow::restoreAgentAction(){
+    action_=baseActionForAgentState();
+    frame_=0;
+    basePos_=pos();
+    update();
+}
+
 PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
     const auto n=name.trimmed().toLower();
     if(n=="working") return Action::Bob;
     if(n=="walk" || n=="walking") return Action::Walk;
-    if(n=="thinking" || n=="think" || n=="pose_tough") return Action::Think;
+    if(n=="thinking" || n=="think" || n=="pose_tough" || n=="scratch_head" || n=="embarrassed") return Action::Think;
     if(n=="celebrate" || n=="happy_bounce" || n=="handsome_pose" || n=="smug_blink") return Action::Celebrate;
     if(n=="sleep") return Action::Sleep;
     if(n=="shiver") return Action::Shiver;
@@ -225,6 +242,8 @@ PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
     if(n=="adjust_glasses") return Action::AdjustGlasses;
     if(n=="remove_glasses") return Action::RemoveGlasses;
     if(n=="wave" || n=="paw_wave" || n=="ear_wiggle" || n=="wake") return Action::Wave;
+    if(n=="blanket" || n=="warm_hands" || n=="tea") return Action::Shiver;
+    if(n=="quiet_idle" || n=="soft_idle" || n=="calm_sit" || n=="proud_sit" || n=="sit" || n=="eat") return Action::Idle;
     return Action::Idle;
 }
 
@@ -276,14 +295,16 @@ void PetWindow::mousePressEvent(QMouseEvent *e){
 void PetWindow::mouseMoveEvent(QMouseEvent *e){
     if(dragging_ && (e->buttons()&Qt::LeftButton)){
         move(e->globalPosition().toPoint()-dragOffset_);
-        setAction(Action::Bob);
+        action_=Action::Bob;
+        frame_=0;
+        update();
     }
 }
 void PetWindow::mouseReleaseEvent(QMouseEvent *e){
     if(e->button()==Qt::LeftButton){
         dragging_=false;
         savePosition();
-        setAction(Action::Idle);
+        restoreAgentAction();
     }
 }
 void PetWindow::mouseDoubleClickEvent(QMouseEvent *e){ if(e->button()==Qt::LeftButton) askTony(); }
@@ -325,7 +346,8 @@ void PetWindow::askTony(){
     auto text=QInputDialog::getText(this,"Tony","想让我做什么？",QLineEdit::Normal,{},&ok);
     if(!ok||text.trimmed().isEmpty()) return;
     answer_.clear();
-    setAction(Action::Think);
+    agentState_="thinking";
+    restoreAgentAction();
     if(agent_.connected()) agent_.sendMessage(text);
     else showBubble("服务器还没连接好，我先在这里等你。\n\n"+text);
 }
