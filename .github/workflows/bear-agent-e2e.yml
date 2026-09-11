@@ -37,12 +37,14 @@ jobs:
           "$VENV/bin/python" - <<'PY'
           import asyncio
           import json
+          import time
           import websockets
 
-          async def recv_json(ws, timeout=100):
+          async def recv_json(ws, timeout=80):
               return json.loads(await asyncio.wait_for(ws.recv(), timeout))
 
           async def ask(ws, content, label):
+              started=time.monotonic()
               await ws.send(json.dumps({
                   'type':'message',
                   'id':f'github-actions-e2e-{label}',
@@ -57,6 +59,7 @@ jobs:
                   if msg.get('type') == 'final':
                       final=msg
                       break
+              elapsed=time.monotonic()-started
               text=str(final.get('content','')).strip()
               assert text, (label, final)
               assert final.get('agent') == 'local2b-tony-chat', (label, final)
@@ -64,9 +67,11 @@ jobs:
               assert final.get('action'), (label, final)
               assert final.get('emotion'), (label, final)
               assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), (label, text)
+              assert len(text.split()) <= 55, (label, text)
               kinds=[e.get('type') for e in events]
               assert 'agent_state' in kinds, (label, kinds)
               assert 'text_delta' in kinds, (label, kinds)
+              print(f'{label}_LATENCY_SEC=', round(elapsed,2))
               print(f'{label}_TEXT=', text[:500].replace('\n',' '))
               return text
 
@@ -80,9 +85,10 @@ jobs:
                   assert second.get('type') == 'avatar_action', second
 
                   intro=await ask(ws, 'Hi Tony. Tell me who you are in one short sentence.', 'INTRO')
-                  assert 'tony' in intro.casefold(), intro
+                  low=intro.casefold()
+                  assert ('boyfriend' in low) or ('paula' in low) or ('teddy' in low), intro
 
-                  paula=await ask(ws, 'Who am I to you, Tony?', 'PAULA_RELATIONSHIP')
+                  paula=await ask(ws, 'Who am I to you?', 'PAULA_RELATIONSHIP')
                   low=paula.casefold()
                   assert ('paula' in low) or ('girlfriend' in low), paula
                   assert ('boyfriend' in low) or ('girlfriend' in low) or ('love' in low), paula
