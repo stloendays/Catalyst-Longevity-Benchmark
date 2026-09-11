@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(TonyDesktopPet VERSION 0.8.2 LANGUAGES CXX)
+project(TonyDesktopPet VERSION 0.8.4 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -18,6 +18,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/LocalBridge.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
+    src/UpdateManager.cpp
+    src/UpdateManager.h
     src/SshTunnel.cpp
     src/SshTunnel.h
 )
@@ -28,6 +30,7 @@ if(WIN32)
 endif()
 install(TARGETS TonyDesktopPet RUNTIME DESTINATION .)
 install(DIRECTORY assets/ DESTINATION assets)
+install(FILES install/tony-install-root.marker DESTINATION .)
 add_custom_command(TARGET TonyDesktopPet POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
