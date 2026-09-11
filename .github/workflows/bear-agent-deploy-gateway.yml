@@ -3,6 +3,8 @@ name: Deploy Tony desktop companion
 on:
   workflow_dispatch:
   push:
+    branches:
+      - 'feature/bear-agent-pet'
     paths:
       - 'bear_agent_pet/server_gateway/**'
       - '.github/workflows/bear-agent-deploy-gateway.yml'
@@ -102,7 +104,7 @@ jobs:
           }
           # Public WSS is protected by per-device bearer tokens issued during pairing.
           set_env BEAR_AGENT_REQUIRE_AUTH true
-          # Reusable trusted-friend code: only its SHA-256 digest is deployed/stored.
+          # Reusable trusted-friend code remains as an owner/admin recovery path.
           set_env BEAR_FRIEND_CODE_SHA256 cd63ec788c84ed0b945f7f4a471271c82471347dc0dfeca51ae96e5221a9bedc
           set_env BEAR_TONY_PERSONA true
           set_env BEAR_LOCAL_MODEL "$MODEL_ID"
@@ -162,7 +164,7 @@ jobs:
           assert 'Simplified Chinese' in d['languages'], d
           assert d['persona'] == 'Paula-boyfriend', d
           assert d['chat_only'] is True, d
-          assert d['pairing_mode'] == 'reusable-friend-code', d
+          assert d['pairing_mode'] in {'reusable-friend-code', 'device-code+recovery'}, d
           assert d['local_tools_enabled'] is False, d
           assert d['openclaw_enabled'] is False, d
           print('TONY_CHAT_GATEWAY_HEALTH=PASS')
