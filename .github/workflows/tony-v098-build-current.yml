@@ -7,6 +7,8 @@ on:
       - fix/tony-v098-icon-connection
     paths:
       - '.github/workflows/tony-v098-build-current.yml'
+      - 'bear_agent_pet/client/VERSION'
+      - 'bear_agent_pet/client/src/PetWindowV7.cpp'
 
 permissions:
   contents: read
