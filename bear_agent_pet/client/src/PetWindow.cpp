@@ -83,16 +83,27 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent) {
         setAction(Action::Think,2600);
         showBubble("Tony couldn't finish that: " + text.left(260));
     });
-
-    QSettings s;
-    const auto endpoint=s.value("agent/url","ws://127.0.0.1:18790/agent/ws").toUrl();
-    agent_.connectTo(endpoint);
+    connect(&tunnel_, &SshTunnel::statusChanged, this, [this](const QString &status){
+        if(!agent_.connected()) tray_.setToolTip("Tony · "+status);
+    });
 
     tray_.setToolTip("Tony · Desktop Agent");
     tray_.setVisible(true);
     connect(&tray_, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason r){
         if(r==QSystemTrayIcon::Trigger){ show(); raise(); }
     });
+
+    QSettings s;
+    const auto endpoint=s.value("agent/url","ws://127.0.0.1:18790/agent/ws").toUrl();
+    // The gateway intentionally stays bound to server loopback. When Tony uses
+    // the default localhost endpoint, open a local SSH forward using the user's
+    // existing Windows OpenSSH key/agent. No private key is embedded in the app.
+    if(endpoint.host()=="127.0.0.1" || endpoint.host()=="localhost") tunnel_.start();
+    agent_.connectTo(endpoint);
+}
+
+PetWindow::~PetWindow() {
+    tunnel_.stop();
 }
 
 void PetWindow::loadAsset() {
