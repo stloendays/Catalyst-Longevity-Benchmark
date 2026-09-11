@@ -59,7 +59,7 @@ jobs:
             Write-Host "TONY_VISUAL_CAPTURE=$path size=$($bounds.Width)x$($bounds.Height)"
           }
 
-          function Run-TonyCapture([string]$label, [string]$action = '') {
+          function Run-TonyCapture([string]$label, [string]$action = '', [int]$delayMs = 2400) {
             if ([string]::IsNullOrWhiteSpace($action)) {
               Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
             } else {
@@ -69,7 +69,7 @@ jobs:
             $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
             $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
             try {
-              Start-Sleep -Milliseconds 2400
+              Start-Sleep -Milliseconds $delayMs
               if ($proc.HasExited) { throw "Tony exited before capture '$label': $($proc.ExitCode)" }
               Save-Desktop "visual-qa/$label.png"
             } finally {
@@ -78,7 +78,9 @@ jobs:
             }
           }
 
-          Run-TonyCapture '00-first-run'
+          # Cold Windows startup can take longer than a warm action restart.
+          # Wait long enough to verify the actual first-run pet + hint placement.
+          Run-TonyCapture '00-first-run' '' 7000
 
           $poses = [ordered]@{
             '01-idle' = 'idle'
