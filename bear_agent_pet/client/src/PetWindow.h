@@ -11,8 +11,10 @@
 #include "SpeechBubble.h"
 #include "ChatComposer.h"
 #include "LocalBridge.h"
+#include "UpdateManager.h"
 
 class QEnterEvent;
+class SettingsDialog;
 
 class PetWindow : public QWidget {
     Q_OBJECT
@@ -57,6 +59,7 @@ private:
     void submitTonyPrompt(const QString &text);
     void hugTony();
     void useLocalSshConnection();
+    void openSettings();
     void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
     void savePosition();
@@ -75,6 +78,8 @@ private:
     LocalBridge localBridge_;
     SpeechBubble bubble_;
     ChatComposer composer_;
+    UpdateManager updater_;
+    SettingsDialog *settingsDialog_{nullptr};
     Action action_{Action::Idle};
     QPoint dragOffset_;
     QPoint basePos_;
