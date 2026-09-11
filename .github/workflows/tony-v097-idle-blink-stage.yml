@@ -1,0 +1,92 @@
+name: Stage Tony 0.9.7 idle blink fix
+
+on:
+  push:
+    branches:
+      - fix/tony-v097-idle-blink
+    paths:
+      - '.github/workflows/tony-v097-idle-blink-stage.yml'
+      - '.github/scripts/fix_tony_v097_idle_blink.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-proof:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-v097-idle-blink
+          fetch-depth: 0
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Apply guarded idle fix
+        shell: pwsh
+        run: |
+          python .github/scripts/fix_tony_v097_idle_blink.py
+          git diff --check
+          if (Select-String -Path bear_agent_pet/client/src/PetWindowV7.cpp -Pattern 'animationAssets_\.constFind\("idle"\)') { throw 'Legacy idle lookup remains' }
+
+      - name: Validate artwork and build
+        shell: pwsh
+        run: |
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          cmake -S bear_agent_pet/client -B build/v097 -G "Visual Studio 17 2022" -A x64
+          cmake --build build/v097 --config Release --parallel
+          if(-not (Test-Path build/v097/Release/TonyDesktopPet.exe)){ throw 'TonyDesktopPet.exe missing' }
+
+      - name: Capture entire first blink window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path proof | Out-Null
+          $env:TONY_VISUAL_ACTION='idle'
+          $exe=(Resolve-Path build/v097/Release/TonyDesktopPet.exe).Path
+          $proc=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            for($i=0;$i -lt 80;$i++) {
+              if($proc.HasExited){ throw "Tony exited during visual proof: $($proc.ExitCode)" }
+              $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+              $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+              $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+              try {
+                $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+                $name=('proof/frame_{0:D2}.png' -f $i)
+                $bmp.Save((Join-Path $PWD $name),[System.Drawing.Imaging.ImageFormat]::Png)
+              } finally { $gfx.Dispose(); $bmp.Dispose() }
+              Start-Sleep -Milliseconds 200
+            }
+          } finally {
+            if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+            Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+          }
+          if((Get-ChildItem proof -Filter '*.png').Count -ne 80){ throw 'Incomplete visual proof' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-v0.9.7-idle-blink-proof
+          path: proof/*.png
+          if-no-files-found: error
+
+      - name: Commit Windows-tested source only
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          if(git diff --cached --quiet){ throw 'Patch produced no source change' }
+          git commit -m "Disable legacy Tony idle screenshot frames"
+          git pull --rebase origin fix/tony-v097-idle-blink
+          git push origin HEAD:fix/tony-v097-idle-blink
