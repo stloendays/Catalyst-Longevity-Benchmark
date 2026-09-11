@@ -46,8 +46,6 @@ jobs:
 
           mkdir -p "$ROOT/models"
           echo '=== PRESERVED QUALITY MODEL ==='
-          # The 2B model is a retained asset, not a disposable fallback. This workflow
-          # must fail rather than silently proceed if that known model disappears.
           test -s "$QUALITY_MODEL"
           QUALITY_SHA_BEFORE=$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')
           printf '%s\n' "$QUALITY_SHA_BEFORE" > "$QUALITY_SHA_FILE"
@@ -82,7 +80,7 @@ jobs:
           echo 'TONY_2B_PRESERVATION=PASS'
           REMOTE
 
-      - name: Install dual-model selector and activate fast mode
+      - name: Install dual-model selector and verify both profiles
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
@@ -93,11 +91,23 @@ jobs:
           QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
           QUALITY_SHA_FILE="$ROOT/models/.Qwen3.5-2B-Q4_K_M.sha256"
           GATEWAY_ENV='/home/ubuntu/.local/share/bear-agent/bear-agent.env'
+          DROPIN_DIR='/etc/systemd/system/rhocodec-llm.service.d'
+          OLD_DROPIN="$DROPIN_DIR/openclaw.conf"
+          BACKUP_DIR="$ROOT/systemd-backups"
 
           test -x "$ROOT/bin/llama-server"
           test -s "$FAST_MODEL"
           test -s "$QUALITY_MODEL"
           QUALITY_SHA_BEFORE=$(cat "$QUALITY_SHA_FILE")
+
+          # This old drop-in hard-coded Qwen3.5 2B and overrode the selectable unit.
+          # Preserve a copy for audit/recovery, but remove it from systemd activation.
+          if [ -f "$OLD_DROPIN" ]; then
+            echo 'Disabling stale hard-coded 2B systemd drop-in.'
+            sudo mkdir -p "$BACKUP_DIR"
+            sudo cp -a "$OLD_DROPIN" "$BACKUP_DIR/openclaw.conf.hardcoded-2b.disabled"
+            sudo rm -f "$OLD_DROPIN"
+          fi
 
           sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
           [Unit]
@@ -123,6 +133,8 @@ jobs:
           WantedBy=multi-user.target
           UNIT
 
+          sudo systemctl daemon-reload
+
           sudo tee /usr/local/bin/tony-model >/dev/null <<'SCRIPT'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -145,10 +157,20 @@ jobs:
           show_status() {
             echo '=== Tony model selector ==='
             cat "$ACTIVE_ENV" 2>/dev/null || true
+            echo '=== Effective systemd command ==='
+            systemctl show rhocodec-llm.service -p DropInPaths -p ExecStart -p MainPID --no-pager || true
+            PID=$(systemctl show rhocodec-llm.service -p MainPID --value 2>/dev/null || true)
+            if [ -n "$PID" ] && [ "$PID" != 0 ] && [ -r "/proc/$PID/cmdline" ]; then
+              tr '\0' ' ' < "/proc/$PID/cmdline"
+              echo
+            fi
             echo '=== Model files ==='
             ls -lh "$FAST_MODEL" "$QUALITY_MODEL" 2>/dev/null || true
-            echo '=== Runtime ==='
+            echo '=== Runtime API ==='
             curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models 2>/dev/null || true
+            echo
+            echo '=== Gateway ==='
+            curl -fsS --max-time 3 http://127.0.0.1:18790/health 2>/dev/null || true
             echo
           }
 
@@ -166,6 +188,9 @@ jobs:
               set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 35
               set_gateway_env BEAR_LOCAL_MAX_TOKENS 48
               MODE='fast / Qwen3.5 0.8B Q4'
+              EXPECTED_ALIAS='tony-qwen3.5-0.8b-q4'
+              EXPECTED_PATH="$FAST_MODEL"
+              EXPECTED_PROFILE='fast'
               ;;
             quality|2b)
               test -s "$QUALITY_MODEL"
@@ -177,10 +202,12 @@ jobs:
           TONY_UBATCH=64
           EOF
               set_gateway_env BEAR_LOCAL_MODEL tony-qwen3.5-2b-q4
-              # 2B is deliberately kept as the slower quality profile on this CPU host.
               set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 150
               set_gateway_env BEAR_LOCAL_MAX_TOKENS 48
               MODE='quality / Qwen3.5 2B Q4'
+              EXPECTED_ALIAS='tony-qwen3.5-2b-q4'
+              EXPECTED_PATH="$QUALITY_MODEL"
+              EXPECTED_PROFILE='quality'
               ;;
             status)
               show_status
@@ -195,40 +222,116 @@ jobs:
           echo "Switching Tony to $MODE"
           sudo systemctl daemon-reload
           sudo systemctl enable rhocodec-llm.service >/dev/null
-          sudo systemctl restart rhocodec-llm.service
 
+          # A plain restart can briefly leave the old model API reachable. Stop first,
+          # wait for the old listener to disappear, then require the exact new alias.
+          sudo systemctl stop rhocodec-llm.service || true
+          old_gone=0
+          for i in $(seq 1 30); do
+            if ! curl -fsS --max-time 1 http://127.0.0.1:18080/v1/models >/dev/null 2>&1; then
+              old_gone=1
+              break
+            fi
+            sleep 1
+          done
+          test "$old_gone" -eq 1
+
+          sudo systemctl start rhocodec-llm.service
           ready=0
           for i in $(seq 1 90); do
             if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-models.json 2>/dev/null; then
-              ready=1
-              break
+              if python3 - "$EXPECTED_ALIAS" "$EXPECTED_PROFILE" <<'PY'
+          import json, sys
+          alias=sys.argv[1]
+          profile=sys.argv[2]
+          d=json.load(open('/tmp/tony-models.json'))
+          rows=d.get('data') or []
+          if not rows:
+              raise SystemExit(1)
+          row=rows[0]
+          if row.get('id') != alias:
+              raise SystemExit(1)
+          n_params=int(((row.get('meta') or {}).get('n_params')) or 0)
+          if profile == 'fast' and n_params and n_params >= 1_200_000_000:
+              raise SystemExit(1)
+          if profile == 'quality' and n_params and n_params <= 1_500_000_000:
+              raise SystemExit(1)
+          PY
+              then
+                ready=1
+                break
+              fi
             fi
             sleep 2
           done
-          test "$ready" -eq 1
+          if [ "$ready" -ne 1 ]; then
+            echo "Expected model did not become active: $EXPECTED_ALIAS" >&2
+            cat /tmp/tony-models.json 2>/dev/null || true
+            systemctl --no-pager --full status rhocodec-llm.service || true
+            exit 1
+          fi
+
           cat /tmp/tony-models.json
+          PID=$(systemctl show rhocodec-llm.service -p MainPID --value)
+          test -n "$PID"
+          test "$PID" != 0
+          ACTUAL_CMD=$(tr '\0' ' ' < "/proc/$PID/cmdline")
+          echo "ACTUAL_LLAMA_CMD=$ACTUAL_CMD"
+          printf '%s' "$ACTUAL_CMD" | grep -F -- "$EXPECTED_PATH" >/dev/null
+          printf '%s' "$ACTUAL_CMD" | grep -F -- "$EXPECTED_ALIAS" >/dev/null
 
           if systemctl list-unit-files bear-agent-gateway.service >/dev/null 2>&1; then
-            sudo systemctl restart bear-agent-gateway.service || true
+            sudo systemctl restart bear-agent-gateway.service
+            gateway_ready=0
+            for i in $(seq 1 30); do
+              if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/tony-health.json 2>/dev/null; then
+                if python3 - "$EXPECTED_ALIAS" "$EXPECTED_PROFILE" <<'PY'
+          import json, sys
+          alias=sys.argv[1]
+          profile=sys.argv[2]
+          d=json.load(open('/tmp/tony-health.json'))
+          if d.get('local_model') == alias and d.get('model_profile') == profile:
+              raise SystemExit(0)
+          raise SystemExit(1)
+          PY
+                then
+                  gateway_ready=1
+                  break
+                fi
+              fi
+              sleep 1
+            done
+            test "$gateway_ready" -eq 1
           fi
+
           show_status
           SCRIPT
           sudo chmod 0755 /usr/local/bin/tony-model
           sudo chown ubuntu:ubuntu "$ROOT"
-          sudo chown ubuntu:ubuntu "$ROOT/models" "$FAST_MODEL"
-          sudo chown ubuntu:ubuntu "$QUALITY_MODEL"
+          sudo chown ubuntu:ubuntu "$ROOT/models" "$FAST_MODEL" "$QUALITY_MODEL"
           sudo touch "$ACTIVE_ENV"
           sudo chown ubuntu:ubuntu "$ACTIVE_ENV"
 
-          /usr/local/bin/tony-model fast
+          echo '=== VERIFY QUALITY PROFILE IS REALLY 2B ==='
+          /usr/local/bin/tony-model quality
+          test "$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')" = "$QUALITY_SHA_BEFORE"
+          echo 'TONY_QUALITY_RUNTIME_SWITCH=PASS'
 
-          # Switching to fast is not allowed to mutate or replace the retained 2B file.
+          echo '=== SWITCH BACK TO DEFAULT FAST PROFILE ==='
+          /usr/local/bin/tony-model fast
           test "$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')" = "$QUALITY_SHA_BEFORE"
           echo 'TONY_2B_AFTER_FAST_SWITCH=PASS'
 
           echo '=== FAST LATENCY SMOKE ==='
           python3 - <<'PY'
           import json, time, urllib.request
+          models=json.load(urllib.request.urlopen('http://127.0.0.1:18080/v1/models', timeout=5))
+          row=(models.get('data') or [{}])[0]
+          assert row.get('id') == 'tony-qwen3.5-0.8b-q4', row
+          n_params=int(((row.get('meta') or {}).get('n_params')) or 0)
+          if n_params:
+              assert n_params < 1_200_000_000, row
+
           payload={
             'model':'tony-qwen3.5-0.8b-q4',
             'messages':[
@@ -252,6 +355,7 @@ jobs:
           assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), text
           assert elapsed < 45, elapsed
           print('TONY_FAST_MODEL=PASS')
+          print('FAST_RUNTIME_PARAMS=', n_params)
           print('LATENCY_SEC=',round(elapsed,2))
           print('SAMPLE=',text[:240].replace('\n',' '))
           PY
@@ -260,7 +364,9 @@ jobs:
           test -s "$FAST_MODEL"
           test -s "$QUALITY_MODEL"
           ls -lh "$FAST_MODEL" "$QUALITY_MODEL"
+          test "$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')" = "$QUALITY_SHA_BEFORE"
           echo 'TONY_DUAL_MODEL_INVENTORY=PASS'
+          echo 'TONY_FINAL_DEFAULT_PROFILE=FAST'
           REMOTE
 
       - name: Remove SSH key
