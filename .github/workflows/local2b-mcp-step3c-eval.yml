@@ -1,0 +1,177 @@
+name: Local2B MCP Step 3C held-out evaluation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - training/local2b_mcp/.stage3c-eval-trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
+jobs:
+  evaluate-stage3c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Copy frozen benchmark code
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'rm -rf /tmp/local2b-mcp-step3c-eval && mkdir -p /tmp/local2b-mcp-step3c-eval'
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/generate_stage2_dataset.py \
+            training/local2b_mcp/validate_dataset.py \
+            training/local2b_mcp/benchmark_tool_use.py \
+            training/local2b_mcp/benchmark_tool_use_trace.py \
+            ubuntu@150.158.27.206:/tmp/local2b-mcp-step3c-eval/
+
+      - name: Rebuild frozen held-out set
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=30 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-step3c-eval
+          cd "$ROOT"
+          python3 generate_stage2_dataset.py --out dataset --train 16000 --val 1600 --test 1600 --seed 20260908
+          python3 validate_dataset.py dataset
+          test "$(sha256sum dataset/train.jsonl | awk '{print $1}')" = d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303
+          test "$(sha256sum dataset/val.jsonl | awk '{print $1}')" = 89e4aca2f72fc4efd6bab0a88299a68a32cd637edc0561d7d2c95b2b27463990
+          test "$(sha256sum dataset/test.jsonl | awk '{print $1}')" = 460b5308f6791eb53692fc0736a53e6f6b553a925207caa34517b456e28d78f2
+          REMOTE
+
+      - name: Evaluate fresh Stage 3C adapter
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=100 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/tmp/local2b-mcp-step3c-eval
+          TRAIN_ROOT=/home/ubuntu/local2b-training/step3c
+          ADAPTER="$TRAIN_ROOT/local2b-mcp-step3c-r4a4-qv.gguf"
+          RESULT="$TRAIN_ROOT/result.txt"
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          SERVER=/opt/rhocodec-llm/bin/llama-server
+          BASE_SHA=d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58
+          DATA_SHA=8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b
+          PORT=18081
+          ALIAS=qwen3.5-2b-q4-stage3c
+          SERVER_PID=""
+
+          test -s "$ADAPTER" && test -s "$RESULT" && test -x "$SERVER"
+          test "$(sha256sum "$MODEL" | awk '{print $1}')" = "$BASE_SHA"
+          grep -q '^lora_init=$' "$RESULT"
+          grep -q '^data_sha256=8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b$' "$RESULT"
+          ADAPTER_SHA=$(sha256sum "$ADAPTER" | awk '{print $1}')
+          grep -q "^adapter_sha256=${ADAPTER_SHA}$" "$RESULT"
+          printf 'stage3c_adapter_sha256=%s\n' "$ADAPTER_SHA" > "$ROOT/adapter-identity.txt"
+
+          restore_base() {
+            if [ -n "$SERVER_PID" ]; then
+              kill "$SERVER_PID" 2>/dev/null || true
+              wait "$SERVER_PID" 2>/dev/null || true
+            fi
+            sudo systemctl start rhocodec-llm.service || true
+          }
+          trap restore_base EXIT INT TERM
+
+          sudo systemctl stop rhocodec-llm.service
+          "$SERVER" -m "$MODEL" --lora "$ADAPTER" --alias "$ALIAS" \
+            --host 127.0.0.1 --port "$PORT" -c 16384 -t 4 -b 128 -ub 128 --parallel 1 \
+            --jinja --reasoning-budget 0 --no-webui > "$ROOT/stage3c-server.log" 2>&1 &
+          SERVER_PID=$!
+          ready=0
+          for _ in $(seq 1 120); do
+            if curl -fsS "http://127.0.0.1:${PORT}/v1/models" >/dev/null 2>&1; then ready=1; break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then tail -160 "$ROOT/stage3c-server.log" || true; exit 20; fi
+
+          cd "$ROOT"
+          python3 benchmark_tool_use_trace.py \
+            --dataset dataset/test.jsonl \
+            --endpoint "http://127.0.0.1:${PORT}/v1/chat/completions" \
+            --model "$ALIAS" --limit 80 --max-tokens 192 --timeout 120 \
+            --out stage3c-benchmark.json --trace-out stage3c.trace.jsonl
+
+          kill "$SERVER_PID" 2>/dev/null || true
+          wait "$SERVER_PID" 2>/dev/null || true
+          SERVER_PID=""
+          sudo systemctl start rhocodec-llm.service
+          healthy=0
+          for _ in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:18080/v1/models >/dev/null 2>&1; then healthy=1; break; fi
+            sleep 1
+          done
+          test "$healthy" -eq 1
+          systemctl is-active --quiet rhocodec-llm.service
+          echo 'base_service_after=HEALTHY' > "$ROOT/runtime-status.txt"
+          trap - EXIT INT TERM
+          REMOTE
+
+      - name: Collect Stage 3C benchmark evidence
+        if: always()
+        run: |
+          mkdir -p build/step3c-eval
+          for f in stage3c-benchmark.json stage3c.trace.jsonl adapter-identity.txt runtime-status.txt stage3c-server.log; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/tmp/local2b-mcp-step3c-eval/$f" \
+              build/step3c-eval/ || true
+          done
+
+      - name: Compare with frozen Base Q4 and apply promotion gate
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s build/step3c-eval/stage3c-benchmark.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base=json.loads(Path('training/local2b_mcp/baselines/base_q4_step2.json').read_text())
+          c=json.loads(Path('build/step3c-eval/stage3c-benchmark.json').read_text())
+          bm=base['metrics']; cm=c['metrics']
+          keys=['tool_gate_accuracy','tool_sequence_exact_accuracy','call_exact_accuracy','valid_argument_shape_rate','no_tool_precision','false_tool_call_rate','api_or_parse_error_rate','mean_latency_s']
+          metrics={k:{'base':bm[k],'stage3c':cm[k],'delta':cm[k]-bm[k]} for k in keys}
+          nonreg=(cm['api_or_parse_error_rate']==0 and cm['tool_gate_accuracy']>=bm['tool_gate_accuracy'] and cm['call_exact_accuracy']>=bm['call_exact_accuracy'] and cm['no_tool_precision']>=bm['no_tool_precision'] and cm['false_tool_call_rate']<=bm['false_tool_call_rate'])
+          gain=(cm['tool_gate_accuracy']>bm['tool_gate_accuracy'] or cm['call_exact_accuracy']>bm['call_exact_accuracy'] or cm['no_tool_precision']>bm['no_tool_precision'] or cm['false_tool_call_rate']<bm['false_tool_call_rate'])
+          promote=bool(nonreg and gain)
+          report={'benchmark':'local2b_mcp_step3c_frozen_eval_v1','metrics':metrics,'counts':c['counts'],'by_task_type':c['by_task_type'],'promote_recommended':promote,'promotion_rule':'zero API/parse errors; non-regression in tool gate, exact call+args, no-tool and false-call; at least one strict primary gain'}
+          Path('build/step3c-eval/comparison.json').write_text(json.dumps(report,indent=2,ensure_ascii=False)+'\n')
+          print(json.dumps(report,indent=2,ensure_ascii=False))
+          lines=['# Stage 3C held-out promotion gate','',f"**PROMOTE_RECOMMENDED={'true' if promote else 'false'}**",'']
+          for k in ['tool_gate_accuracy','call_exact_accuracy','no_tool_precision','false_tool_call_rate','valid_argument_shape_rate']:
+              r=metrics[k]
+              lines.append(f"- {k}: {r['base']*100:.2f}% -> {r['stage3c']*100:.2f}% ({r['delta']*100:+.2f} pp)")
+          Path('build/step3c-eval/summary.md').write_text('\n'.join(lines)+'\n')
+          PY
+          cat build/step3c-eval/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Stage 3C evaluation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3c-heldout-eval
+          path: build/step3c-eval/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
