@@ -1,0 +1,52 @@
+name: Fix Tony visual regression
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/scripts/fix_tony_visual_regression.py'
+      - '.github/workflows/tony-visual-regression-fix.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-visual-regression-fix
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Apply safe full-character rendering rollback
+        run: |
+          set -euo pipefail
+          python .github/scripts/fix_tony_visual_regression.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          git diff --check
+          grep -F 'project(TonyDesktopPet VERSION 0.9.1 LANGUAGES CXX)' bear_agent_pet/client/CMakeLists.txt
+          grep -F 'Fit the visible (alpha) subject' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'Visual-quality rollback' bear_agent_pet/client/src/PetWindowV7.cpp
+
+      - name: Commit repaired Tony renderer
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/CMakeLists.txt
+          git add -A .github/tony_assets_bootstrap
+          if git diff --cached --quiet; then
+            echo 'Tony visual regression fix is already applied.'
+            exit 0
+          fi
+          git commit -m 'Fix Tony full-character rendering regression'
+          git pull --rebase origin feature/bear-agent-pet
+          git push origin HEAD:feature/bear-agent-pet
