@@ -11,6 +11,12 @@
 #include <QSysInfo>
 #include <QUuid>
 
+namespace {
+QByteArray tonyUserAgent() {
+    return QByteArray("TonyDesktopPet/") + QCoreApplication::applicationVersion().toUtf8();
+}
+}
+
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
     reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(false);
@@ -82,7 +88,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.9");
+    request.setHeader(QNetworkRequest::UserAgentHeader, tonyUserAgent());
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -119,7 +125,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.9");
+    request.setHeader(QNetworkRequest::UserAgentHeader, tonyUserAgent());
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
