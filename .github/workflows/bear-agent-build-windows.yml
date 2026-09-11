@@ -38,6 +38,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path bear_agent_pet/client/package/assets | Out-Null
           Copy-Item bear_agent_pet/client/build/Release/TonyDesktopPet.exe bear_agent_pet/client/package/
           Copy-Item bear_agent_pet/client/assets/tony.png bear_agent_pet/client/package/assets/tony.png
+          Copy-Item bear_agent_pet/client/RUN_TONY.md bear_agent_pet/client/package/
           windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
       - uses: actions/upload-artifact@v4
         with:
