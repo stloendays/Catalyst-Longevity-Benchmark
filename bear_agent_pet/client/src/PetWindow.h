@@ -5,11 +5,13 @@
 #include <QPoint>
 #include <QSystemTrayIcon>
 #include "AgentClient.h"
+#include "SshTunnel.h"
 
 class PetWindow : public QWidget {
     Q_OBJECT
 public:
     explicit PetWindow(QWidget *parent=nullptr);
+    ~PetWindow() override;
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
@@ -41,6 +43,7 @@ private:
     QTimer animTimer_;
     QTimer idleTimer_;
     QTimer actionTimer_;
+    SshTunnel tunnel_;
     AgentClient agent_;
     QSystemTrayIcon tray_;
     Action action_{Action::Idle};
