@@ -32,6 +32,7 @@ signals:
     void textDelta(const QString &text);
     void answerFinished();
     void connectionChanged(bool connected);
+    void connectionStageChanged(const QString &stage);
     void pairingCodeReady(const QString &code, qint64 expiresAtEpochSeconds);
     void paired(const QString &token, const QString &deviceId, const QUrl &endpoint);
     void pairingFailed(const QString &text);
@@ -46,11 +47,13 @@ private:
     static QUrl pairingRequestUrlFor(const QUrl &wsUrl);
     static QUrl pairingStatusUrlFor(const QUrl &wsUrl);
     void sendClientHello();
+    void scheduleReconnect();
 
     QWebSocket socket_;
     QNetworkAccessManager network_;
     QUrl endpoint_;
     QTimer reconnectTimer_;
+    QTimer connectWatchdog_;
     QTimer pairingPollTimer_;
     QUrl pairingWsUrl_;
     QString pairingRequestId_;
@@ -59,4 +62,5 @@ private:
     QString bearerToken_;
     QString language_{"en"};
     bool outageReported_{false};
+    int reconnectDelayMs_{1000};
 };
