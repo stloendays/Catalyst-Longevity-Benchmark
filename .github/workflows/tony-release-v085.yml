@@ -1,0 +1,160 @@
+name: Build Tony v0.8.5 installer and update release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/teddy-agent-pet
+    paths:
+      - '.github/workflows/tony-release-v085.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      TONY_VERSION: '0.8.5'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python teddy_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S teddy_agent_pet/client -B teddy_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build teddy_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package = "$PWD/teddy_agent_pet/client/package"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install teddy_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          Copy-Item teddy_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+          $root = (Resolve-Path $package).Path
+          $managed = Get-ChildItem $package -Recurse -File | Where-Object { $_.Name -ne 'tony-file-list.txt' } | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          $managed | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+
+          if (-not (Test-Path "$package/tony-install-root.marker")) { throw 'Managed install marker missing' }
+          if (-not (Test-Path "$package/tony-file-list.txt")) { throw 'Managed file list missing' }
+
+      - name: Portable smoke test
+        shell: pwsh
+        run: |
+          $exe = "$PWD/teddy_agent_pet/client/package/TonyDesktopPet.exe"
+          $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 7
+            if ($process.HasExited) { throw "Tony exited during portable smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_PORTABLE_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - name: Build portable ZIP and SHA-256
+        shell: pwsh
+        run: |
+          $dist = "$PWD/teddy_agent_pet/client/dist"
+          if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
+          $zipName = "TonyDesktopPet-v$env:TONY_VERSION-windows-x64.zip"
+          $zipPath = Join-Path $dist $zipName
+          Compress-Archive -Path "$PWD/teddy_agent_pet/client/package/*" -DestinationPath $zipPath -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content "$zipPath.sha256" -Encoding ascii
+          Write-Host "TONY_ZIP_SHA256=$hash"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe not found' }
+          & $iscc "$PWD/teddy_agent_pet/client/installer/TonyDesktopPet.iss"
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
+          $setup = "$PWD/teddy_agent_pet/client/dist/TonyDesktopPet-Setup-v$env:TONY_VERSION.exe"
+          if (-not (Test-Path $setup)) { throw 'Installer output missing' }
+          (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant() | Set-Content "$setup.sha256" -Encoding ascii
+
+      - name: Installer smoke test
+        shell: pwsh
+        run: |
+          $setup = "$PWD/teddy_agent_pet/client/dist/TonyDesktopPet-Setup-v$env:TONY_VERSION.exe"
+          $testDir = "$env:LOCALAPPDATA\TonyDesktopPet-Smoke-$env:GITHUB_RUN_ID"
+          if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force }
+          $install = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS',"/DIR=$testDir" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer smoke install failed: $($install.ExitCode)" }
+          $exe = Join-Path $testDir 'TonyDesktopPet.exe'
+          if (-not (Test-Path $exe)) { throw 'Installed Tony executable missing' }
+          if (-not (Test-Path (Join-Path $testDir 'tony-install-root.marker'))) { throw 'Installed marker missing' }
+          if (-not (Test-Path (Join-Path $testDir 'tony-file-list.txt'))) { throw 'Installed file list missing' }
+          $process = Start-Process -FilePath $exe -WorkingDirectory $testDir -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Installed Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_INSTALLER_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+          $uninstaller = Get-ChildItem $testDir -Filter 'unins*.exe' | Select-Object -First 1
+          if ($uninstaller) {
+            Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          }
+          if (Test-Path $testDir) { Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "tony-v$env:TONY_VERSION"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --cleanup-tag -y
+          }
+          $notes = @"
+          Tony Desktop Pet v$env:TONY_VERSION
+
+          - First launch now tries to verify the owner's existing SSH identity automatically.
+          - If the SSH tunnel succeeds, Tony obtains and securely stores this computer's device token without asking for a Friend code.
+          - The SSH bootstrap endpoint is loopback-only and rejects reverse-proxied/public traffic.
+          - If SSH verification is unavailable, Tony falls back to the Friend code and clearly explains that it is needed only once per computer.
+          - In-app updates remain SHA-256 verified and clean old Tony update packages/cache after success without deleting unrelated files.
+          "@
+          gh release create $tag --repo $env:GITHUB_REPOSITORY --target feature/teddy-agent-pet --title "Tony Desktop Pet v$env:TONY_VERSION" --notes $notes `
+            "teddy_agent_pet/client/dist/TonyDesktopPet-Setup-v$env:TONY_VERSION.exe" `
+            "teddy_agent_pet/client/dist/TonyDesktopPet-Setup-v$env:TONY_VERSION.exe.sha256" `
+            "teddy_agent_pet/client/dist/TonyDesktopPet-v$env:TONY_VERSION-windows-x64.zip" `
+            "teddy_agent_pet/client/dist/TonyDesktopPet-v$env:TONY_VERSION-windows-x64.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.8.5-release
+          path: teddy_agent_pet/client/dist/*
+          if-no-files-found: error
