@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QPoint>
 #include <QSystemTrayIcon>
+#include <QHash>
 #include "AgentClient.h"
 #include "SshTunnel.h"
 
@@ -26,7 +27,9 @@ private:
         AdjustGlasses, RemoveGlasses, Wave
     };
 
-    void loadAsset();
+    void loadAssets();
+    QString assetKeyForAction(Action action) const;
+    const QPixmap *pixmapForAction(Action action) const;
     void setAction(Action action, int durationMs=0);
     Action actionFromWire(const QString &name) const;
     Action baseActionForAgentState() const;
@@ -34,12 +37,15 @@ private:
     void tickAnimation();
     void askTony();
     void hugTony();
+    void configureConnection();
+    void useLocalSshConnection();
     void showBubble(const QString &text);
     void restorePosition();
     void savePosition();
     QString actionName() const;
 
     QPixmap pet_;
+    QHash<QString,QPixmap> stateAssets_;
     QTimer animTimer_;
     QTimer idleTimer_;
     QTimer actionTimer_;
