@@ -1,0 +1,64 @@
+name: Tony 0.9.5 idle blink QA
+
+on:
+  push:
+    branches:
+      - qa/tony-095-visual
+    paths:
+      - '.github/workflows/tony-095-idle-blink-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blink-qa:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact Tony 0.9.5 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download tony-v0.9.5 --repo $env:GITHUB_REPOSITORY --pattern TonyDesktopPet-0.9.5-windows-x64.zip --clobber
+          Expand-Archive TonyDesktopPet-0.9.5-windows-x64.zip -DestinationPath runtime -Force
+      - name: Sample idle through the first blink window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path blink-qa | Out-Null
+          $env:TONY_VISUAL_ACTION='idle'
+          $exe=(Resolve-Path runtime/TonyDesktopPet.exe).Path
+          $proc=Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            for($i=0; $i -lt 50; $i++) {
+              if($proc.HasExited){ throw "Tony exited during blink QA: $($proc.ExitCode)" }
+              $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+              $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+              $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+              try {
+                $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+                $name=('blink-qa/frame_{0:D2}.png' -f $i)
+                $bmp.Save((Join-Path $PWD $name),[System.Drawing.Imaging.ImageFormat]::Png)
+              } finally { $gfx.Dispose(); $bmp.Dispose() }
+              Start-Sleep -Milliseconds 200
+            }
+          } finally {
+            if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+            Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+          }
+      - name: Confirm sequence
+        shell: pwsh
+        run: |
+          $files=Get-ChildItem blink-qa -Filter '*.png'
+          if($files.Count -ne 50){ throw "Expected 50 frames, found $($files.Count)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-0.9.5-idle-blink-qa
+          path: blink-qa/*.png
+          if-no-files-found: error
