@@ -1,0 +1,173 @@
+name: Temporary Tony 0.9.5 unified validation
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/_temporary-tony-v095-unified.yml'
+      - '.github/scripts/build_tony_v095_unified.py'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v095-unified
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v095-unified
+          fetch-depth: 0
+
+      - name: Bring forward the validated legacy behavior layer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/tony-v093-release-integration
+          for path in \
+            bear_agent_pet/client/src/PetWindow.h \
+            bear_agent_pet/client/src/PetWindowV7.cpp \
+            bear_agent_pet/client/src/TonyBehaviorEngine.h \
+            bear_agent_pet/client/src/TonyBehaviorEngine.cpp \
+            bear_agent_pet/client/tools/apply_v010_interactions.py \
+            bear_agent_pet/client/tools/validate_state_assets.py
+          do
+            git show "origin/feature/tony-v093-release-integration:$path" > "$path"
+          done
+
+      - name: Merge current full-exposure rendering with restored behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/build_tony_v095_unified.py
+          python bear_agent_pet/client/tools/apply_v010_interactions.py
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '0.9.5'
+          grep -q 'setFixedSize(280,250)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'QRectF(0,0,sprite->width(),sprite->height())' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'void PetWindow::tickPhysics()' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'void PetWindow::walkAlongForegroundWindow()' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'borderless && coversMonitor' bear_agent_pet/client/src/PetWindowV7.cpp
+          echo 'TONY_V095_CAPABILITY_UNION=PASS'
+
+      - name: Commit unified source
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/VERSION \
+                  bear_agent_pet/client/CMakeLists.txt \
+                  bear_agent_pet/client/src/PetWindow.h \
+                  bear_agent_pet/client/src/PetWindowV7.cpp \
+                  bear_agent_pet/client/src/TonyBehaviorEngine.h \
+                  bear_agent_pet/client/src/TonyBehaviorEngine.cpp \
+                  bear_agent_pet/client/tools/apply_v010_interactions.py \
+                  bear_agent_pet/client/tools/validate_state_assets.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'Unify Tony full-exposure rendering with desktop life behavior'
+            git push origin HEAD:feature/tony-v095-unified
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: integrate
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v095-unified
+
+      - name: Verify canonical source before build
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '0.9.5') { throw "Expected 0.9.5, got $version" }
+          $source = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          foreach ($needle in @(
+            'setFixedSize(280,250)',
+            'TONY_VISUAL_ACTION',
+            'QRectF(0,0,sprite->width(),sprite->height())',
+            'void PetWindow::tickPhysics()',
+            'void PetWindow::walkAlongForegroundWindow()',
+            'borderless && coversMonitor',
+            'cursorTravel>=150',
+            'moveToRestCorner'
+          )) {
+            if (-not $source.Contains($needle)) { throw "Missing unified capability: $needle" }
+          }
+          Write-Host 'TONY_V095_SOURCE_UNION=PASS'
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          if (Test-Path bear_agent_pet/client/package) { Remove-Item bear_agent_pet/client/package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix bear_agent_pet/client/package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+      - name: Smoke test full-exposure idle
+        shell: pwsh
+        run: |
+          $package = (Resolve-Path bear_agent_pet/client/package).Path
+          $version = (Get-Content (Join-Path $package 'VERSION') -Raw).Trim()
+          if ($version -ne '0.9.5') { throw "Packaged VERSION mismatch: $version" }
+          $productVersion=(Get-Item (Join-Path $package 'TonyDesktopPet.exe')).VersionInfo.ProductVersion
+          if (-not $productVersion.StartsWith('0.9.5')) { throw "ProductVersion mismatch: $productVersion" }
+          $env:TONY_VISUAL_ACTION='idle'
+          $proc=Start-Process -FilePath (Join-Path $package 'TonyDesktopPet.exe') -WorkingDirectory $package -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            if ($proc.HasExited) { throw "Tony exited during idle smoke: $($proc.ExitCode)" }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+          Write-Host "TONY_V095_IDLE_SMOKE=PASS ProductVersion=$productVersion"
+
+      - name: Smoke test restored interaction action
+        shell: pwsh
+        run: |
+          $package = (Resolve-Path bear_agent_pet/client/package).Path
+          $env:TONY_VISUAL_ACTION='dizzy'
+          $proc=Start-Process -FilePath (Join-Path $package 'TonyDesktopPet.exe') -WorkingDirectory $package -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($proc.HasExited) { throw "Tony exited during restored-action smoke: $($proc.ExitCode)" }
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+          Write-Host 'TONY_V095_RESTORED_ACTION_SMOKE=PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.9.5-unified-windows-x64
+          path: bear_agent_pet/client/package
+          if-no-files-found: error
