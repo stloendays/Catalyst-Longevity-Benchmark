@@ -1,0 +1,6 @@
+Stage 3C fresh-from-base training trigger
+
+Frozen Stage 3C data SHA256: 8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b
+Initialization: fresh from base Q4; no Stage 3A/3B LoRA continuation
+Reason: Stage 3B full-strength regression confirmed; runtime scale sweep found no strict rescue candidate.
+Promotion policy: do not install before the frozen held-out gate passes.
