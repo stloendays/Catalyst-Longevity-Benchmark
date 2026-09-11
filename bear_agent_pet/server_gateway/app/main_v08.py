@@ -1,28 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import secrets
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
-from .main import PairRequest, action_for_text, authorized, call_backend, local_model_id, send_json
+from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, send_json
 from .pairing import consume_pairing_code, paired_device_count
 
-app = FastAPI(title="Tony Desktop Companion", version="0.8.2")
+app = FastAPI(title="Tony Desktop Companion", version="0.8.4")
 
 
-async def stream_answer(ws: WebSocket, answer: str, used_agent: str, fallback_used: bool) -> None:
-    await send_json(ws, {
-        "type": "agent_state",
-        "state": "working",
-        "agent": used_agent,
-        "fallback": fallback_used,
-    })
-    for i in range(0, len(answer), 24):
-        await send_json(ws, {"type": "text_delta", "content": answer[i:i + 24]})
-        await asyncio.sleep(0.005)
-
+async def finish_answer(ws: WebSocket, answer: str, used_agent: str, fallback_used: bool) -> None:
     final_action, final_emotion, final_duration = action_for_text(answer, response=True)
     await send_json(ws, {
         "type": "final",
@@ -47,13 +36,15 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "0.8.2",
+        "version": "0.8.4",
         "backend": "local-qwen-chat-only",
         "local_model": model,
         "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
         "language": "English",
         "persona": "Paula-boyfriend",
         "chat_only": True,
+        "streaming": True,
+        "persona_core": True,
         "pairing_supported": True,
         "paired_devices": paired_device_count(),
         "local_tools_enabled": False,
@@ -108,9 +99,10 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "0.8.2",
+                    "server_version": "0.8.4",
                     "accepted_capabilities": [],
                     "chat_only": True,
+                    "streaming": True,
                     "local_model": local_model_id(),
                 })
                 continue
@@ -130,10 +122,14 @@ async def agent_ws(ws: WebSocket) -> None:
                 "duration_ms": duration,
             })
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
+            await send_json(ws, {"type": "agent_state", "state": "working", "agent": "tony-chat"})
 
             try:
-                answer, used_agent, fallback_used = await call_backend(content, session_key)
-                await stream_answer(ws, answer, used_agent, fallback_used)
+                async def emit_delta(piece: str) -> None:
+                    await send_json(ws, {"type": "text_delta", "content": piece})
+
+                answer, used_agent, fallback_used = await call_backend_stream(content, session_key, emit_delta)
+                await finish_answer(ws, answer, used_agent, fallback_used)
             except Exception as exc:
                 await send_json(ws, {"type": "error", "message": f"Tony could not reply: {exc}"})
                 await send_json(ws, {"type": "agent_state", "state": "error"})
@@ -147,7 +143,8 @@ async def agent_ws(ws: WebSocket) -> None:
         return
     finally:
         try:
-            from .main import SESSION_HISTORY
+            from .main import SESSION_HISTORY, SESSION_MEMORY
             SESSION_HISTORY.pop(session_key, None)
+            SESSION_MEMORY.pop(session_key, None)
         except Exception:
             pass
