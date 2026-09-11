@@ -1,4 +1,4 @@
-name: Deploy Tony desktop Agent gateway
+name: Deploy Tony desktop companion
 
 on:
   workflow_dispatch:
@@ -42,9 +42,10 @@ jobs:
             bear_agent_pet/server_gateway/ \
             ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
 
-      - name: Install restart and verify service
+      - name: Install restart and verify Tony chat service
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           ROOT='/home/ubuntu/.local/share/bear-agent'
           APP="$ROOT/app"
@@ -61,47 +62,41 @@ jobs:
           python3 -m venv "$VENV"
           "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
 
-          if [ ! -f "$ENVFILE" ]; then
-            cat > "$ENVFILE" <<'ENV'
-          BEAR_AGENT_REQUIRE_AUTH=false
-          BEAR_OPENCLAW_AGENT=main
-          BEAR_OPENCLAW_TIMEOUT=240
-          BEAR_TONY_PERSONA=true
-          BEAR_LOCAL_MODEL=qwen3.5-2b-q4
-          BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions
-          BEAR_LOCAL_MODEL_TIMEOUT=90
-          BEAR_LOCAL_MAX_TOKENS=220
-          OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
-          ENV
-            chmod 600 "$ENVFILE"
-          fi
-          grep -q '^BEAR_TONY_PERSONA=' "$ENVFILE" || printf '%s\n' 'BEAR_TONY_PERSONA=true' >> "$ENVFILE"
-          grep -q '^BEAR_LOCAL_MODEL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL=qwen3.5-2b-q4' >> "$ENVFILE"
-          grep -q '^BEAR_LOCAL_MODEL_URL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions' >> "$ENVFILE"
-          grep -q '^BEAR_LOCAL_MODEL_TIMEOUT=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_TIMEOUT=90' >> "$ENVFILE"
-          if grep -q '^BEAR_LOCAL_MAX_TOKENS=' "$ENVFILE"; then
-            sed -i 's/^BEAR_LOCAL_MAX_TOKENS=.*/BEAR_LOCAL_MAX_TOKENS=220/' "$ENVFILE"
-          else
-            printf '%s\n' 'BEAR_LOCAL_MAX_TOKENS=220' >> "$ENVFILE"
-          fi
+          touch "$ENVFILE"
+          chmod 600 "$ENVFILE"
+          set_env() {
+            key="$1"; value="$2"
+            if grep -q "^${key}=" "$ENVFILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENVFILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENVFILE"
+            fi
+          }
+          set_env BEAR_AGENT_REQUIRE_AUTH false
+          set_env BEAR_TONY_PERSONA true
+          set_env BEAR_LOCAL_MODEL qwen3.5-2b-q4
+          set_env BEAR_LOCAL_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
+          set_env BEAR_LOCAL_MODEL_TIMEOUT 55
+          set_env BEAR_LOCAL_MAX_TOKENS 48
 
           sudo systemctl enable "$LOCAL_SERVICE"
           if ! systemctl is-active --quiet "$LOCAL_SERVICE"; then
             sudo systemctl restart "$LOCAL_SERVICE"
           fi
-          local_ready=0
+
+          ready=0
           for i in $(seq 1 60); do
             if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-local-models.json 2>/dev/null; then
-              local_ready=1
+              ready=1
               break
             fi
             sleep 2
           done
-          test "$local_ready" -eq 1
+          test "$ready" -eq 1
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
-          Description=Tony Desktop Agent OpenClaw WebSocket Gateway
+          Description=Tony English Boyfriend Desktop Companion Gateway
           After=network-online.target rhocodec-llm.service
           Wants=network-online.target rhocodec-llm.service
 
@@ -134,68 +129,35 @@ jobs:
           done
           test "$ready" -eq 1
 
-          echo '=== TONY GATEWAY HEALTH ==='
           cat /tmp/tony-health.json
-          echo
-          python3 - <<'PY'
+          "$VENV/bin/python" - <<'PY'
           import json
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
-          assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.8.0', d
-          assert d['tony_persona'] is True, d
-          assert d['technical_agent'] == 'main', d
-          assert d['local_model'] == 'qwen3.5-2b-q4', d
-          assert d['pairing_supported'] is True, d
-          assert d['local_tool_protocol'] == '1', d
-          assert d['arbitrary_shell'] is False, d
-          assert 'capture_screen' in d['local_tools'], d
-          print('TONY_GATEWAY_HEALTH=PASS')
+          assert d['service'] == 'Tony Desktop Companion', d
+          assert d['version'] == '0.8.1', d
+          assert d['backend'] == 'local-qwen-chat-only', d
+          assert d['language'] == 'English', d
+          assert d['persona'] == 'Paula-boyfriend', d
+          assert d['chat_only'] is True, d
+          assert d['local_tools_enabled'] is False, d
+          assert d['openclaw_enabled'] is False, d
+          print('TONY_CHAT_GATEWAY_HEALTH=PASS')
           PY
 
-          echo '=== PAIRING CONTRACT ==='
-          cd "$APP"
-          BEAR_PAIRING_STORE=/tmp/tony-pairing-contract.json "$VENV/bin/python" - <<'PY'
-          from pathlib import Path
-          from app.pairing import issue_pairing_code, consume_pairing_code, token_valid, revoke_device
-          p=Path('/tmp/tony-pairing-contract.json')
-          p.unlink(missing_ok=True)
-          code, expires_at = issue_pairing_code(120)
-          assert len(code.replace('-', '')) == 12
-          assert expires_at > 0
-          token, device_id = consume_pairing_code(code, 'GitHub Actions')
-          assert token_valid(token)
-          assert revoke_device(device_id)
-          assert not token_valid(token)
-          p.unlink(missing_ok=True)
-          print('TONY_PAIRING_CONTRACT=PASS')
-          PY
-
-          echo '=== ROUTER AND LOCAL TOOL PLANNER CONTRACT ==='
-          "$VENV/bin/python" - <<'PY'
-          from app.main import action_for_text, route_backends
-          from app.local_tools import plan_local_tool
-          assert route_backends('Can I have a hug?')[0] == 'local-qwen'
-          assert route_backends('Check my VASP server job')[0] == 'openclaw-main'
-          assert action_for_text('Paula is here')[0] == 'blush_wave'
-          assert action_for_text('It is freezing')[0] == 'shiver'
-          assert action_for_text('Can I have a hug?')[0] == 'ask_hug'
-          assert plan_local_tool('Tony, take a screenshot')['tool'] == 'capture_screen'
-          assert plan_local_tool('Tony, read my clipboard')['tool'] == 'read_clipboard'
-          assert plan_local_tool('Tony, open https://example.com')['tool'] == 'open_url'
-          assert plan_local_tool('Tony, run PowerShell') is None
-          print('TONY_ROUTER_CONTRACT=PASS')
-          print('TONY_LOCAL_TOOL_PLANNER=PASS')
-          PY
-
-          echo '=== LOCAL QWEN NO-THINK COMPLETION ==='
+          echo '=== LOCAL BOYFRIEND CHAT SMOKE ==='
           "$VENV/bin/python" - <<'PY'
           import json, urllib.request
+          from app.main import TONY_PERSONA
           payload={
             'model':'qwen3.5-2b-q4',
-            'messages':[{'role':'user','content':'Reply exactly with: TONY_LOCAL_QWEN_OK\n/no_think'}],
-            'temperature':0,
-            'max_tokens':64,
+            'messages':[
+              {'role':'system','content':TONY_PERSONA},
+              {'role':'user','content':'Paula says: I missed you today. Reply naturally.\n/no_think'}
+            ],
+            'temperature':0.8,
+            'top_p':0.9,
+            'max_tokens':40,
             'stream':False,
             'reasoning_budget':0,
             'chat_template_kwargs':{'enable_thinking':False},
@@ -204,81 +166,16 @@ jobs:
             'http://127.0.0.1:18080/v1/chat/completions',
             data=json.dumps(payload).encode(),
             headers={'Content-Type':'application/json'}, method='POST')
-          with urllib.request.urlopen(req, timeout=90) as r:
+          with urllib.request.urlopen(req, timeout=65) as r:
             d=json.load(r)
-          msg=((d.get('choices') or [{}])[0].get('message') or {})
-          text=str(msg.get('content') or '').strip()
-          assert 'TONY_LOCAL_QWEN_OK' in text, d
-          print('TONY_LOCAL_QWEN_NO_THINK=PASS')
-          print('VISIBLE_TEXT=', text[:200].replace('\n',' '))
+          text=str(((d.get('choices') or [{}])[0].get('message') or {}).get('content') or '').strip()
+          assert text, d
+          assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), text
+          print('TONY_LOCAL_BOYFRIEND_CHAT=PASS')
+          print('TONY_SAMPLE=', text[:300].replace('\n',' '))
           PY
 
-          echo '=== OPENCLAW CONTROL PLANE ==='
-          export PATH="/home/ubuntu/.npm-global/bin:$PATH"
-          /home/ubuntu/.npm-global/bin/openclaw gateway status --deep --json >/tmp/tony-openclaw-status.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open('/tmp/tony-openclaw-status.json'))
-          assert ((d.get('service') or {}).get('runtime') or {}).get('status') == 'running', d
-          assert (d.get('rpc') or {}).get('ok') is True, d
-          print('TONY_OPENCLAW_CONTROL_PLANE=PASS')
-          PY
-
-          echo '=== WEBSOCKET LOCAL BRIDGE CONTRACT ==='
-          "$VENV/bin/python" - <<'PY'
-          import asyncio, json
-          import websockets
-
-          async def recv_json(ws, timeout=5):
-              return json.loads(await asyncio.wait_for(ws.recv(), timeout))
-
-          async def main():
-              async with websockets.connect('ws://127.0.0.1:18790/agent/ws') as ws:
-                  first=await recv_json(ws)
-                  second=await recv_json(ws)
-                  assert first == {'type':'agent_state','state':'idle'}, first
-                  assert second.get('type') == 'avatar_action', second
-
-                  await ws.send(json.dumps({
-                      'type':'client_hello',
-                      'protocol_version':'1',
-                      'client':'ci',
-                      'client_version':'0',
-                      'capabilities':['capture_screen']
-                  }))
-                  ack=await recv_json(ws)
-                  assert ack.get('type') == 'client_hello_ack', ack
-                  assert 'capture_screen' in ack.get('accepted_capabilities', []), ack
-
-                  await ws.send(json.dumps({'type':'message','content':'Tony, take a screenshot'}))
-                  request=None
-                  for _ in range(8):
-                      event=await recv_json(ws)
-                      if event.get('type') == 'tool_request':
-                          request=event
-                          break
-                  assert request is not None, 'tool_request not received'
-                  assert request.get('tool') == 'capture_screen', request
-                  await ws.send(json.dumps({
-                      'type':'tool_result',
-                      'request_id':request['request_id'],
-                      'tool':'capture_screen',
-                      'ok':True,
-                      'result':{'path':'C:\\Users\\ci\\Pictures\\Tony\\shot.png','width':1920,'height':1080,'uploaded':False}
-                  }))
-                  final=None
-                  for _ in range(12):
-                      event=await recv_json(ws)
-                      if event.get('type') == 'final':
-                          final=event
-                          break
-                  assert final is not None, 'final not received after tool_result'
-                  assert 'shot.png' in final.get('content',''), final
-                  print('TONY_WEBSOCKET_LOCAL_BRIDGE=PASS')
-          asyncio.run(main())
-          PY
-
-          systemctl --no-pager --full status bear-agent-gateway.service | head -n 24
+          systemctl --no-pager --full status bear-agent-gateway.service | head -n 18
           REMOTE
 
       - name: Remove SSH key
