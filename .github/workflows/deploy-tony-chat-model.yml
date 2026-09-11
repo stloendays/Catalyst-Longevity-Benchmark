@@ -16,7 +16,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Prepare SSH key
         env:
@@ -29,35 +29,67 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Download and activate Qwen3.5 0.8B Q4
+      - name: Download Qwen3.5 0.8B and keep Qwen3.5 2B
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
             -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
           ROOT='/opt/rhocodec-llm'
-          MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
-          TMP="$MODEL.part"
-          URL='https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
-          ALIAS='tony-qwen3.5-0.8b-q4'
+          FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
+          FAST_TMP="$FAST_MODEL.part"
+          QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+          MIRROR_URL='https://hf-mirror.com/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
+          OFFICIAL_URL='https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
 
           mkdir -p "$ROOT/models"
-          if [ ! -s "$MODEL" ]; then
-            echo 'Downloading the official ggml-org Qwen3.5-0.8B Q4_0 GGUF...'
-            curl -fL -C - --retry 12 --retry-all-errors --retry-delay 4 \
-              --connect-timeout 30 --speed-time 120 --speed-limit 1024 \
-              -o "$TMP" "$URL"
-            test "$(stat -c '%s' "$TMP")" -gt 500000000
-            mv -f "$TMP" "$MODEL"
+          echo '=== PRESERVED QUALITY MODEL ==='
+          if [ -s "$QUALITY_MODEL" ]; then
+            ls -lh "$QUALITY_MODEL"
+            echo 'Qwen3.5 2B Q4 is preserved and will not be deleted.'
+          else
+            echo 'Qwen3.5 2B Q4 is not present at the expected path; this workflow will not create or delete it.'
           fi
 
-          echo '=== MODEL FILE ==='
-          ls -lh "$MODEL"
-          sha256sum "$MODEL"
+          if [ ! -s "$FAST_MODEL" ]; then
+            echo 'Downloading Qwen3.5 0.8B Q4_0; mirror first for mainland/Tencent connectivity.'
+            download_model() {
+              url="$1"
+              label="$2"
+              echo "Trying $label"
+              curl -fL -C - --retry 8 --retry-all-errors --retry-delay 4 \
+                --connect-timeout 20 --speed-time 120 --speed-limit 1024 \
+                -o "$FAST_TMP" "$url"
+            }
+            if ! download_model "$MIRROR_URL" 'hf-mirror.com'; then
+              echo 'Mirror failed; falling back to official Hugging Face.'
+              download_model "$OFFICIAL_URL" 'huggingface.co'
+            fi
+            test "$(stat -c '%s' "$FAST_TMP")" -gt 500000000
+            mv -f "$FAST_TMP" "$FAST_MODEL"
+          fi
+
+          echo '=== AVAILABLE TONY MODELS ==='
+          ls -lh "$ROOT/models"/Qwen3.5-0.8B-Q4_0.gguf "$ROOT/models"/Qwen3.5-2B-Q4_K_M.gguf 2>/dev/null || true
+          sha256sum "$FAST_MODEL"
+          REMOTE
+
+      - name: Install dual-model selector and activate fast mode
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=120 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/opt/rhocodec-llm'
+          ACTIVE_ENV="$ROOT/active-model.env"
+          FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
+          QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+          GATEWAY_ENV='/home/ubuntu/.local/share/bear-agent/bear-agent.env'
 
           test -x "$ROOT/bin/llama-server"
-          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<UNIT
+          test -s "$FAST_MODEL"
+
+          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
           [Unit]
-          Description=Tony local Qwen3.5 0.8B Q4 chat server
+          Description=Tony selectable local Qwen chat server
           After=network-online.target
           Wants=network-online.target
 
@@ -65,34 +97,117 @@ jobs:
           Type=simple
           User=ubuntu
           Group=ubuntu
-          WorkingDirectory=$ROOT/bin
+          WorkingDirectory=/opt/rhocodec-llm/bin
           Environment=HOME=/home/ubuntu
-          Environment=LD_LIBRARY_PATH=$ROOT/bin
-          ExecStart=$ROOT/bin/llama-server -m $MODEL -a $ALIAS --host 127.0.0.1 --port 18080 -c 1024 -t 4 -b 64 -ub 64 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          Environment=LD_LIBRARY_PATH=/opt/rhocodec-llm/bin
+          EnvironmentFile=/opt/rhocodec-llm/active-model.env
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m ${TONY_MODEL_PATH} -a ${TONY_MODEL_ALIAS} --host 127.0.0.1 --port 18080 -c ${TONY_CONTEXT} -t 4 -b ${TONY_BATCH} -ub ${TONY_UBATCH} --parallel 1 --jinja --reasoning-budget 0 --no-webui
           Restart=on-failure
           RestartSec=3
-          TimeoutStartSec=120
+          TimeoutStartSec=180
           LimitNOFILE=65535
 
           [Install]
           WantedBy=multi-user.target
           UNIT
 
+          sudo tee /usr/local/bin/tony-model >/dev/null <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          ROOT='/opt/rhocodec-llm'
+          ACTIVE_ENV="$ROOT/active-model.env"
+          GATEWAY_ENV='/home/ubuntu/.local/share/bear-agent/bear-agent.env'
+          FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
+          QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+
+          set_gateway_env() {
+            key="$1"; value="$2"
+            [ -f "$GATEWAY_ENV" ] || return 0
+            if grep -q "^${key}=" "$GATEWAY_ENV"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$GATEWAY_ENV"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$GATEWAY_ENV"
+            fi
+          }
+
+          show_status() {
+            echo '=== Tony model selector ==='
+            cat "$ACTIVE_ENV" 2>/dev/null || true
+            echo '=== Model files ==='
+            ls -lh "$FAST_MODEL" "$QUALITY_MODEL" 2>/dev/null || true
+            echo '=== Runtime ==='
+            curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models 2>/dev/null || true
+            echo
+          }
+
+          case "${1:-status}" in
+            fast|0.8b|08b)
+              test -s "$FAST_MODEL"
+              cat > "$ACTIVE_ENV" <<EOF
+          TONY_MODEL_PATH=$FAST_MODEL
+          TONY_MODEL_ALIAS=tony-qwen3.5-0.8b-q4
+          TONY_CONTEXT=1024
+          TONY_BATCH=64
+          TONY_UBATCH=64
+          EOF
+              set_gateway_env BEAR_LOCAL_MODEL tony-qwen3.5-0.8b-q4
+              set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 35
+              set_gateway_env BEAR_LOCAL_MAX_TOKENS 48
+              MODE='fast / Qwen3.5 0.8B Q4'
+              ;;
+            quality|2b)
+              test -s "$QUALITY_MODEL"
+              cat > "$ACTIVE_ENV" <<EOF
+          TONY_MODEL_PATH=$QUALITY_MODEL
+          TONY_MODEL_ALIAS=tony-qwen3.5-2b-q4
+          TONY_CONTEXT=1536
+          TONY_BATCH=64
+          TONY_UBATCH=64
+          EOF
+              set_gateway_env BEAR_LOCAL_MODEL tony-qwen3.5-2b-q4
+              set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 65
+              set_gateway_env BEAR_LOCAL_MAX_TOKENS 48
+              MODE='quality / Qwen3.5 2B Q4'
+              ;;
+            status)
+              show_status
+              exit 0
+              ;;
+            *)
+              echo 'Usage: tony-model {fast|0.8b|quality|2b|status}' >&2
+              exit 2
+              ;;
+          esac
+
+          echo "Switching Tony to $MODE"
           sudo systemctl daemon-reload
-          sudo systemctl enable rhocodec-llm.service
+          sudo systemctl enable rhocodec-llm.service >/dev/null
           sudo systemctl restart rhocodec-llm.service
 
           ready=0
-          for i in $(seq 1 60); do
-            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-fast-models.json 2>/dev/null; then
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-models.json 2>/dev/null; then
               ready=1
               break
             fi
             sleep 2
           done
           test "$ready" -eq 1
-          cat /tmp/tony-fast-models.json
-          grep -q "$ALIAS" /tmp/tony-fast-models.json
+          cat /tmp/tony-models.json
+
+          if systemctl list-unit-files bear-agent-gateway.service >/dev/null 2>&1; then
+            sudo systemctl restart bear-agent-gateway.service || true
+          fi
+          show_status
+          SCRIPT
+          sudo chmod 0755 /usr/local/bin/tony-model
+          sudo chown ubuntu:ubuntu "$ROOT"
+          sudo chown ubuntu:ubuntu "$ROOT/models" "$FAST_MODEL"
+          if [ -s "$QUALITY_MODEL" ]; then sudo chown ubuntu:ubuntu "$QUALITY_MODEL"; fi
+          sudo touch "$ACTIVE_ENV"
+          sudo chown ubuntu:ubuntu "$ACTIVE_ENV"
+
+          /usr/local/bin/tony-model fast
 
           echo '=== LATENCY SMOKE ==='
           python3 - <<'PY'
