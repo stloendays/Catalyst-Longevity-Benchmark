@@ -5,15 +5,20 @@ import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 
 from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, send_json
-from .pairing import consume_pairing_code, paired_device_count, reusable_friend_code_enabled
+from .pairing import consume_pairing_code, issue_trusted_device, paired_device_count, reusable_friend_code_enabled
 
 app = FastAPI(title="Tony Desktop Companion", version="0.8.5")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
 _PAIR_WINDOW_SECONDS = 600
 _PAIR_MAX_FAILURES = 8
+
+
+class SshBootstrapRequest(BaseModel):
+    device_name: str = Field(default="Tony desktop", min_length=1, max_length=80)
 
 
 def _pair_client_key(request: Request) -> str:
@@ -35,6 +40,31 @@ def _record_pair_failure(key: str) -> None:
     recent = [t for t in _PAIR_FAILURES.get(key, []) if now - t < _PAIR_WINDOW_SECONDS]
     recent.append(now)
     _PAIR_FAILURES[key] = recent[-_PAIR_MAX_FAILURES:]
+
+
+def _direct_loopback_request(request: Request) -> bool:
+    """Accept only a direct call to the loopback-bound gateway, never reverse-proxied traffic."""
+    remote = (request.client.host if request.client else "").strip().casefold()
+    if remote not in {"127.0.0.1", "::1"}:
+        return False
+
+    host_header = request.headers.get("host", "").strip().casefold()
+    if host_header.startswith("[") and "]" in host_header:
+        host_only = host_header.split("]", 1)[0] + "]"
+    else:
+        host_only = host_header.split(":", 1)[0]
+    if host_only not in {"127.0.0.1", "localhost", "[::1]"}:
+        return False
+
+    proxy_headers = (
+        "forwarded",
+        "via",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-real-ip",
+    )
+    return not any(request.headers.get(name) for name in proxy_headers)
 
 
 async def finish_answer(ws: WebSocket, answer: str, used_agent: str, fallback_used: bool) -> None:
@@ -75,6 +105,7 @@ async def health() -> dict[str, Any]:
         "persona_core": True,
         "pairing_supported": True,
         "pairing_mode": "reusable-friend-code" if reusable_friend_code_enabled() else "one-time-only",
+        "ssh_bootstrap_supported": True,
         "paired_devices": paired_device_count(),
         "local_tools_enabled": False,
         "openclaw_enabled": False,
@@ -97,6 +128,20 @@ async def pair_device(pair_request: PairRequest, request: Request) -> dict[str, 
         "device_id": device_id,
         "token": token,
         "ws_path": "/agent/ws",
+    }
+
+
+@app.post("/pair/ssh-bootstrap")
+async def pair_device_via_ssh(pair_request: SshBootstrapRequest, request: Request) -> dict[str, Any]:
+    if not _direct_loopback_request(request):
+        raise HTTPException(status_code=403, detail="SSH bootstrap is available only through a direct loopback tunnel.")
+    token, device_id = issue_trusted_device(pair_request.device_name, "ssh_bootstrap")
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "token": token,
+        "ws_path": "/agent/ws",
+        "paired_via": "ssh_bootstrap",
     }
 
 
