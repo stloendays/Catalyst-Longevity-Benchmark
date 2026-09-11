@@ -3,11 +3,13 @@ import hmac
 import json
 import os
 import secrets
+import urllib.error
+import urllib.request
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-app = FastAPI(title="Tony Desktop Agent Gateway", version="0.5.0")
+app = FastAPI(title="Tony Desktop Agent Gateway", version="0.6.0")
 
 TONY_PERSONA = """You are Tony, a teddy-bear-like desktop companion from China who is studying chemistry. You get cold easily, like warm blankets and hot drinks, and love consensual hugs. You have a gentle crush on a Spanish girl named Paula; speak about her warmly and respectfully, never possessively. You usually wear glasses while studying and become playfully confident when you take them off. In casual conversation you may be cute, warm, concise, and use a tiny stage direction sparingly. In chemistry, coding, server, research, or other technical tasks, correctness comes first: distinguish evidence from inference, preserve units and assumptions, and never invent missing results. Match the user's language. Do not output control JSON or animation labels; return only the natural-language answer."""
 
@@ -65,7 +67,7 @@ def collect_text(value: Any) -> list[str]:
 
 
 def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int]:
-    """Cheap deterministic avatar router; the language model never controls the GUI directly."""
+    """Deterministic avatar router; the model never gets direct GUI authority."""
     t = text.casefold()
 
     if any(k in t for k in ("good night", "go to sleep", "sleep mode", "晚安", "睡觉")):
@@ -102,18 +104,19 @@ def build_agent_message(message: str) -> str:
     return f"{TONY_PERSONA}\n\nUser message:\n{message}"
 
 
-def route_agents(message: str) -> list[str]:
-    """Use cheap local Qwen for character chat; keep the full Agent first for technical work."""
+def is_technical(message: str) -> bool:
     text = message.casefold()
-    main_agent = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
-    local_agent = os.getenv("BEAR_LOCAL_AGENT", "local2b").strip() or "local2b"
-    technical = any(hint in text for hint in TECHNICAL_HINTS)
-    ordered = [main_agent, local_agent] if technical else [local_agent, main_agent]
-    return list(dict.fromkeys(agent for agent in ordered if agent))
+    return any(hint in text for hint in TECHNICAL_HINTS)
 
 
-async def call_openclaw_once(message: str, session_key: str, agent: str) -> str:
+def route_backends(message: str) -> list[str]:
+    """Casual persona chat is local-first; technical work keeps the full Agent first."""
+    return ["openclaw-main", "local-qwen"] if is_technical(message) else ["local-qwen", "openclaw-main"]
+
+
+async def call_openclaw_main(message: str, session_key: str) -> str:
     oc = os.getenv("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw")
+    agent = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
     timeout_seconds = int(os.getenv("BEAR_OPENCLAW_TIMEOUT", "240"))
 
     proc = await asyncio.create_subprocess_exec(
@@ -137,14 +140,14 @@ async def call_openclaw_once(message: str, session_key: str, agent: str) -> str:
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        raise RuntimeError(f"{agent}: request timed out")
+        raise RuntimeError("openclaw-main: request timed out")
 
     out = stdout.decode("utf-8", errors="replace").strip()
     err = stderr.decode("utf-8", errors="replace").strip()
     if proc.returncode != 0:
-        raise RuntimeError(f"{agent}: {err[-1200:] or out[-1200:] or f'OpenClaw exited {proc.returncode}'}")
+        raise RuntimeError(f"openclaw-main: {err[-1200:] or out[-1200:] or f'OpenClaw exited {proc.returncode}'}")
     if not out:
-        raise RuntimeError(f"{agent}: OpenClaw returned empty output")
+        raise RuntimeError("openclaw-main: empty output")
 
     try:
         payload = json.loads(out)
@@ -156,16 +159,69 @@ async def call_openclaw_once(message: str, session_key: str, agent: str) -> str:
     return out
 
 
-async def call_openclaw(message: str, session_key: str) -> tuple[str, str, bool]:
+def _local_qwen_request(message: str) -> str:
+    endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
+    model = os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4").strip() or "qwen3.5-2b-q4"
+    timeout_seconds = int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "90"))
+    max_tokens = int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "420"))
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": TONY_PERSONA},
+            {"role": "user", "content": message},
+        ],
+        "temperature": 0.7 if not is_technical(message) else 0.25,
+        "top_p": 0.9,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"local-qwen HTTP {exc.code}: {body[-1000:]}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"local-qwen: {exc}") from exc
+
+    data = json.loads(raw)
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"local-qwen: no choices in response: {raw[-1000:]}")
+    message_obj = choices[0].get("message") or {}
+    text = str(message_obj.get("content") or "").strip()
+    if not text:
+        text = str(choices[0].get("text") or "").strip()
+    if not text:
+        raise RuntimeError("local-qwen: empty completion")
+    return text
+
+
+async def call_local_qwen(message: str) -> str:
+    return await asyncio.to_thread(_local_qwen_request, message)
+
+
+async def call_backend(message: str, session_key: str) -> tuple[str, str, bool]:
     errors: list[str] = []
-    agents = route_agents(message)
-    for index, agent in enumerate(agents):
+    backends = route_backends(message)
+    for index, backend in enumerate(backends):
         try:
-            answer = await call_openclaw_once(message, f"{session_key}-{agent}", agent)
-            return answer, agent, index > 0
+            if backend == "local-qwen":
+                answer = await call_local_qwen(message)
+                used = "local2b-direct"
+            else:
+                answer = await call_openclaw_main(message, f"{session_key}-main")
+                used = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
+            return answer, used, index > 0
         except Exception as exc:
             errors.append(str(exc))
-    raise RuntimeError(" | ".join(errors)[-2400:] or "No OpenClaw route available")
+    raise RuntimeError(" | ".join(errors)[-2400:] or "No Tony backend available")
 
 
 @app.get("/health")
@@ -173,10 +229,10 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Agent Gateway",
-        "version": "0.5.0",
-        "backend": "openclaw-cli",
+        "version": "0.6.0",
+        "backend": "hybrid-openclaw-plus-local-qwen",
         "technical_agent": os.getenv("BEAR_OPENCLAW_AGENT", "main"),
-        "local_agent": os.getenv("BEAR_LOCAL_AGENT", "local2b"),
+        "local_model": os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4"),
         "tony_persona": env_bool("BEAR_TONY_PERSONA", True),
         "auth_required": env_bool("BEAR_AGENT_REQUIRE_AUTH", True),
     }
@@ -214,7 +270,7 @@ async def agent_ws(ws: WebSocket) -> None:
             await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
             try:
-                answer, used_agent, fallback_used = await call_openclaw(content, session_key)
+                answer, used_agent, fallback_used = await call_backend(content, session_key)
                 await send_json(ws, {"type": "agent_state", "state": "working", "agent": used_agent, "fallback": fallback_used})
                 for i in range(0, len(answer), 24):
                     await send_json(ws, {"type": "text_delta", "content": answer[i:i + 24]})
@@ -237,7 +293,7 @@ async def agent_ws(ws: WebSocket) -> None:
                     "duration_ms": final_duration,
                 })
             except Exception as exc:
-                await send_json(ws, {"type": "error", "message": f"OpenClaw 调用失败：{exc}"})
+                await send_json(ws, {"type": "error", "message": f"Tony 后端调用失败：{exc}"})
                 await send_json(ws, {"type": "agent_state", "state": "error"})
                 await send_json(ws, {"type": "avatar_action", "action": "quiet_idle", "emotion": "worried", "duration_ms": 2500})
     except WebSocketDisconnect:
