@@ -55,6 +55,7 @@ private:
     QTimer reconnectTimer_;
     QTimer connectWatchdog_;
     QTimer pairingPollTimer_;
+    int reconnectDelayMs_{1000};
     QUrl pairingWsUrl_;
     QString pairingRequestId_;
     qint64 pairingExpiresAt_{0};
@@ -62,5 +63,4 @@ private:
     QString bearerToken_;
     QString language_{"en"};
     bool outageReported_{false};
-    int reconnectDelayMs_{1000};
 };

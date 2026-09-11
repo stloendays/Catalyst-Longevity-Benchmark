@@ -55,11 +55,11 @@ SettingsDialog::SettingsDialog(UpdateManager *updater, QWidget *parent)
     auto *connection = new QGroupBox(trUi("Connection", "连接"), general);
     auto *connectionLayout = new QVBoxLayout(connection);
     auto *connectionText = new QLabel(
-        trUi("Tony reconnects automatically with the device token stored on this computer. You normally do not need to sign in again.",
-             "Tony 会使用保存在这台电脑上的设备令牌自动重连，通常不需要再次登录。"), connection);
+        trUi("Tony reconnects automatically with the device token stored on this computer. Use the button below to test the secure server path or create a fresh pairing code.",
+             "Tony 会使用保存在这台电脑上的设备令牌自动重连。可使用下方按钮测试安全连接，或重新生成配对码。"), connection);
     connectionText->setWordWrap(true);
     connectionLayout->addWidget(connectionText);
-    auto *reconnectButton = new QPushButton(trUi("Pair / reconnect this computer…", "配对 / 重新连接这台电脑…"), connection);
+    auto *reconnectButton = new QPushButton(trUi("Test connection / pair this computer…", "测试连接 / 配对这台电脑…"), connection);
     connectionLayout->addWidget(reconnectButton, 0, Qt::AlignLeft);
     generalLayout->addWidget(connection);
     generalLayout->addStretch(1);
