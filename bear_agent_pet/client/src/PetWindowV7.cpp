@@ -74,9 +74,23 @@ PetWindow::PetWindow(QWidget *parent)
     loadAssets();
     restorePosition();
 
-    animTimer_.setInterval(40);
+    // Calm desktop-companion cadence: animation is deliberately low-frame-rate.
+    // At normal idle Tony stays still; only an occasional blink/wink changes the sprite.
+    animTimer_.setInterval(70);
     connect(&animTimer_, &QTimer::timeout, this, &PetWindow::tickAnimation);
     animTimer_.start();
+
+    blinkTimer_.setSingleShot(true);
+    connect(&blinkTimer_, &QTimer::timeout, this, [this]{
+        if(action_==Action::Idle && agentState_=="idle" && !dragging_ && !composer_.isVisible()) {
+            idleBlinking_=true;
+            idleBlinkTick_=0;
+            update();
+        } else {
+            scheduleBlink();
+        }
+    });
+    scheduleBlink();
 
     idleTimer_.setSingleShot(true);
     connect(&idleTimer_, &QTimer::timeout, this, &PetWindow::runIdleMoment);
@@ -283,6 +297,23 @@ int PetWindow::frameStrideForAction(Action action) const {
 const QPixmap *PetWindow::pixmapForAction(Action action) const {
     const QString key=assetKeyForAction(action);
     auto framesIt=animationAssets_.constFind(key);
+
+    // Idle is not a looping animation. Keep the normal pose fixed and only
+    // play the existing idle face frames during the short blink window.
+    if(action==Action::Idle) {
+        if(idleBlinking_ && framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) {
+            static constexpr int blinkSequence[] = {0, 1, 2, 2, 1, 0, 0};
+            const int sequenceSize=static_cast<int>(sizeof(blinkSequence)/sizeof(blinkSequence[0]));
+            const int step=qBound(0,idleBlinkTick_,sequenceSize-1);
+            const int index=blinkSequence[step] % framesIt.value().size();
+            return &framesIt.value().at(index);
+        }
+        auto idleIt=stateAssets_.constFind("idle");
+        if(idleIt!=stateAssets_.constEnd()) return &idleIt.value();
+        if(framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty())
+            return &framesIt.value().first();
+    }
+
     if(framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) {
         const int stride=qMax(1,frameStrideForAction(action));
         const int index=(frame_/stride)%framesIt.value().size();
@@ -304,11 +335,14 @@ void PetWindow::paintEvent(QPaintEvent*) {
     int dx=0, dy=0;
     qreal scale=1.0, rotation=0.0;
     switch(action_) {
-    case Action::Idle: dy=int(2*qSin(t)); scale=1.0+0.006*qSin(t*.55); break;
-    case Action::Bob: dy=int(5*qSin(t*1.5)); scale=1.0+0.008*qSin(t*.65); break;
-    case Action::Walk: dy=-qAbs(int(2*qSin(t*2.2))); rotation=1.2*qSin(t*2.2); break;
-    case Action::Think: dy=int(2*qSin(t)); rotation=-1.4+0.8*qSin(t*.7); scale=1.0+0.009*qSin(t*.8); break;
-    case Action::Celebrate: dy=-qAbs(int(10*qSin(t*1.8))); scale=1.0+0.025*qSin(t*1.8); rotation=2.5*qSin(t*1.8); break;
+    case Action::Idle:
+        // Normal desktop state is intentionally motionless. The face sprite
+        // handles the occasional blink; no perpetual bobbing or breathing zoom.
+        break;
+    case Action::Bob: dy=int(2*qSin(t*.65)); scale=1.0+0.003*qSin(t*.45); break;
+    case Action::Walk: dy=-qAbs(int(qSin(t*1.25))); rotation=.7*qSin(t*1.25); break;
+    case Action::Think: rotation=-.7+.35*qSin(t*.45); scale=1.0+0.003*qSin(t*.4); break;
+    case Action::Celebrate: dy=-qAbs(int(6*qSin(t*1.05))); scale=1.0+0.015*qSin(t*1.05); rotation=1.4*qSin(t*1.05); break;
     case Action::Sleep: dy=int(qSin(t*.35)); scale=.99+0.008*qSin(t*.35); rotation=-1.5; break;
     case Action::Shiver: dx=(frame_%4<2)?-2:2; dy=int(qSin(t)); scale=.995; break;
     case Action::AskHug: dy=-qAbs(int(3*qSin(t*1.2))); scale=1.01+0.018*qSin(t*.9); rotation=1.0*qSin(t*.7); break;
@@ -358,6 +392,12 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
 void PetWindow::setAction(Action a,int durationMs){
     action_=a; frame_=0; basePos_=pos();
+    if(a!=Action::Idle) {
+        idleBlinking_=false;
+        idleBlinkTick_=0;
+    } else if(!blinkTimer_.isActive()) {
+        scheduleBlink();
+    }
     if(durationMs>0) actionTimer_.start(durationMs); else actionTimer_.stop();
     update();
 }
@@ -371,7 +411,10 @@ PetWindow::Action PetWindow::baseActionForAgentState() const {
 }
 
 void PetWindow::restoreAgentAction(){
-    action_=baseActionForAgentState(); frame_=0; basePos_=pos(); update();
+    action_=baseActionForAgentState(); frame_=0; basePos_=pos();
+    if(action_==Action::Idle && !blinkTimer_.isActive()) scheduleBlink();
+    if(action_!=Action::Idle) { idleBlinking_=false; idleBlinkTick_=0; }
+    update();
 }
 
 PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
@@ -396,11 +439,20 @@ PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
 
 void PetWindow::tickAnimation(){
     ++frame_;
+    if(action_==Action::Idle && idleBlinking_) {
+        ++idleBlinkTick_;
+        if(idleBlinkTick_>=7) {
+            idleBlinking_=false;
+            idleBlinkTick_=0;
+            scheduleBlink();
+        }
+    }
     if(action_==Action::Walk && !dragging_){
         auto screen=QGuiApplication::screenAt(frameGeometry().center());
         if(!screen) screen=QGuiApplication::primaryScreen();
         const auto area=screen->availableGeometry();
-        QPoint n=pos()+QPoint(2*walkDirection_,0);
+        // Slow desktop walk: one pixel per animation tick rather than gliding constantly.
+        QPoint n=pos()+QPoint(1*walkDirection_,0);
         if(n.x()+width()>area.right()) { walkDirection_=-1; n.setX(area.right()-width()); }
         else if(n.x()<area.left()) { walkDirection_=1; n.setX(area.left()); }
         move(n);
@@ -408,10 +460,19 @@ void PetWindow::tickAnimation(){
     const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
     bubble_.follow(anchor);
     composer_.follow(anchor);
-    update();
+    if(action_!=Action::Idle || idleBlinking_) update();
 }
 
-void PetWindow::scheduleIdleMoment(){ idleTimer_.start(QRandomGenerator::global()->bounded(18000,46001)); }
+void PetWindow::scheduleBlink(){
+    if(blinkTimer_.isActive()) return;
+    // Natural but quiet: roughly one blink every 5-11 seconds.
+    blinkTimer_.start(QRandomGenerator::global()->bounded(5000,11001));
+}
+
+void PetWindow::scheduleIdleMoment(){
+    // Autonomous gestures are now rare; the usual state is simply sitting and blinking.
+    idleTimer_.start(QRandomGenerator::global()->bounded(90000,210001));
+}
 
 void PetWindow::runIdleMoment(){
     if(action_!=Action::Idle || dragging_ || agentState_!="idle" || composer_.isVisible()) {
@@ -420,13 +481,13 @@ void PetWindow::runIdleMoment(){
     const int hour=QTime::currentTime().hour();
     const bool night=(hour>=23 || hour<7);
     const int r=QRandomGenerator::global()->bounded(100);
-    if(night && r<22) { emotion_="sleepy"; setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,11001)); }
-    else if(r<12) { emotion_="cold"; setAction(Action::Shiver,2800); showBubble("Brrr... Tony wants somewhere warm.",4200); }
-    else if(r<23) { emotion_="hopeful"; setAction(Action::AskHug,3400); showBubble("Can I have a tiny hug?",4200); }
-    else if(r<36) { emotion_="playful"; setAction(Action::Walk,QRandomGenerator::global()->bounded(4200,7201)); }
-    else if(r<49) { emotion_="curious"; setAction(Action::Think,2400); }
-    else if(r<62) { emotion_="friendly"; setAction(Action::Wave,1800); }
-    else if(r<71) { emotion_="focused"; setAction(Action::AdjustGlasses,2000); }
+    // Most checks intentionally do nothing. Tony should feel present, not restless.
+    if(night && r<10) { emotion_="sleepy"; setAction(Action::Sleep,QRandomGenerator::global()->bounded(6500,9501)); }
+    else if(r<4) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble("Brrr... stay warm with me?",3600); }
+    else if(r<8) { emotion_="hopeful"; setAction(Action::AskHug,2600); showBubble("Can I have a tiny hug?",3600); }
+    else if(r<12) { emotion_="friendly"; setAction(Action::Wave,1400); }
+    else if(r<15) { emotion_="focused"; setAction(Action::AdjustGlasses,1600); }
+    else if(r<17) { emotion_="playful"; setAction(Action::Walk,3200); }
     scheduleIdleMoment();
 }
 
@@ -442,9 +503,8 @@ QString PetWindow::actionName() const {
 }
 
 void PetWindow::enterEvent(QEnterEvent*){
-    if(agentState_=="idle" && action_==Action::Idle && !actionTimer_.isActive() && !dragging_) {
-        emotion_="friendly"; setAction(Action::Wave,1200);
-    }
+    // Hovering should not make Tony constantly wave. Stay calm and let the blink timer work.
+    if(agentState_=="idle" && action_==Action::Idle && !blinkTimer_.isActive()) scheduleBlink();
 }
 void PetWindow::leaveEvent(QEvent*){}
 

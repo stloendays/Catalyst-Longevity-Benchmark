@@ -44,6 +44,7 @@ private:
     Action baseActionForAgentState() const;
     void restoreAgentAction();
     void tickAnimation();
+    void scheduleBlink();
     void scheduleIdleMoment();
     void runIdleMoment();
     void askTony();
@@ -60,6 +61,7 @@ private:
     QHash<QString,QPixmap> stateAssets_;
     QHash<QString,QVector<QPixmap>> animationAssets_;
     QTimer animTimer_;
+    QTimer blinkTimer_;
     QTimer idleTimer_;
     QTimer actionTimer_;
     SshTunnel tunnel_;
@@ -72,6 +74,8 @@ private:
     QPoint dragOffset_;
     QPoint basePos_;
     bool dragging_{false};
+    bool idleBlinking_{false};
+    int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
     QString answer_;
