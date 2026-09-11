@@ -1,0 +1,30 @@
+name: Apply Tony V0.8.2 fullscreen fix
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/scripts/fix_tony_fullscreen_detection.py'
+      - '.github/workflows/_temporary-tony-v082-fullscreen-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+          fetch-depth: 0
+      - run: python3 .github/scripts/fix_tony_fullscreen_detection.py
+      - run: git diff --check
+      - name: Commit fix
+        run: |
+          git config user.name 'Tony Desktop Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add teddy_agent_pet/client/src/PetWindowV7.cpp
+          git commit -m 'Avoid mistaking maximized windows for fullscreen'
+          git push origin HEAD:feature/teddy-agent-pet
