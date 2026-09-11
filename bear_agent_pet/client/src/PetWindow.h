@@ -85,6 +85,8 @@ private:
     void askTony();
     void submitTonyPrompt(const QString &text);
     void hugTony();
+    void startAutomaticPairing();
+    void showCurrentPairingCode(bool copyToClipboard=false);
     void useLocalSshConnection();
     void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
@@ -151,6 +153,8 @@ private:
     QPoint lastCursorGlobal_;
     QPoint walkTarget_;
     QRect windowWalkArea_;
+    QString pairingCode_;
+    qint64 pairingCodeExpiresAt_{0};
     QString answer_;
     QString emotion_{"neutral"};
     QString agentState_{"idle"};
