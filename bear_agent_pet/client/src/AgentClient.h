@@ -18,6 +18,8 @@ public:
                         bool ok,
                         const QJsonObject &result={},
                         const QString &error={});
+    void setLanguage(const QString &language);
+    QString language() const { return language_; }
     bool connected() const;
     QString bearerToken() const { return bearerToken_; }
 signals:
@@ -42,5 +44,6 @@ private:
     QUrl endpoint_;
     QTimer reconnectTimer_;
     QString bearerToken_;
+    QString language_{"en"};
     bool outageReported_{false};
 };
