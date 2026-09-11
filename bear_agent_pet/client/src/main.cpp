@@ -111,9 +111,9 @@ int main(int argc, char *argv[]) {
 
     updater.scheduleStartupCheck();
 
-    // First launch stays non-modal. PetWindow already shows a short connection
-    // hint; the friend-code dialog opens only when the user explicitly chooses
-    // Connect to Tony. This keeps the pet visible instead of covering it at startup.
+    // First launch stays non-modal. An unpaired PetWindow automatically exposes
+    // a short-lived device connection code after Tony is visibly on the desktop.
+    // Settings/reconnect uses the same device-code flow; friend code is recovery-only.
 
     const int result = app.exec();
     qInfo() << "Tony Desktop Pet exiting" << result;

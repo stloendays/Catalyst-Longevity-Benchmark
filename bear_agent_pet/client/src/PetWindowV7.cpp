@@ -1678,7 +1678,7 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
             } else QMessageBox::warning(this,"Tony",uiText("Please enter a valid wss:// address.","请输入有效的 wss:// 地址。"));
         }
     }
-    else if(chosen==manualFriendCode) configureConnection();
+    else if(chosen==manualFriendCode) configureRecoveryConnection();
     else if(chosen==localSsh) useLocalSshConnection();
     else if(chosen==followCursor) {
         followCursor_=followCursor->isChecked();
@@ -1802,6 +1802,10 @@ void PetWindow::showCurrentPairingCode(bool copyToClipboard){
 }
 
 void PetWindow::configureConnection(){
+    startAutomaticPairing();
+}
+
+void PetWindow::configureRecoveryConnection(){
     QSettings s; bool ok=false;
     const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
     if(!endpoint.isValid() || endpoint.scheme().toLower()!="wss" || endpoint.host().isEmpty()) {
