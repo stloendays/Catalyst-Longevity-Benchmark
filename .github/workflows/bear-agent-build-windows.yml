@@ -66,41 +66,67 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read Tony version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid Tony VERSION: $version" }
+          "TONY_VERSION=$version" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "TONY_VERSION=$version"
+
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
           arch: 'win64_msvc2022_64'
           modules: 'qtwebsockets'
           cache: true
+
       - name: Validate Tony state artwork
         shell: pwsh
         run: python bear_agent_pet/client/tools/validate_state_assets.py
+
       - name: Configure
         shell: pwsh
         run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
       - name: Build
         shell: pwsh
         run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
       - name: Deploy Qt runtime and Tony artwork
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path bear_agent_pet/client/package/assets | Out-Null
-          cmake --install bear_agent_pet/client/build --config Release --prefix bear_agent_pet/client/package
+          $package = "$PWD/bear_agent_pet/client/package"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
           if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
-          Copy-Item bear_agent_pet/client/RUN_TONY.md bear_agent_pet/client/package/
-          $projectLine = Get-Content bear_agent_pet/client/CMakeLists.txt | Select-String 'project\(TonyDesktopPet VERSION ([0-9.]+)'
-          $version = $projectLine.Matches[0].Groups[1].Value
-          "TonyDesktopPet $version`ncommit=$env:GITHUB_SHA" | Set-Content bear_agent_pet/client/package/VERSION.txt
-          windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet $env:TONY_VERSION`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
           if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+          $root = (Resolve-Path $package).Path
+          $managed = Get-ChildItem $package -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+          if (-not (Test-Path "$package/tony-install-root.marker")) { throw 'Managed install marker missing' }
+          if (-not (Test-Path "$package/tony-file-list.txt")) { throw 'Managed file list missing' }
+
       - name: Verify packaged artwork and executable
         shell: pwsh
         run: |
           $source = (Resolve-Path bear_agent_pet/client/assets).Path
           $package = (Resolve-Path bear_agent_pet/client/package).Path
-          foreach ($required in @('TonyDesktopPet.exe', 'assets/states', 'assets/animations')) {
+          foreach ($required in @('TonyDesktopPet.exe', 'VERSION', 'VERSION.txt', 'tony-install-root.marker', 'tony-file-list.txt', 'assets/states', 'assets/animations')) {
             if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
           }
+          if ((Get-Content "$package/VERSION" -Raw).Trim() -ne $env:TONY_VERSION) { throw 'Packaged VERSION mismatch' }
+          $productVersion = (Get-Item "$package/TonyDesktopPet.exe").VersionInfo.ProductVersion
+          if ($productVersion -notlike "$env:TONY_VERSION*") { throw "EXE ProductVersion mismatch: $productVersion" }
           foreach ($file in Get-ChildItem $source -File -Recurse) {
             $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
             $deployed = Join-Path "$package/assets" $relative
@@ -109,6 +135,7 @@ jobs:
               throw "Packaged artwork differs: $relative"
             }
           }
+          Write-Host "TONY_VERSION_SYNC=PASS version=$env:TONY_VERSION exe=$productVersion"
           Write-Host 'TONY_PACKAGE_ASSETS=PASS (formal assets validated and all packaged bytes match SHA256)'
           $originalPath = $env:PATH
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
@@ -122,9 +149,10 @@ jobs:
               if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
             }
           } finally { $env:PATH = $originalPath }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: TonyDesktopPet-windows-x64
+          name: TonyDesktopPet-${{ steps.version.outputs.version }}-windows-x64
           path: bear_agent_pet/client/package
           if-no-files-found: error
 
@@ -133,8 +161,7 @@ jobs:
         id: update_package
         shell: pwsh
         run: |
-          $projectLine = Get-Content bear_agent_pet/client/CMakeLists.txt | Select-String 'project\(TonyDesktopPet VERSION ([0-9.]+)'
-          $version = $projectLine.Matches[0].Groups[1].Value
+          $version = $env:TONY_VERSION
           $zip = Join-Path $PWD 'TonyDesktopPet-windows-x64.zip'
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path bear_agent_pet/client/package/* -DestinationPath $zip -CompressionLevel Optimal
