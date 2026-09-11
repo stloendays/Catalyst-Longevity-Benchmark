@@ -1,0 +1,111 @@
+name: Tony 0.9.7 release visual QA
+
+on:
+  push:
+    branches:
+      - qa/tony-v097-release-visual
+    paths:
+      - '.github/workflows/tony-v097-release-visual-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-visual:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact formal 0.9.7 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh release download tony-v0.9.7 `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern TonyDesktopPet-0.9.7-windows-x64.zip `
+            --clobber
+          $sha=(Get-FileHash TonyDesktopPet-0.9.7-windows-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -ne '75619a0cc3dbdcf67c0b8a21332e00ac31d91c4656b0ebfa95722fef1f70c681') { throw "Release ZIP digest mismatch: $sha" }
+          Expand-Archive TonyDesktopPet-0.9.7-windows-x64.zip -DestinationPath runtime -Force
+          $identity=Get-Content runtime/VERSION.txt -Raw
+          if(-not $identity.Contains('0.9.7')) { throw "Wrong Tony release version: $identity" }
+          if(-not $identity.Contains('0a28b3dde67af833356d1c2b0eafc709007bf756')) { throw "Wrong Tony release commit: $identity" }
+          Write-Host "TONY_RELEASE_IDENTITY=$($identity.Trim())"
+          Write-Host "TONY_RELEASE_SHA256=$sha"
+
+      - name: Capture real release runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          New-Item -ItemType Directory -Force -Path proof/idle | Out-Null
+          New-Item -ItemType Directory -Force -Path proof/hug | Out-Null
+          New-Item -ItemType Directory -Force -Path proof/first-run | Out-Null
+
+          function Save-Desktop([string]$path) {
+            $bounds=[System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+            $gfx=[System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+              $bmp.Save((Join-Path $PWD $path),[System.Drawing.Imaging.ImageFormat]::Png)
+            } finally { $gfx.Dispose(); $bmp.Dispose() }
+          }
+
+          function Run-Series([string]$action,[string]$folder,[int]$warmupMs,[int]$count,[int]$intervalMs) {
+            $env:TONY_VISUAL_ACTION=$action
+            $exe=(Resolve-Path runtime/TonyDesktopPet.exe).Path
+            $proc=Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+            try {
+              Start-Sleep -Milliseconds $warmupMs
+              for($i=0;$i -lt $count;$i++) {
+                if($proc.HasExited){ throw "Tony exited during $action QA: $($proc.ExitCode)" }
+                Save-Desktop ("proof/$folder/frame_{0:D2}.png" -f $i)
+                Start-Sleep -Milliseconds $intervalMs
+              }
+            } finally {
+              if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+              Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+              Start-Sleep -Milliseconds 400
+            }
+          }
+
+          # 5 s warmup + 16 s sampling covers the complete 7.5-15 s blink window.
+          Run-Series 'idle' 'idle' 5000 80 200
+          # Rotation-aware full-exposure fit is sampled over multiple Hug phases.
+          Run-Series 'hug' 'hug' 6500 16 350
+
+          # Fresh runner settings: capture the actual non-modal startup/connection presentation.
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+          Remove-Item 'HKCU:\Software\TonyAgent' -Recurse -Force -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path runtime/TonyDesktopPet.exe).Path
+          $proc=Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if($proc.HasExited){ throw "Tony exited during first-run QA: $($proc.ExitCode)" }
+            Save-Desktop 'proof/first-run/second_06.png'
+          } finally {
+            if(-not $proc.HasExited){ Stop-Process -Id $proc.Id -Force }
+          }
+
+      - name: Confirm proof set
+        shell: pwsh
+        run: |
+          $idle=(Get-ChildItem proof/idle -Filter '*.png').Count
+          $hug=(Get-ChildItem proof/hug -Filter '*.png').Count
+          $first=(Get-ChildItem proof/first-run -Filter '*.png').Count
+          if($idle -ne 80){ throw "Expected 80 idle frames, found $idle" }
+          if($hug -ne 16){ throw "Expected 16 hug frames, found $hug" }
+          if($first -ne 1){ throw "Expected first-run screenshot, found $first" }
+          Write-Host "TONY_V097_RELEASE_VISUAL_PROOF=PASS idle=$idle hug=$hug first=$first"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tony-v0.9.7-release-visual-proof
+          path: proof/**/*.png
+          if-no-files-found: error
