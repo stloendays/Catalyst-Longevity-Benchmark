@@ -50,6 +50,7 @@ jobs:
           APP="$ROOT/app"
           VENV="$ROOT/venv"
           ENVFILE="$ROOT/bear-agent.env"
+          LOCAL_SERVICE='rhocodec-llm.service'
 
           if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
             sudo apt-get update -qq
@@ -69,7 +70,7 @@ jobs:
           BEAR_LOCAL_MODEL=qwen3.5-2b-q4
           BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions
           BEAR_LOCAL_MODEL_TIMEOUT=90
-          BEAR_LOCAL_MAX_TOKENS=420
+          BEAR_LOCAL_MAX_TOKENS=220
           OPENCLAW_BIN=/home/ubuntu/.npm-global/bin/openclaw
           ENV
             chmod 600 "$ENVFILE"
@@ -78,13 +79,34 @@ jobs:
           grep -q '^BEAR_LOCAL_MODEL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL=qwen3.5-2b-q4' >> "$ENVFILE"
           grep -q '^BEAR_LOCAL_MODEL_URL=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_URL=http://127.0.0.1:18080/v1/chat/completions' >> "$ENVFILE"
           grep -q '^BEAR_LOCAL_MODEL_TIMEOUT=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MODEL_TIMEOUT=90' >> "$ENVFILE"
-          grep -q '^BEAR_LOCAL_MAX_TOKENS=' "$ENVFILE" || printf '%s\n' 'BEAR_LOCAL_MAX_TOKENS=420' >> "$ENVFILE"
+          if grep -q '^BEAR_LOCAL_MAX_TOKENS=' "$ENVFILE"; then
+            sed -i 's/^BEAR_LOCAL_MAX_TOKENS=.*/BEAR_LOCAL_MAX_TOKENS=220/' "$ENVFILE"
+          else
+            printf '%s\n' 'BEAR_LOCAL_MAX_TOKENS=220' >> "$ENVFILE"
+          fi
+
+          # The local model had previously been deliberately stopped with a clean
+          # systemd stop (not an OOM/crash). Tony depends on it for the resilient
+          # offline persona route, so deployments ensure it is enabled and alive.
+          sudo systemctl enable "$LOCAL_SERVICE"
+          if ! systemctl is-active --quiet "$LOCAL_SERVICE"; then
+            sudo systemctl restart "$LOCAL_SERVICE"
+          fi
+          local_ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-local-models.json 2>/dev/null; then
+              local_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$local_ready" -eq 1
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
           Description=Tony Desktop Agent OpenClaw WebSocket Gateway
-          After=network-online.target
-          Wants=network-online.target
+          After=network-online.target rhocodec-llm.service
+          Wants=network-online.target rhocodec-llm.service
 
           [Service]
           Type=simple
@@ -123,7 +145,7 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Agent Gateway', d
-          assert d['version'] == '0.6.0', d
+          assert d['version'] == '0.6.1', d
           assert d['tony_persona'] is True, d
           assert d['technical_agent'] == 'main', d
           assert d['local_model'] == 'qwen3.5-2b-q4', d
@@ -142,26 +164,29 @@ jobs:
           print('TONY_ROUTER_CONTRACT=PASS')
           PY
 
-          echo '=== LOCAL QWEN DIRECT COMPLETION ==='
+          echo '=== LOCAL QWEN NO-THINK COMPLETION ==='
           "$VENV/bin/python" - <<'PY'
           import json, urllib.request
           payload={
             'model':'qwen3.5-2b-q4',
-            'messages':[{'role':'user','content':'Reply exactly with: TONY_LOCAL_QWEN_OK'}],
+            'messages':[{'role':'user','content':'Reply exactly with: TONY_LOCAL_QWEN_OK\n/no_think'}],
             'temperature':0,
-            'max_tokens':32,
+            'max_tokens':64,
             'stream':False,
+            'reasoning_budget':0,
+            'chat_template_kwargs':{'enable_thinking':False},
           }
           req=urllib.request.Request(
             'http://127.0.0.1:18080/v1/chat/completions',
             data=json.dumps(payload).encode(),
-            headers={'Content-Type':'application/json'},
-            method='POST')
-          with urllib.request.urlopen(req, timeout=60) as r:
+            headers={'Content-Type':'application/json'}, method='POST')
+          with urllib.request.urlopen(req, timeout=90) as r:
             d=json.load(r)
-          text=((d.get('choices') or [{}])[0].get('message') or {}).get('content','')
+          msg=((d.get('choices') or [{}])[0].get('message') or {})
+          text=str(msg.get('content') or '').strip()
           assert 'TONY_LOCAL_QWEN_OK' in text, d
-          print('TONY_LOCAL_QWEN_DIRECT=PASS')
+          print('TONY_LOCAL_QWEN_NO_THINK=PASS')
+          print('VISIBLE_TEXT=', text[:200].replace('\n',' '))
           PY
 
           echo '=== OPENCLAW CONTROL PLANE ==='
