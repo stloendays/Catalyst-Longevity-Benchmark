@@ -1,0 +1,60 @@
+name: Local2B MCP Step 3C balanced-data prep
+
+on:
+  push:
+    paths:
+      - .github/workflows/local2b-mcp-step3c-prep.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Generate frozen Step 2 source
+        run: |
+          set -euo pipefail
+          rm -rf build/step3c
+          mkdir -p build/step3c
+          python3 training/local2b_mcp/generate_stage2_dataset.py \
+            --out build/step3c/stage2 \
+            --train 16000 --val 1600 --test 1600 --seed 20260908
+          python3 training/local2b_mcp/validate_dataset.py build/step3c/stage2
+          test "$(sha256sum build/step3c/stage2/train.jsonl | awk '{print $1}')" = d2f3ec25be2599642f6355dcec997b55039137e60d9f0fb618ce18b0a7a42303
+
+      - name: Prepare balanced full-tool Stage 3C
+        run: |
+          set -euo pipefail
+          python3 training/local2b_mcp/prepare_qvac_sft_stage3c.py \
+            --input build/step3c/stage2/train.jsonl \
+            --output build/step3c/train.jsonl \
+            --manifest build/step3c/manifest.json \
+            --seed 20260908
+          test "$(wc -l < build/step3c/train.jsonl)" -eq 48
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('build/step3c/manifest.json').read_text())
+          assert manifest['records']==48
+          assert manifest['selected_tool_count_distribution']=={'7':48}
+          assert len(manifest['task_counts'])==16
+          assert manifest['training_initialization']=='fresh_from_base_no_lora_init'
+          print('STAGE3C_DATA_CONTRACT=PASS')
+          print('STAGE3C_SHA256='+manifest['output_sha256'])
+          print(json.dumps(manifest, indent=2, ensure_ascii=False))
+          PY
+
+      - name: Upload Stage 3C prepared curriculum
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3c-balanced-full7-48
+          path: |
+            build/step3c/train.jsonl
+            build/step3c/manifest.json
+          if-no-files-found: error
+          retention-days: 90
