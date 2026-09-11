@@ -1,0 +1,106 @@
+name: Recover Tony local Qwen
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/bear-agent-local-qwen-recovery.yml
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Diagnose and recover local Qwen service
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          SERVICE='rhocodec-llm.service'
+          MODEL='/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf'
+          SERVER='/opt/rhocodec-llm/bin/llama-server'
+
+          echo '=== PRE-RECOVERY STATE ==='
+          systemctl is-enabled "$SERVICE" 2>/dev/null || true
+          systemctl is-active "$SERVICE" 2>/dev/null || true
+          sudo systemctl --no-pager --full status "$SERVICE" 2>/dev/null | head -n 60 || true
+          echo '=== RECENT JOURNAL ==='
+          sudo journalctl -u "$SERVICE" -n 80 --no-pager 2>/dev/null || true
+          echo '=== FILES ==='
+          test -s "$MODEL"
+          test -x "$SERVER"
+          ls -lh "$MODEL" "$SERVER"
+          echo '=== MEMORY ==='
+          free -h
+
+          echo '=== RECOVER ==='
+          sudo systemctl enable "$SERVICE"
+          sudo systemctl restart "$SERVICE"
+
+          ready=0
+          for i in $(seq 1 90); do
+            if curl -fsS --max-time 5 http://127.0.0.1:18080/v1/models >/tmp/tony-local-models.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            echo '=== POST-FAILURE SERVICE ==='
+            sudo systemctl --no-pager --full status "$SERVICE" | head -n 80 || true
+            sudo journalctl -u "$SERVICE" -n 120 --no-pager || true
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/tony-local-models.json'))
+          rows=d.get('data') or []
+          assert rows and rows[0].get('id') == 'qwen3.5-2b-q4', d
+          assert int((rows[0].get('meta') or {}).get('n_ctx') or 0) >= 16384, d
+          print('TONY_LOCAL_QWEN_MODELS=PASS')
+          PY
+
+          python3 - <<'PY'
+          import json, urllib.request
+          payload={
+            'model':'qwen3.5-2b-q4',
+            'messages':[{'role':'user','content':'Reply exactly with: TONY_LOCAL_QWEN_OK'}],
+            'temperature':0,
+            'max_tokens':32,
+            'stream':False,
+          }
+          req=urllib.request.Request(
+            'http://127.0.0.1:18080/v1/chat/completions',
+            data=json.dumps(payload).encode(),
+            headers={'Content-Type':'application/json'}, method='POST')
+          with urllib.request.urlopen(req, timeout=90) as r:
+            d=json.load(r)
+          text=((d.get('choices') or [{}])[0].get('message') or {}).get('content','')
+          assert 'TONY_LOCAL_QWEN_OK' in text, d
+          print('TONY_LOCAL_QWEN_COMPLETION=PASS')
+          PY
+
+          echo '=== POST-RECOVERY STATE ==='
+          systemctl is-active "$SERVICE"
+          sudo ss -lntp | grep ':18080'
+          free -h
+          REMOTE
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
