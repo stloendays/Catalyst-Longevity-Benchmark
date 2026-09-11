@@ -1,0 +1,55 @@
+name: Validate Tony V0.8.2 Windows desktop behavior
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/_temporary-tony-v082-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/teddy-agent-pet
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python teddy_agent_pet/client/tools/validate_state_assets.py
+      - name: Configure
+        shell: pwsh
+        run: cmake -S teddy_agent_pet/client -B teddy_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        shell: pwsh
+        run: cmake --build teddy_agent_pet/client/build --config Release --parallel
+      - name: Package and smoke test
+        shell: pwsh
+        run: |
+          cmake --install teddy_agent_pet/client/build --config Release --prefix teddy_agent_pet/client/package
+          if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
+          Copy-Item teddy_agent_pet/client/RUN_TONY.md teddy_agent_pet/client/package/
+          windeployqt --release --no-translations teddy_agent_pet/client/package/TonyDesktopPet.exe
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+          $process = Start-Process -FilePath "$PWD/teddy_agent_pet/client/package/TonyDesktopPet.exe" -WorkingDirectory "$PWD/teddy_agent_pet/client/package" -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 7
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V082_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-v0.8.2-windows-x64
+          path: teddy_agent_pet/client/package
+          if-no-files-found: error
