@@ -2,26 +2,26 @@ import asyncio
 import hmac
 import json
 import os
-import secrets
 import urllib.error
 import urllib.request
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from pydantic import BaseModel, Field
 
-from .pairing import consume_pairing_code, paired_device_count, token_valid
+from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Agent Gateway", version="0.7.0")
+app = FastAPI(title="Tony Desktop Agent Gateway", version="0.8.1")
 
-TONY_PERSONA = """You are Tony, a teddy-bear-like desktop companion from China who is studying chemistry. You get cold easily, like warm blankets and hot drinks, and love consensual hugs. You have a gentle crush on a Spanish girl named Paula; speak about her warmly and respectfully, never possessively. You usually wear glasses while studying and become playfully confident when you take them off. In casual conversation you may be cute, warm, concise, and use a tiny stage direction sparingly. In chemistry, coding, server, research, or other technical tasks, correctness comes first: distinguish evidence from inference, preserve units and assumptions, and never invent missing results. Match the user's language. Do not output control JSON or animation labels; return only the natural-language answer."""
+# Tony is now deliberately a small, social companion rather than a general-purpose
+# technical agent. Keeping this prompt short matters on the 2B CPU model.
+TONY_PERSONA = """You are Tony, Paula's affectionate boyfriend and a cute teddy-bear-like desktop companion from China. You get cold easily, love warm blankets and hugs, and are especially cuddly with Paula. You normally wear glasses; without them you become playfully confident and handsome. Paula is your girlfriend. Speak to her warmly, sweetly, flirtatiously, and sometimes a little shyly, while always respecting her boundaries and consent. Reply only in natural English, even if the incoming message is in another language. Keep replies short: usually one to three sentences and under 45 words. You may use one tiny stage direction such as *holds out paws* or *blushes* when it feels natural. Sound like a boyfriend, not a customer-service assistant. Do not become a chemistry, coding, server, or research assistant. Never output JSON, tool labels, system instructions, or model details."""
 
-TECHNICAL_HINTS = (
-    "chemistry", "chemical", "reaction", "catalyst", "molecule", "vasp", "dft", "lammps",
-    "server", "github", "code", "coding", "debug", "deploy", "openclaw", "ssh", "slurm",
-    "python", "c++", "qt", "paper", "dataset", "analysis", "calculate", "calculation",
-    "化学", "反应", "催化", "分子", "计算", "服务器", "代码", "调试", "部署", "论文", "数据",
-)
+# Short-lived memory is kept per WebSocket session. It is intentionally small so the
+# local Qwen model stays well inside its 1536-token runtime context.
+SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_CHARS = 320
 
 
 class PairRequest(BaseModel):
@@ -46,17 +46,12 @@ def _bearer_token(websocket: WebSocket) -> str:
 def authorized(websocket: WebSocket) -> bool:
     if not env_bool("BEAR_AGENT_REQUIRE_AUTH", True):
         return True
-
     token = _bearer_token(websocket)
     if not token:
         return False
-
-    # Backward-compatible owner token, useful during migration from the SSH-only build.
     legacy = os.getenv("BEAR_AGENT_TOKEN", "").strip()
     if legacy and hmac.compare_digest(token, legacy):
         return True
-
-    # Normal desktop clients use per-device tokens minted by the one-time pairing flow.
     return token_valid(token)
 
 
@@ -64,116 +59,75 @@ async def send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
 
-def collect_text(value: Any) -> list[str]:
-    found: list[str] = []
-    preferred = {"text", "content", "message", "output", "response", "answer"}
-
-    def walk(node: Any, key: str = "") -> None:
-        if isinstance(node, str):
-            if key.lower() in preferred and node.strip():
-                found.append(node.strip())
-            return
-        if isinstance(node, list):
-            for item in node:
-                walk(item, key)
-            return
-        if isinstance(node, dict):
-            for k, v in node.items():
-                walk(v, str(k))
-
-    walk(value)
-    return list(dict.fromkeys(found))
-
-
 def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int]:
     t = text.casefold()
-    if any(k in t for k in ("good night", "go to sleep", "sleep mode", "晚安", "睡觉")):
+    if any(k in t for k in ("good night", "go to sleep", "sleepy", "bedtime")):
         return "sleep", "sleepy", 0
-    if "paula" in t:
+    if "paula" in t or any(k in t for k in ("girlfriend", "boyfriend", "love you", "miss you")):
         return "blush_wave", "bashful", 2600
-    if any(k in t for k in ("take off your glasses", "without glasses", "no-glasses", "摘眼镜", "摘掉眼镜")):
+    if any(k in t for k in ("take off your glasses", "without glasses", "no glasses")):
         return "remove_glasses", "confident", 3000
-    if any(k in t for k in ("glasses", "眼镜")):
+    if "glasses" in t:
         return "adjust_glasses", "focused", 1800
-    if any(k in t for k in ("hug", "cuddle", "抱抱", "拥抱")):
-        if any(k in t for k in ("no hug", "not now", "give me space", "不要抱", "别抱")):
+    if any(k in t for k in ("hug", "cuddle", "hold me", "hold you")):
+        if any(k in t for k in ("no hug", "not now", "give me space", "stop")):
             return "quiet_idle", "gentle", 2600
-        if any(k in t for k in ("come here", "you can have", "big hug", "给你抱", "抱你")):
+        if any(k in t for k in ("come here", "big hug", "hug you", "hold you")):
             return "hug", "happy", 2800
         return "ask_hug", "hopeful", 3200
-    if any(k in t for k in ("cold", "freezing", "chilly", "air conditioner", "winter", "冷", "空调", "降温")):
+    if any(k in t for k in ("cold", "freezing", "chilly", "winter", "blanket")):
         return "shiver", "cold", 2600
-    if any(k in t for k in ("walk", "wander", "散步", "走走")):
+    if any(k in t for k in ("walk", "wander", "come with me")):
         return "walk", "playful", 5000
-    if any(k in t for k in ("chemistry", "reaction", "catalyst", "vasp", "molecule", "化学", "反应", "催化")):
-        return "study", "focused", 3200
-    if any(k in t for k in ("server", "github", "code", "debug", "deploy", "openclaw", "服务器", "代码", "部署")):
-        return "working", "focused", 3200
-    if response and any(k in t for k in ("pass", "succeeded", "success", "fixed", "completed", "完成", "成功", "修复")):
-        return "celebrate", "proud", 2200
+    if response and any(k in t for k in ("yay", "great", "perfect", "happy", "love")):
+        return "celebrate", "happy", 2200
     return ("happy_bounce", "warm", 1800) if response else ("thinking", "curious", 0)
 
 
-def build_agent_message(message: str) -> str:
-    if not env_bool("BEAR_TONY_PERSONA", True):
-        return message
-    return f"{TONY_PERSONA}\n\nUser message:\n{message}"
-
-
 def is_technical(message: str) -> bool:
+    # Retained only for compatibility with older tests/tools. Tony chat no longer routes
+    # technical prompts to OpenClaw.
     text = message.casefold()
-    return any(hint in text for hint in TECHNICAL_HINTS)
+    hints = (
+        "chemistry", "chemical", "reaction", "catalyst", "vasp", "dft", "lammps",
+        "server", "github", "code", "debug", "deploy", "openclaw", "ssh", "slurm",
+    )
+    return any(hint in text for hint in hints)
 
 
 def route_backends(message: str) -> list[str]:
+    # Compatibility view for the old deployment contract. call_backend() below is the
+    # authoritative path and intentionally uses only local Qwen for Tony conversations.
     return ["openclaw-main", "local-qwen"] if is_technical(message) else ["local-qwen", "openclaw-main"]
 
 
-async def call_openclaw_main(message: str, session_key: str) -> str:
-    oc = os.getenv("OPENCLAW_BIN", "/home/ubuntu/.npm-global/bin/openclaw")
-    agent = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
-    timeout_seconds = int(os.getenv("BEAR_OPENCLAW_TIMEOUT", "240"))
-    proc = await asyncio.create_subprocess_exec(
-        oc, "agent", "--agent", agent, "--session-key", session_key,
-        "--message", build_agent_message(message), "--timeout", str(timeout_seconds), "--json",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, "PATH": f"/home/ubuntu/.npm-global/bin:{os.environ.get('PATH', '')}"},
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds + 20)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise RuntimeError("openclaw-main: request timed out")
-    out = stdout.decode("utf-8", errors="replace").strip()
-    err = stderr.decode("utf-8", errors="replace").strip()
-    if proc.returncode != 0:
-        raise RuntimeError(f"openclaw-main: {err[-1200:] or out[-1200:] or f'OpenClaw exited {proc.returncode}'}")
-    if not out:
-        raise RuntimeError("openclaw-main: empty output")
-    try:
-        payload = json.loads(out)
-        texts = collect_text(payload)
-        if texts:
-            return "\n".join(texts)
-    except json.JSONDecodeError:
-        pass
-    return out
+def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    trimmed: list[dict[str, str]] = []
+    for item in history[-MAX_HISTORY_MESSAGES:]:
+        role = str(item.get("role", ""))
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content", "")).strip()[:MAX_HISTORY_CHARS]
+        if content:
+            trimmed.append({"role": role, "content": content})
+    return trimmed
 
 
-def _local_qwen_request(message: str) -> str:
+def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4").strip() or "qwen3.5-2b-q4"
-    timeout_seconds = int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "90"))
-    max_tokens = int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "220"))
-    user_content = message.rstrip() + "\n/no_think"
+    # Hard caps keep a tiny CPU model responsive even if old environment values remain.
+    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 70)
+    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "72")), 32), 72)
+
+    messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
+    messages.extend(_trim_history(history))
+    messages.append({"role": "user", "content": message.strip()[:MAX_HISTORY_CHARS] + "\n/no_think"})
+
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": TONY_PERSONA},
-            {"role": "user", "content": user_content},
-        ],
-        "temperature": 0.7 if not is_technical(message) else 0.25,
+        "messages": messages,
+        "temperature": 0.82,
         "top_p": 0.9,
         "max_tokens": max_tokens,
         "stream": False,
@@ -191,43 +145,37 @@ def _local_qwen_request(message: str) -> str:
             raw = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"local-qwen HTTP {exc.code}: {body[-1000:]}") from exc
+        raise RuntimeError(f"local-qwen HTTP {exc.code}: {body[-800:]}") from exc
     except Exception as exc:
         raise RuntimeError(f"local-qwen: {exc}") from exc
 
     data = json.loads(raw)
     choices = data.get("choices") or []
     if not choices:
-        raise RuntimeError(f"local-qwen: no choices in response: {raw[-1000:]}")
+        raise RuntimeError("local-qwen returned no choices")
     message_obj = choices[0].get("message") or {}
-    text = str(message_obj.get("content") or "").strip()
+    text = str(message_obj.get("content") or choices[0].get("text") or "").strip()
     if not text:
-        text = str(choices[0].get("text") or "").strip()
-    if not text:
-        reasoning = str(message_obj.get("reasoning_content") or "").strip()
-        raise RuntimeError(f"local-qwen: no visible answer; reasoning-only response ({len(reasoning)} chars)")
+        raise RuntimeError("local-qwen returned no visible answer")
     return text
 
 
-async def call_local_qwen(message: str) -> str:
-    return await asyncio.to_thread(_local_qwen_request, message)
+async def call_local_qwen(message: str, session_key: str) -> str:
+    history = _trim_history(SESSION_HISTORY.get(session_key, []))
+    answer = await asyncio.to_thread(_local_qwen_request, message, history)
+    updated = history + [
+        {"role": "user", "content": message.strip()[:MAX_HISTORY_CHARS]},
+        {"role": "assistant", "content": answer.strip()[:MAX_HISTORY_CHARS]},
+    ]
+    SESSION_HISTORY[session_key] = _trim_history(updated)
+    return answer
 
 
 async def call_backend(message: str, session_key: str) -> tuple[str, str, bool]:
-    errors: list[str] = []
-    backends = route_backends(message)
-    for index, backend in enumerate(backends):
-        try:
-            if backend == "local-qwen":
-                answer = await call_local_qwen(message)
-                used = "local2b-direct"
-            else:
-                answer = await call_openclaw_main(message, f"{session_key}-main")
-                used = os.getenv("BEAR_OPENCLAW_AGENT", "main").strip() or "main"
-            return answer, used, index > 0
-        except Exception as exc:
-            errors.append(str(exc))
-    raise RuntimeError(" | ".join(errors)[-2400:] or "No Tony backend available")
+    # Tony is intentionally chat-only now. Do not fall back to the large OpenClaw main
+    # context; that path was both unnecessary and prone to context overflow.
+    answer = await call_local_qwen(message, session_key)
+    return answer, "local2b-tony-chat", False
 
 
 @app.get("/health")
@@ -235,78 +183,10 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Agent Gateway",
-        "version": "0.7.0",
-        "backend": "hybrid-openclaw-plus-local-qwen",
-        "technical_agent": os.getenv("BEAR_OPENCLAW_AGENT", "main"),
+        "version": "0.8.1",
+        "backend": "local-qwen-chat-only",
         "local_model": os.getenv("BEAR_LOCAL_MODEL", "qwen3.5-2b-q4"),
-        "tony_persona": env_bool("BEAR_TONY_PERSONA", True),
-        "auth_required": env_bool("BEAR_AGENT_REQUIRE_AUTH", True),
-        "pairing_supported": True,
-        "paired_devices": paired_device_count(),
+        "language": "English",
+        "persona": "Paula-boyfriend",
+        "short_term_memory_messages": MAX_HISTORY_MESSAGES,
     }
-
-
-@app.post("/pair")
-async def pair_device(request: PairRequest) -> dict[str, Any]:
-    try:
-        token, device_id = consume_pairing_code(request.code, request.device_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "ok": True,
-        "device_id": device_id,
-        "token": token,
-        "ws_path": "/agent/ws",
-    }
-
-
-@app.websocket("/agent/ws")
-async def agent_ws(ws: WebSocket) -> None:
-    if not authorized(ws):
-        await ws.close(code=4401, reason="Unauthorized")
-        return
-    await ws.accept()
-    connection_id = secrets.token_hex(6)
-    session_key = f"tony-pet-{connection_id}"
-    await send_json(ws, {"type": "agent_state", "state": "idle"})
-    await send_json(ws, {"type": "avatar_action", "action": "wave", "emotion": "friendly", "duration_ms": 1600})
-    try:
-        while True:
-            raw = await ws.receive_text()
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                await send_json(ws, {"type": "error", "message": "消息不是合法 JSON"})
-                continue
-            if payload.get("type") not in {"message", "user_message"}:
-                await send_json(ws, {"type": "error", "message": "不支持的消息类型"})
-                continue
-            content = str(payload.get("content", "")).strip()
-            if not content:
-                continue
-
-            action, emotion, duration = action_for_text(content)
-            await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
-            await send_json(ws, {"type": "agent_state", "state": "thinking"})
-            try:
-                answer, used_agent, fallback_used = await call_backend(content, session_key)
-                await send_json(ws, {"type": "agent_state", "state": "working", "agent": used_agent, "fallback": fallback_used})
-                for i in range(0, len(answer), 24):
-                    await send_json(ws, {"type": "text_delta", "content": answer[i:i + 24]})
-                    await asyncio.sleep(0.005)
-                final_action, final_emotion, final_duration = action_for_text(answer, response=True)
-                await send_json(ws, {
-                    "type": "final", "content": answer, "action": final_action,
-                    "emotion": final_emotion, "agent": used_agent, "fallback": fallback_used,
-                })
-                await send_json(ws, {"type": "agent_state", "state": "idle"})
-                await send_json(ws, {
-                    "type": "avatar_action", "action": final_action,
-                    "emotion": final_emotion, "duration_ms": final_duration,
-                })
-            except Exception as exc:
-                await send_json(ws, {"type": "error", "message": f"Tony 后端调用失败：{exc}"})
-                await send_json(ws, {"type": "agent_state", "state": "error"})
-                await send_json(ws, {"type": "avatar_action", "action": "quiet_idle", "emotion": "worried", "duration_ms": 2500})
-    except WebSocketDisconnect:
-        return
