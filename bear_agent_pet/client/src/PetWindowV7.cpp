@@ -210,6 +210,7 @@ PetWindow::PetWindow(QWidget *parent)
     });
     connect(&agent_, &AgentClient::pairingCodeReady, this,
             [this](const QString &code, qint64 expiresAt){
+        pairingRequestActive_=false;
         pairingCode_=code;
         pairingCodeExpiresAt_=expiresAt;
         emotion_="curious";
@@ -223,6 +224,7 @@ PetWindow::PetWindow(QWidget *parent)
         s.setValue("agent/url",endpoint);
         s.setValue("agent/token",protectSecret(token));
         s.setValue("agent/device_id",deviceId);
+        pairingRequestActive_=false;
         pairingCode_.clear();
         pairingCodeExpiresAt_=0;
         if(endpoint.host()!="127.0.0.1" && endpoint.host()!="localhost") tunnel_.stop();
@@ -232,6 +234,7 @@ PetWindow::PetWindow(QWidget *parent)
         showBubble(uiText("Paired. Tony will remember this computer.","配对成功。Tony 会记住这台电脑。"),5200);
     });
     connect(&agent_, &AgentClient::pairingFailed, this, [this](const QString &text){
+        pairingRequestActive_=false;
         pairingCode_.clear();
         pairingCodeExpiresAt_=0;
         emotion_="worried";
@@ -277,8 +280,10 @@ PetWindow::PetWindow(QWidget *parent)
     } else {
         tray_.setToolTip("Tony · preparing connection code");
         if(visualTestAction.isEmpty()) {
-            showBubble(uiText("Creating a secure connection code…","正在生成安全连接码…"),0);
-            QTimer::singleShot(700,this,&PetWindow::startAutomaticPairing);
+            QTimer::singleShot(2200,this,[this]{
+                if(!agent_.connected() && pairingCode_.isEmpty() && !pairingRequestActive_)
+                    startAutomaticPairing();
+            });
         }
     }
 
@@ -422,15 +427,18 @@ const QPixmap *PetWindow::pixmapForAction(Action action) const {
     // appear to lose ears, feet or arms between frames.
     if(action==Action::Idle) {
         auto framesIt=animationAssets_.constFind("idle");
-        if(idleBlinking_ && framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) {
-            static constexpr int blinkSequence[] = {0, 1, 2, 2, 1, 0, 0};
+        auto idleIt=stateAssets_.constFind("idle");
+        if(idleBlinking_ && framesIt!=animationAssets_.constEnd() && framesIt.value().size()>=2) {
+            // frame_03 is intentionally excluded: it is the known malformed/
+            // inconsistent blink frame. -1 means use the approved static idle pose.
+            static constexpr int blinkSequence[] = {-1, 1, 1, -1, -1};
             const int sequenceSize=static_cast<int>(sizeof(blinkSequence)/sizeof(blinkSequence[0]));
             const int step=qBound(0,idleBlinkTick_,sequenceSize-1);
-            const int index=blinkSequence[step] % framesIt.value().size();
-            return &framesIt.value().at(index);
+            const int index=blinkSequence[step];
+            if(index>=0) return &framesIt.value().at(index);
         }
-        auto idleIt=stateAssets_.constFind("idle");
         if(idleIt!=stateAssets_.constEnd() && !idleIt.value().isNull()) return &idleIt.value();
+        if(framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) return &framesIt.value().first();
     }
 
     // Prefer the complete V0.9 state image. V0.8-only behaviors can consume the
@@ -569,12 +577,25 @@ void PetWindow::paintEvent(QPaintEvent*) {
         const qreal safeMotionScale=qBound<qreal>(0.97,scale,maxMotionScale);
         const qreal maxVisibleW=252.0;
         const qreal maxVisibleH=192.0;
-        const qreal baseFit=qMin(maxVisibleW/visibleW,maxVisibleH/visibleH);
-        const qreal fit=baseFit*safeMotionScale;
+        const qreal desiredFit=qMin(maxVisibleW/visibleW,maxVisibleH/visibleH)*safeMotionScale;
 
         const qreal visibleCx=(minX+maxX+1)/2.0;
         const qreal visibleCy=(minY+maxY+1)/2.0;
         const qreal groundY=205.0+dy;
+
+        // Reserve a real top margin after rotation, not just before it. Hug is the
+        // widest/most expanded pose and gets 16 px; other poses keep at least 8 px.
+        const qreal topSafety=(action_==Action::Hug) ? 16.0 : 8.0;
+        const qreal sideSafety=14.0;
+        const qreal radians=qDegreesToRadians(rotation);
+        const qreal absCos=qAbs(qCos(radians));
+        const qreal absSin=qAbs(qSin(radians));
+        const qreal rotatedUnitW=visibleW*absCos+visibleH*absSin;
+        const qreal rotatedUnitH=visibleH*absCos+visibleW*absSin;
+        const qreal safetyFit=qMin(
+            qMax<qreal>(1.0,width()-2.0*sideSafety)/qMax<qreal>(1.0,rotatedUnitW),
+            qMax<qreal>(1.0,groundY-topSafety)/qMax<qreal>(1.0,rotatedUnitH));
+        const qreal fit=qMin(desiredFit,safetyFit);
         const qreal pivotY=groundY-visibleH*fit/2.0;
 
         p.translate(QPointF(width()/2.0+dx,pivotY));
@@ -662,7 +683,7 @@ void PetWindow::tickAnimation(){
     ++frame_;
     if(action_==Action::Idle && idleBlinking_) {
         ++idleBlinkTick_;
-        if(idleBlinkTick_>=7) {
+        if(idleBlinkTick_>=5) {
             idleBlinking_=false;
             idleBlinkTick_=0;
             scheduleBlink();
@@ -679,13 +700,14 @@ void PetWindow::tickAnimation(){
 
 void PetWindow::scheduleBlink(){
     if(blinkTimer_.isActive()) return;
-    // Natural but quiet: roughly one blink every 5-11 seconds.
-    blinkTimer_.start(QRandomGenerator::global()->bounded(5000,11001));
+    // Quiet idle cadence: avoid repetitive blinking while Tony is just sitting.
+    blinkTimer_.start(QRandomGenerator::global()->bounded(7500,15001));
 }
 
 void PetWindow::scheduleIdleMoment(){
-    // Check often enough to feel alive, but the behavior engine returns None most of the time.
-    idleTimer_.start(QRandomGenerator::global()->bounded(22000,55001));
+    // First/autonomous personality prompts must not fire immediately after launch.
+    // Keep the proven calm cadence from the later V0.9 line: 140-320 seconds.
+    idleTimer_.start(QRandomGenerator::global()->bounded(140000,320001));
 }
 
 void PetWindow::runIdleMoment(){
@@ -1738,6 +1760,13 @@ void PetWindow::submitTonyPrompt(const QString &text){
 void PetWindow::hugTony(){ markInteraction(); behavior_.onHugged(); emotion_="happy"; setAction(Action::Hug,2600); showBubble(uiText("Got you. Tony cuddles closer.","抱到啦。Tony 开心地靠近了一点。"),4300); }
 
 void PetWindow::startAutomaticPairing(){
+    const qint64 now=QDateTime::currentSecsSinceEpoch();
+    if(!pairingCode_.isEmpty() && pairingCodeExpiresAt_>now+2) {
+        showCurrentPairingCode(false);
+        return;
+    }
+    if(pairingRequestActive_) return;
+
     QSettings s;
     const QUrl endpoint(s.value("agent/public_url",defaultPublicEndpoint()).toString());
     if(!endpoint.isValid() || endpoint.scheme().toLower()!="wss" || endpoint.host().isEmpty()) {
@@ -1749,6 +1778,7 @@ void PetWindow::startAutomaticPairing(){
     s.setValue("connection/prefer_local_ssh",false);
     pairingCode_.clear();
     pairingCodeExpiresAt_=0;
+    pairingRequestActive_=true;
     emotion_="curious";
     setAction(Action::Think,0);
     tray_.setToolTip("Tony · requesting connection code");
