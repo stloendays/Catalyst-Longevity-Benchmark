@@ -1,0 +1,9 @@
+VERSION=0.9.8
+icon=84c95bf202db5bcf3c3eb0f662071c3c35eae157
+installer=a0cf3e848d5c0ffdf1f234116d4a3ecb402fe6fa
+AgentClient.cpp=244022005cc15bde3f2455bb071c0b1d8fa2d827
+AgentClient.h=59549ce8650e68e17e89072cef391cd8bd145ac0
+PetWindowV7.cpp=7ed3dc90ef4239b6f30cf9ada33d08f403943749
+SettingsDialog.cpp=908be3b322de966f08cb4ceea3d311e89833de43
+TonyVersion.rc.in=f3f92344426f0dc4dc9ee9fd1b1e66b1a7626ad8
+main.cpp=0172bde07d0f0ab5e410ff3e302ead17fac8129e
