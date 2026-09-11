@@ -11,6 +11,10 @@ from typing import Any
 
 _LOCK = Lock()
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# This is only a SHA-256 digest of the reusable friend code, never the code itself.
+# The 12-character code has enough entropy to keep the public digest from being useful
+# as a practical offline guessing target. Rotate by setting BEAR_FRIEND_CODE_SHA256.
+_DEFAULT_FRIEND_CODE_SHA256 = "8d37450f5e691cfb8e5f0fa1e09361c0a0a293b824d1ae7d6eb3bd05a0dc15f2"
 
 
 def _store_path() -> Path:
@@ -23,7 +27,7 @@ def _store_path() -> Path:
 
 
 def _empty_store() -> dict[str, Any]:
-    return {"version": 1, "pairing": None, "devices": []}
+    return {"version": 2, "pairing": None, "devices": []}
 
 
 def _read_store() -> dict[str, Any]:
@@ -36,7 +40,7 @@ def _read_store() -> dict[str, Any]:
         return _empty_store()
     if not isinstance(data, dict):
         return _empty_store()
-    data.setdefault("version", 1)
+    data.setdefault("version", 2)
     data.setdefault("pairing", None)
     data.setdefault("devices", [])
     return data
@@ -66,12 +70,27 @@ def _normalize_code(code: str) -> str:
     return "".join(ch for ch in code.upper() if ch.isalnum())
 
 
+def _friend_code_hash() -> str:
+    configured = os.getenv("BEAR_FRIEND_CODE_SHA256", "").strip().lower()
+    return configured or _DEFAULT_FRIEND_CODE_SHA256
+
+
+def reusable_friend_code_enabled() -> bool:
+    return len(_friend_code_hash()) == 64
+
+
+def _matches_friend_code(normalized: str) -> bool:
+    expected = _friend_code_hash()
+    return len(expected) == 64 and secrets.compare_digest(expected, _digest(normalized))
+
+
 def _new_pairing_code() -> str:
     raw = "".join(secrets.choice(_ALPHABET) for _ in range(12))
     return "-".join(raw[i : i + 4] for i in range(0, 12, 4))
 
 
 def issue_pairing_code(ttl_seconds: int = 600) -> tuple[str, int]:
+    """Issue a legacy one-time code. The reusable friend code is separate."""
     ttl_seconds = max(60, min(int(ttl_seconds), 3600))
     code = _new_pairing_code()
     expires_at = int(time.time()) + ttl_seconds
@@ -86,40 +105,55 @@ def issue_pairing_code(ttl_seconds: int = 600) -> tuple[str, int]:
     return code, expires_at
 
 
+def _append_device(data: dict[str, Any], clean_name: str, now: int, paired_via: str) -> tuple[str, str]:
+    token = secrets.token_urlsafe(36)
+    device_id = secrets.token_hex(8)
+    devices = data.setdefault("devices", [])
+    if not isinstance(devices, list):
+        devices = []
+        data["devices"] = devices
+    devices.append(
+        {
+            "id": device_id,
+            "name": clean_name,
+            "token_hash": _digest(token),
+            "created_at": now,
+            "revoked": False,
+            "paired_via": paired_via,
+        }
+    )
+    return token, device_id
+
+
 def consume_pairing_code(code: str, device_name: str) -> tuple[str, str]:
     normalized = _normalize_code(code)
     if len(normalized) != 12:
-        raise ValueError("配对码格式不正确")
+        raise ValueError("Pairing code format is invalid")
     clean_name = " ".join(device_name.split()).strip()[:80] or "Tony desktop"
     now = int(time.time())
 
     with _LOCK:
         data = _read_store()
+
+        # Trusted-friend mode: reusable and non-expiring, but every computer still gets
+        # its own random bearer token so a device can be revoked without changing the code.
+        if _matches_friend_code(normalized):
+            token, device_id = _append_device(data, clean_name, now, "friend_code")
+            _write_store(data)
+            return token, device_id
+
+        # Keep the original one-time pairing mechanism for owner/admin recovery.
         pairing = data.get("pairing")
         if not isinstance(pairing, dict):
-            raise ValueError("当前没有可用的配对码")
+            raise ValueError("Pairing code is incorrect")
         if pairing.get("used"):
-            raise ValueError("这个配对码已经使用过")
+            raise ValueError("This one-time pairing code has already been used")
         if int(pairing.get("expires_at") or 0) < now:
-            raise ValueError("配对码已经过期，请重新生成")
+            raise ValueError("This one-time pairing code has expired")
         if not secrets.compare_digest(str(pairing.get("code_hash") or ""), _digest(normalized)):
-            raise ValueError("配对码不正确")
+            raise ValueError("Pairing code is incorrect")
 
-        token = secrets.token_urlsafe(36)
-        device_id = secrets.token_hex(8)
-        devices = data.setdefault("devices", [])
-        if not isinstance(devices, list):
-            devices = []
-            data["devices"] = devices
-        devices.append(
-            {
-                "id": device_id,
-                "name": clean_name,
-                "token_hash": _digest(token),
-                "created_at": now,
-                "revoked": False,
-            }
-        )
+        token, device_id = _append_device(data, clean_name, now, "one_time_code")
         pairing["used"] = True
         pairing["used_at"] = now
         pairing["device_id"] = device_id
@@ -155,6 +189,7 @@ def list_devices() -> list[dict[str, Any]]:
                 "name": device.get("name"),
                 "created_at": device.get("created_at"),
                 "revoked": bool(device.get("revoked")),
+                "paired_via": device.get("paired_via", "legacy"),
             }
         )
     return rows
