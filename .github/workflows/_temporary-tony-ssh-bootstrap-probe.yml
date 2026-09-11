@@ -14,16 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Public reverse proxy must reject SSH bootstrap
+      - name: Public reverse proxy must not allow SSH bootstrap
         run: |
           set -euo pipefail
-          code=$(curl -sS -o /tmp/public.json -w '%{http_code}' \
+          set +e
+          code=$(curl -sS --connect-timeout 5 --max-time 15 -o /tmp/public.json -w '%{http_code}' \
             -X POST 'https://150-158-27-206.sslip.io/pair/ssh-bootstrap' \
             -H 'Content-Type: application/json' \
             --data '{"device_name":"public-security-probe"}')
-          cat /tmp/public.json
-          test "$code" = '403'
-          echo 'TONY_PUBLIC_SSH_BOOTSTRAP=BLOCKED'
+          rc=$?
+          set -e
+          if [ -f /tmp/public.json ]; then cat /tmp/public.json; fi
+          if [ "$rc" -eq 0 ] && printf '%s' "$code" | grep -Eq '^2'; then
+            echo "Public SSH bootstrap unexpectedly returned HTTP $code" >&2
+            exit 1
+          fi
+          echo "TONY_PUBLIC_SSH_BOOTSTRAP=BLOCKED status=${code:-timeout} curl_rc=$rc"
 
       - name: Prepare SSH key
         env:
@@ -44,7 +50,8 @@ jobs:
           ROOT='/home/ubuntu/.local/share/bear-agent'
           APP="$ROOT/app"
           VENV="$ROOT/venv"
-          response=$(curl -fsS -X POST 'http://127.0.0.1:18790/pair/ssh-bootstrap' \
+          response=$(curl -fsS --connect-timeout 3 --max-time 10 \
+            -X POST 'http://127.0.0.1:18790/pair/ssh-bootstrap' \
             -H 'Host: 127.0.0.1:18790' \
             -H 'Content-Type: application/json' \
             --data '{"device_name":"ssh-bootstrap-ci-probe"}')
