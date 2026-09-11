@@ -26,6 +26,9 @@ jobs:
           arch: 'win64_msvc2022_64'
           modules: 'qtwebsockets'
           cache: true
+      - name: Validate Tony state artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
       - name: Configure
         shell: pwsh
         run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
@@ -39,6 +42,7 @@ jobs:
           Copy-Item bear_agent_pet/client/build/Release/TonyDesktopPet.exe bear_agent_pet/client/package/
           Copy-Item bear_agent_pet/client/assets/* bear_agent_pet/client/package/assets/ -Recurse -Force
           Copy-Item bear_agent_pet/client/RUN_TONY.md bear_agent_pet/client/package/
+          "TonyDesktopPet 0.5.0`ncommit=$env:GITHUB_SHA" | Set-Content bear_agent_pet/client/package/VERSION.txt
           windeployqt --release --no-translations bear_agent_pet/client/package/TonyDesktopPet.exe
       - uses: actions/upload-artifact@v4
         with:
