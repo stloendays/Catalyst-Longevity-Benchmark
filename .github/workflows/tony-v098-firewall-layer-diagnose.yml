@@ -1,4 +1,4 @@
-name: Tony v0.9.8 firewall layer diagnose
+name: Tony v0.9.8 TLS recovery diagnose
 
 on:
   workflow_dispatch:
@@ -12,11 +12,12 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-firewall-layer:
+  recover-tls:
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       TONY_SERVER_IP: 150.158.27.206
+      TONY_HOST: 150-158-27-206.sslip.io
     steps:
       - name: Prepare SSH key
         env:
@@ -24,6 +25,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:SERVER_SSH_KEY)) { throw 'SERVER_SSH_KEY is empty' }
           $keyPath = Join-Path $env:RUNNER_TEMP 'tony_server_key'
           $keyText = $env:SERVER_SSH_KEY.Replace("`r", '')
           [IO.File]::WriteAllText($keyPath, $keyText + "`n", [Text.UTF8Encoding]::new($false))
@@ -31,10 +33,29 @@ jobs:
           icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
           "TONY_SSH_KEY=$keyPath" >> $env:GITHUB_ENV
 
-      - name: Inspect host firewall chains and route
+      - name: Inspect Caddy TLS config and restart
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Continue'
-          $cmd = "echo ===INPUT===; sudo iptables -S INPUT; echo ===YJ===; sudo iptables -S YJ-FIREWALL-INPUT 2>&1 || true; echo ===YJ_COUNTERS===; sudo iptables -L YJ-FIREWALL-INPUT -n -v --line-numbers 2>&1 || true; echo ===NFT===; sudo nft list ruleset 2>&1 || true; echo ===ADDR===; ip -br addr; echo ===ROUTE===; ip route; echo ===CADDY===; sudo ss -lntp '( sport = :80 or sport = :443 )'; echo ===SYSCTL===; sysctl net.ipv4.conf.all.rp_filter net.ipv4.conf.default.rp_filter 2>&1 || true"
+          $ErrorActionPreference = 'Stop'
+          $cmd = "echo ===CADDYFILE===; sudo cat /etc/caddy/Caddyfile; echo ===SERVICE_ENV===; sudo systemctl show caddy -p Environment --no-pager; echo ===STAGING_REFS===; sudo grep -R -n -E 'acme-staging|CADDY_ACME_CA' /etc/caddy /etc/systemd/system /etc/default /etc/environment 2>/dev/null || true; echo ===RESTART===; sudo systemctl restart caddy; sleep 15; sudo systemctl is-active caddy; echo ===LISTENERS===; sudo ss -lntp | grep -E ':(80|443)\\b' || true; echo ===TLS_LOGS===; sudo journalctl -u caddy -n 120 --no-pager | grep -E 'certificate|obtaining|challenge|tls.obtain|error|serving|renew' || true"
           & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $cmd
-          exit 0
+          if ($LASTEXITCODE -ne 0) { throw "Remote TLS recovery failed with exit $LASTEXITCODE" }
+
+      - name: Verify public 80 and 443 from Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($port in 80,443) {
+            $client = [System.Net.Sockets.TcpClient]::new()
+            try {
+              $task = $client.ConnectAsync($env:TONY_SERVER_IP, $port)
+              if (-not ($task.Wait(7000) -and $client.Connected)) { throw "TCP $port is not reachable" }
+              Write-Host "PUBLIC_TCP_${port}=OPEN"
+            } finally { $client.Dispose() }
+          }
+          $health = Invoke-RestMethod -Uri "https://$env:TONY_HOST/health" -Method Get -TimeoutSec 20
+          if (-not $health.ok) { throw 'Public HTTPS health did not return ok=true' }
+          Write-Host 'PUBLIC_HTTPS_HEALTH=PASS'
+          Write-Host "gateway_version=$($health.version)"
+          Write-Host "backend=$($health.backend)"
+          Write-Host "local_model=$($health.local_model)"
