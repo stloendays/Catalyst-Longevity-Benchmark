@@ -36,26 +36,35 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
-          $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
-          try {
-            Start-Sleep -Seconds 5
-            if ($proc.HasExited) { throw "Tony exited before visual capture: $($proc.ExitCode)" }
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
 
-            Add-Type -AssemblyName System.Drawing
-            Add-Type -AssemblyName System.Windows.Forms
+          function Save-Desktop([string]$path) {
             $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
             $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
             $gfx = [System.Drawing.Graphics]::FromImage($bmp)
             try {
               $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-              $bmp.Save((Join-Path $PWD 'tony-runtime-desktop.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+              $bmp.Save((Join-Path $PWD $path), [System.Drawing.Imaging.ImageFormat]::Png)
             } finally {
               $gfx.Dispose()
               $bmp.Dispose()
             }
-            if (-not (Test-Path tony-runtime-desktop.png)) { throw 'Runtime screenshot was not created.' }
-            Write-Host "TONY_RUNTIME_VISUAL_CAPTURE=PASS size=$($bounds.Width)x$($bounds.Height)"
+            Write-Host "TONY_RUNTIME_VISUAL_CAPTURE=$path size=$($bounds.Width)x$($bounds.Height)"
+          }
+
+          $exe = (Resolve-Path runtime/TonyDesktopPet.exe).Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path runtime).Path -PassThru
+          try {
+            Start-Sleep -Seconds 5
+            if ($proc.HasExited) { throw "Tony exited before visual capture: $($proc.ExitCode)" }
+            Save-Desktop 'tony-first-run.png'
+
+            # Close the automatic friend-code dialog so the actual pet surface can
+            # be inspected without a modal window covering the character.
+            [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+            Start-Sleep -Seconds 2
+            Save-Desktop 'tony-idle-clean.png'
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
@@ -63,5 +72,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Tony-runtime-visual-smoke
-          path: tony-runtime-desktop.png
+          path: |
+            tony-first-run.png
+            tony-idle-clean.png
           if-no-files-found: error
