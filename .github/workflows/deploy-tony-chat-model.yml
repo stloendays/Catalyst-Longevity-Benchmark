@@ -9,8 +9,10 @@ on:
 permissions:
   contents: read
 
+# Shared with gateway deployment and E2E. A model switch restarts both the local
+# model service and gateway, so it must never overlap a conversation test.
 concurrency:
-  group: deploy-tony-fast-chat-model
+  group: tony-server-runtime
   cancel-in-progress: false
 
 jobs:
@@ -38,17 +40,20 @@ jobs:
           FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
           FAST_TMP="$FAST_MODEL.part"
           QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+          QUALITY_SHA_FILE="$ROOT/models/.Qwen3.5-2B-Q4_K_M.sha256"
           MIRROR_URL='https://hf-mirror.com/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
           OFFICIAL_URL='https://huggingface.co/ggml-org/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_0.gguf?download=true'
 
           mkdir -p "$ROOT/models"
           echo '=== PRESERVED QUALITY MODEL ==='
-          if [ -s "$QUALITY_MODEL" ]; then
-            ls -lh "$QUALITY_MODEL"
-            echo 'Qwen3.5 2B Q4 is preserved and will not be deleted.'
-          else
-            echo 'Qwen3.5 2B Q4 is not present at the expected path; this workflow will not create or delete it.'
-          fi
+          # The 2B model is a retained asset, not a disposable fallback. This workflow
+          # must fail rather than silently proceed if that known model disappears.
+          test -s "$QUALITY_MODEL"
+          QUALITY_SHA_BEFORE=$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')
+          printf '%s\n' "$QUALITY_SHA_BEFORE" > "$QUALITY_SHA_FILE"
+          ls -lh "$QUALITY_MODEL"
+          echo "Qwen3.5 2B SHA256: $QUALITY_SHA_BEFORE"
+          echo 'Qwen3.5 2B Q4 is preserved and will not be deleted.'
 
           if [ ! -s "$FAST_MODEL" ]; then
             echo 'Downloading Qwen3.5 0.8B Q4_0; mirror first for mainland/Tencent connectivity.'
@@ -69,8 +74,12 @@ jobs:
           fi
 
           echo '=== AVAILABLE TONY MODELS ==='
-          ls -lh "$ROOT/models"/Qwen3.5-0.8B-Q4_0.gguf "$ROOT/models"/Qwen3.5-2B-Q4_K_M.gguf 2>/dev/null || true
-          sha256sum "$FAST_MODEL"
+          test -s "$FAST_MODEL"
+          test -s "$QUALITY_MODEL"
+          ls -lh "$FAST_MODEL" "$QUALITY_MODEL"
+          sha256sum "$FAST_MODEL" "$QUALITY_MODEL"
+          test "$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')" = "$QUALITY_SHA_BEFORE"
+          echo 'TONY_2B_PRESERVATION=PASS'
           REMOTE
 
       - name: Install dual-model selector and activate fast mode
@@ -82,10 +91,13 @@ jobs:
           ACTIVE_ENV="$ROOT/active-model.env"
           FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
           QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+          QUALITY_SHA_FILE="$ROOT/models/.Qwen3.5-2B-Q4_K_M.sha256"
           GATEWAY_ENV='/home/ubuntu/.local/share/bear-agent/bear-agent.env'
 
           test -x "$ROOT/bin/llama-server"
           test -s "$FAST_MODEL"
+          test -s "$QUALITY_MODEL"
+          QUALITY_SHA_BEFORE=$(cat "$QUALITY_SHA_FILE")
 
           sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
           [Unit]
@@ -165,7 +177,8 @@ jobs:
           TONY_UBATCH=64
           EOF
               set_gateway_env BEAR_LOCAL_MODEL tony-qwen3.5-2b-q4
-              set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 65
+              # 2B is deliberately kept as the slower quality profile on this CPU host.
+              set_gateway_env BEAR_LOCAL_MODEL_TIMEOUT 150
               set_gateway_env BEAR_LOCAL_MAX_TOKENS 48
               MODE='quality / Qwen3.5 2B Q4'
               ;;
@@ -203,19 +216,23 @@ jobs:
           sudo chmod 0755 /usr/local/bin/tony-model
           sudo chown ubuntu:ubuntu "$ROOT"
           sudo chown ubuntu:ubuntu "$ROOT/models" "$FAST_MODEL"
-          if [ -s "$QUALITY_MODEL" ]; then sudo chown ubuntu:ubuntu "$QUALITY_MODEL"; fi
+          sudo chown ubuntu:ubuntu "$QUALITY_MODEL"
           sudo touch "$ACTIVE_ENV"
           sudo chown ubuntu:ubuntu "$ACTIVE_ENV"
 
           /usr/local/bin/tony-model fast
 
-          echo '=== LATENCY SMOKE ==='
+          # Switching to fast is not allowed to mutate or replace the retained 2B file.
+          test "$(sha256sum "$QUALITY_MODEL" | awk '{print $1}')" = "$QUALITY_SHA_BEFORE"
+          echo 'TONY_2B_AFTER_FAST_SWITCH=PASS'
+
+          echo '=== FAST LATENCY SMOKE ==='
           python3 - <<'PY'
           import json, time, urllib.request
           payload={
             'model':'tony-qwen3.5-0.8b-q4',
             'messages':[
-              {'role':'system','content':'You are Tony, Paula\'s cute teddy-bear-like boyfriend. Speak only short natural English.'},
+              {'role':'system','content':"You are Tony, Paula's cute teddy-bear-like boyfriend. Speak only short natural English."},
               {'role':'user','content':'Paula says: I missed you. Reply in one short sentence.\n/no_think'}
             ],
             'temperature':0.8,
@@ -233,10 +250,17 @@ jobs:
           text=str(((data.get('choices') or [{}])[0].get('message') or {}).get('content') or '').strip()
           assert text, data
           assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), text
+          assert elapsed < 45, elapsed
           print('TONY_FAST_MODEL=PASS')
           print('LATENCY_SEC=',round(elapsed,2))
           print('SAMPLE=',text[:240].replace('\n',' '))
           PY
+
+          echo '=== FINAL MODEL INVENTORY ==='
+          test -s "$FAST_MODEL"
+          test -s "$QUALITY_MODEL"
+          ls -lh "$FAST_MODEL" "$QUALITY_MODEL"
+          echo 'TONY_DUAL_MODEL_INVENTORY=PASS'
           REMOTE
 
       - name: Remove SSH key
