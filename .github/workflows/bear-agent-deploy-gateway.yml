@@ -62,6 +62,33 @@ jobs:
           python3 -m venv "$VENV"
           "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
 
+          sudo systemctl enable "$LOCAL_SERVICE"
+          if ! systemctl is-active --quiet "$LOCAL_SERVICE"; then
+            sudo systemctl restart "$LOCAL_SERVICE"
+          fi
+
+          ready=0
+          for i in $(seq 1 70); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-local-models.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+          cat /tmp/tony-local-models.json
+
+          MODEL_ID=$(python3 - <<'PY'
+          import json
+          with open('/tmp/tony-local-models.json') as f:
+              d=json.load(f)
+          rows=d.get('data') or []
+          assert rows and rows[0].get('id'), d
+          print(rows[0]['id'])
+          PY
+          )
+          echo "Active Tony model: $MODEL_ID"
+
           touch "$ENVFILE"
           chmod 600 "$ENVFILE"
           set_env() {
@@ -74,25 +101,14 @@ jobs:
           }
           set_env BEAR_AGENT_REQUIRE_AUTH false
           set_env BEAR_TONY_PERSONA true
-          set_env BEAR_LOCAL_MODEL qwen3.5-2b-q4
+          set_env BEAR_LOCAL_MODEL "$MODEL_ID"
           set_env BEAR_LOCAL_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
-          set_env BEAR_LOCAL_MODEL_TIMEOUT 55
-          set_env BEAR_LOCAL_MAX_TOKENS 48
-
-          sudo systemctl enable "$LOCAL_SERVICE"
-          if ! systemctl is-active --quiet "$LOCAL_SERVICE"; then
-            sudo systemctl restart "$LOCAL_SERVICE"
+          if printf '%s' "$MODEL_ID" | grep -qi '0.8b'; then
+            set_env BEAR_LOCAL_MODEL_TIMEOUT 35
+          else
+            set_env BEAR_LOCAL_MODEL_TIMEOUT 65
           fi
-
-          ready=0
-          for i in $(seq 1 60); do
-            if curl -fsS --max-time 3 http://127.0.0.1:18080/v1/models >/tmp/tony-local-models.json 2>/dev/null; then
-              ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$ready" -eq 1
+          set_env BEAR_LOCAL_MAX_TOKENS 48
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
@@ -130,13 +146,15 @@ jobs:
           test "$ready" -eq 1
 
           cat /tmp/tony-health.json
-          "$VENV/bin/python" - <<'PY'
-          import json
+          "$VENV/bin/python" - "$MODEL_ID" <<'PY'
+          import json, sys
+          expected=sys.argv[1]
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Companion', d
-          assert d['version'] == '0.8.1', d
+          assert d['version'] == '0.8.2', d
           assert d['backend'] == 'local-qwen-chat-only', d
+          assert d['local_model'] == expected, (d, expected)
           assert d['language'] == 'English', d
           assert d['persona'] == 'Paula-boyfriend', d
           assert d['chat_only'] is True, d
@@ -147,11 +165,12 @@ jobs:
 
           echo '=== LOCAL BOYFRIEND CHAT SMOKE ==='
           cd "$APP"
-          "$VENV/bin/python" - <<'PY'
-          import json, urllib.request
+          "$VENV/bin/python" - "$MODEL_ID" <<'PY'
+          import json, sys, time, urllib.request
           from app.main import TONY_PERSONA
+          model=sys.argv[1]
           payload={
-            'model':'qwen3.5-2b-q4',
+            'model':model,
             'messages':[
               {'role':'system','content':TONY_PERSONA},
               {'role':'user','content':'Paula says: I missed you today. Reply naturally.\n/no_think'}
@@ -167,12 +186,16 @@ jobs:
             'http://127.0.0.1:18080/v1/chat/completions',
             data=json.dumps(payload).encode(),
             headers={'Content-Type':'application/json'}, method='POST')
-          with urllib.request.urlopen(req, timeout=65) as r:
+          start=time.monotonic()
+          with urllib.request.urlopen(req, timeout=80) as r:
             d=json.load(r)
+          elapsed=time.monotonic()-start
           text=str(((d.get('choices') or [{}])[0].get('message') or {}).get('content') or '').strip()
           assert text, d
           assert not any('\u4e00' <= ch <= '\u9fff' for ch in text), text
           print('TONY_LOCAL_BOYFRIEND_CHAT=PASS')
+          print('MODEL=',model)
+          print('LATENCY_SEC=',round(elapsed,2))
           print('TONY_SAMPLE=', text[:300].replace('\n',' '))
           PY
 
