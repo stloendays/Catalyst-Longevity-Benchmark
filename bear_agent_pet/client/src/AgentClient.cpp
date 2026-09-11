@@ -3,6 +3,7 @@
 #include "AppLogger.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,12 +16,27 @@ namespace {
 QByteArray tonyUserAgent() {
     return QByteArray("TonyDesktopPet/") + QCoreApplication::applicationVersion().toUtf8();
 }
+
+QUrl pairingApiUrlFor(const QUrl &wsUrl, const QString &path) {
+    QUrl url(wsUrl);
+    if(url.scheme().compare("wss", Qt::CaseInsensitive)==0) url.setScheme("https");
+    else if(url.scheme().compare("ws", Qt::CaseInsensitive)==0) url.setScheme("http");
+    else return {};
+    url.setPath(path);
+    url.setQuery({});
+    url.setFragment({});
+    return url;
+}
 }
 
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
     reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(false);
     connect(&reconnectTimer_, &QTimer::timeout, this, &AgentClient::reconnect);
+
+    pairingPollTimer_.setInterval(2000);
+    pairingPollTimer_.setSingleShot(false);
+    connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
 
     connect(&socket_, &QWebSocket::connected, this, [this]{
         reconnectTimer_.stop();
@@ -50,6 +66,11 @@ void AgentClient::setLanguage(const QString &language) {
 }
 
 void AgentClient::connectTo(const QUrl &url, const QString &bearerToken) {
+    pairingPollTimer_.stop();
+    pairingRequestId_.clear();
+    pairingExpiresAt_=0;
+    pairingPollInFlight_=false;
+
     const bool changed = endpoint_ != url || bearerToken_ != bearerToken;
     endpoint_=url;
     bearerToken_=bearerToken.trimmed();
@@ -64,17 +85,149 @@ void AgentClient::connectTo(const QUrl &url, const QString &bearerToken) {
 }
 
 QUrl AgentClient::pairingUrlFor(const QUrl &wsUrl) {
-    QUrl url(wsUrl);
-    if(url.scheme().compare("wss", Qt::CaseInsensitive)==0) url.setScheme("https");
-    else if(url.scheme().compare("ws", Qt::CaseInsensitive)==0) url.setScheme("http");
-    else return {};
-    url.setPath("/pair");
-    url.setQuery({});
-    url.setFragment({});
-    return url;
+    return pairingApiUrlFor(wsUrl,QStringLiteral("/pair"));
+}
+
+QUrl AgentClient::pairingRequestUrlFor(const QUrl &wsUrl) {
+    return pairingApiUrlFor(wsUrl,QStringLiteral("/pair/request"));
+}
+
+QUrl AgentClient::pairingStatusUrlFor(const QUrl &wsUrl) {
+    return pairingApiUrlFor(wsUrl,QStringLiteral("/pair/status"));
+}
+
+void AgentClient::requestDevicePairing(const QUrl &wsUrl, const QString &deviceName) {
+    const QUrl requestUrl=pairingRequestUrlFor(wsUrl);
+    if(!requestUrl.isValid() || requestUrl.host().isEmpty()) {
+        emit pairingFailed(language_=="zh" ? "连接地址不正确。" : "The Tony server address is invalid.");
+        return;
+    }
+
+    pairingPollTimer_.stop();
+    pairingRequestId_.clear();
+    pairingWsUrl_=wsUrl;
+    pairingExpiresAt_=0;
+    pairingPollInFlight_=false;
+
+    AppLogger::recordOperatorEvent(
+        QStringLiteral("device_pair_request"),
+        {},
+        QJsonObject{{QStringLiteral("transport"), requestUrl.scheme().toLower()}});
+
+    QNetworkRequest request(requestUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
+    request.setHeader(QNetworkRequest::UserAgentHeader,tonyUserAgent());
+    const QJsonObject body{
+        {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
+    };
+    auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply,&QNetworkReply::finished,this,[this,reply]{
+        const QByteArray raw=reply->readAll();
+        const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto doc=QJsonDocument::fromJson(raw);
+        const auto obj=doc.isObject() ? doc.object() : QJsonObject{};
+        if(reply->error()!=QNetworkReply::NoError || status<200 || status>=300) {
+            QString detail=obj.value("detail").toString();
+            if(detail.isEmpty()) detail=reply->errorString();
+            emit pairingFailed((language_=="zh" ? QString("无法生成连接码：") : QString("Could not create a connection code: "))+detail);
+            reply->deleteLater();
+            return;
+        }
+
+        pairingRequestId_=obj.value("request_id").toString().trimmed();
+        const QString code=obj.value("code").toString().trimmed();
+        pairingExpiresAt_=static_cast<qint64>(obj.value("expires_at").toDouble(0));
+        const int pollMs=qBound(1000,obj.value("poll_after_ms").toInt(2000),5000);
+        if(pairingRequestId_.isEmpty() || code.isEmpty() || pairingExpiresAt_<=QDateTime::currentSecsSinceEpoch()) {
+            pairingRequestId_.clear();
+            emit pairingFailed(language_=="zh" ? "服务器没有返回有效的连接码。" : "The server did not return a valid connection code.");
+            reply->deleteLater();
+            return;
+        }
+
+        pairingPollTimer_.setInterval(pollMs);
+        pairingPollTimer_.start();
+        emit pairingCodeReady(code,pairingExpiresAt_);
+        reply->deleteLater();
+    });
+}
+
+void AgentClient::pollDevicePairing() {
+    if(pairingPollInFlight_ || pairingRequestId_.isEmpty() || !pairingWsUrl_.isValid()) return;
+    if(pairingExpiresAt_>0 && QDateTime::currentSecsSinceEpoch()>=pairingExpiresAt_) {
+        pairingPollTimer_.stop();
+        pairingRequestId_.clear();
+        emit pairingFailed(language_=="zh" ? "连接码已过期，请生成一个新的。" : "The connection code expired. Generate a new one.");
+        return;
+    }
+
+    const QUrl statusUrl=pairingStatusUrlFor(pairingWsUrl_);
+    if(!statusUrl.isValid()) return;
+    pairingPollInFlight_=true;
+    QNetworkRequest request(statusUrl);
+    request.setHeader(QNetworkRequest::ContentTypeHeader,"application/json");
+    request.setHeader(QNetworkRequest::UserAgentHeader,tonyUserAgent());
+    const QJsonObject body{{"request_id",pairingRequestId_}};
+    auto *reply=network_.post(request,QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply,&QNetworkReply::finished,this,[this,reply]{
+        pairingPollInFlight_=false;
+        const QByteArray raw=reply->readAll();
+        const int httpStatus=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto doc=QJsonDocument::fromJson(raw);
+        const auto obj=doc.isObject() ? doc.object() : QJsonObject{};
+
+        if(httpStatus==410) {
+            pairingPollTimer_.stop();
+            pairingRequestId_.clear();
+            emit pairingFailed(language_=="zh" ? "连接码已过期，请生成一个新的。" : "The connection code expired. Generate a new one.");
+            reply->deleteLater();
+            return;
+        }
+        if(httpStatus==404) {
+            pairingPollTimer_.stop();
+            pairingRequestId_.clear();
+            QString detail=obj.value("detail").toString();
+            if(detail.isEmpty()) detail=language_=="zh" ? "连接请求不存在。" : "The pairing request was not found.";
+            emit pairingFailed(detail);
+            reply->deleteLater();
+            return;
+        }
+        if(reply->error()!=QNetworkReply::NoError || httpStatus<200 || httpStatus>=300) {
+            // Transient transport/server failures are retried until the code expires.
+            reply->deleteLater();
+            return;
+        }
+
+        if(obj.value("status").toString()!=QStringLiteral("approved")) {
+            reply->deleteLater();
+            return;
+        }
+
+        const QString token=obj.value("token").toString().trimmed();
+        const QString deviceId=obj.value("device_id").toString().trimmed();
+        if(token.isEmpty()) {
+            pairingPollTimer_.stop();
+            emit pairingFailed(language_=="zh" ? "批准响应中没有设备令牌。" : "The approval response did not contain a device token.");
+            reply->deleteLater();
+            return;
+        }
+
+        const QUrl endpoint=pairingWsUrl_;
+        pairingPollTimer_.stop();
+        pairingRequestId_.clear();
+        AppLogger::recordOperatorEvent(QStringLiteral("device_pair_approved"));
+        emit paired(token,deviceId,endpoint);
+        connectTo(endpoint,token);
+        reply->deleteLater();
+    });
 }
 
 void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, const QString &deviceName) {
+    pairingPollTimer_.stop();
+    pairingRequestId_.clear();
+    pairingExpiresAt_=0;
+    pairingPollInFlight_=false;
+
     const QUrl pairUrl=pairingUrlFor(wsUrl);
     if(!pairUrl.isValid() || pairUrl.host().isEmpty()) {
         emit pairingFailed(language_=="zh" ? "连接地址不正确。" : "The Tony server address is invalid.");
@@ -143,7 +296,7 @@ void AgentClient::sendClientHello() {
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},
-        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1")}}
+        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1"),QStringLiteral("device_code_pairing_v1")}}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
