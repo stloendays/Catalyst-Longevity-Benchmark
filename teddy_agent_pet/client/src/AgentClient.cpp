@@ -1,12 +1,23 @@
 #include "AgentClient.h"
 
+#include <QByteArray>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QString>
 #include <QSysInfo>
 #include <QUuid>
+
+#ifndef TONY_APP_VERSION
+#error "TONY_APP_VERSION must be provided by CMake"
+#endif
+
+namespace {
+const QByteArray kTonyUserAgent = QByteArray("TonyDesktopPet/") + QByteArray(TONY_APP_VERSION);
+const QString kTonyAppVersion = QString::fromLatin1(TONY_APP_VERSION);
+}
 
 AgentClient::AgentClient(QObject *parent): QObject(parent) {
     reconnectTimer_.setInterval(3000);
@@ -74,7 +85,7 @@ void AgentClient::pairAndConnect(const QUrl &wsUrl, const QString &pairingCode, 
 
     QNetworkRequest request(pairUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
+    request.setHeader(QNetworkRequest::UserAgentHeader, kTonyUserAgent);
     const QJsonObject body{
         {"code",pairingCode.trimmed()},
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
@@ -118,7 +129,7 @@ void AgentClient::pairViaTrustedTunnel(const QUrl &wsUrl, const QUrl &bootstrapU
 
     QNetworkRequest request(bootstrapUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
+    request.setHeader(QNetworkRequest::UserAgentHeader, kTonyUserAgent);
     const QJsonObject body{
         {"device_name",deviceName.trimmed().isEmpty() ? QString("Tony desktop") : deviceName.trimmed()}
     };
@@ -154,7 +165,7 @@ void AgentClient::pairViaTrustedTunnel(const QUrl &wsUrl, const QUrl &bootstrapU
 void AgentClient::reconnect() {
     if(!endpoint_.isValid() || socket_.state()!=QAbstractSocket::UnconnectedState) return;
     QNetworkRequest request(endpoint_);
-    request.setHeader(QNetworkRequest::UserAgentHeader, "TonyDesktopPet/0.8.5");
+    request.setHeader(QNetworkRequest::UserAgentHeader, kTonyUserAgent);
     if(!bearerToken_.isEmpty())
         request.setRawHeader("Authorization", QByteArray("Bearer ") + bearerToken_.toUtf8());
     socket_.open(request);
@@ -168,7 +179,7 @@ void AgentClient::sendClientHello() {
         {"type","client_hello"},
         {"protocol_version","1"},
         {"client","TonyDesktopPet"},
-        {"client_version","0.8.5"},
+        {"client_version",kTonyAppVersion},
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},
