@@ -19,6 +19,12 @@ class PetWindow : public QWidget {
 public:
     explicit PetWindow(QWidget *parent=nullptr);
     ~PetWindow() override;
+
+public slots:
+    // First-run setup calls this automatically. The public server address is built in,
+    // so a trusted friend only has to enter the reusable friend code once.
+    void configureConnection();
+
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
@@ -50,7 +56,6 @@ private:
     void askTony();
     void submitTonyPrompt(const QString &text);
     void hugTony();
-    void configureConnection();
     void useLocalSshConnection();
     void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
