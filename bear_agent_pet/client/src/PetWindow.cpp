@@ -64,7 +64,7 @@ QString unprotectSecret(const QString &stored) {
 }
 }
 
-PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr) {
+PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr), composer_(nullptr) {
     setWindowTitle("Tony");
     setFixedSize(230,250);
     setWindowFlags(Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint|Qt::Tool);
@@ -77,13 +77,16 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr) {
     connect(&animTimer_, &QTimer::timeout, this, &PetWindow::tickAnimation);
     animTimer_.start();
 
-    // Randomized passive behavior feels much less mechanical than a fixed 22 s loop.
     idleTimer_.setSingleShot(true);
     connect(&idleTimer_, &QTimer::timeout, this, &PetWindow::runIdleMoment);
     scheduleIdleMoment();
 
     actionTimer_.setSingleShot(true);
     connect(&actionTimer_, &QTimer::timeout, this, &PetWindow::restoreAgentAction);
+
+    connect(&composer_,&ChatComposer::submitted,this,[this](const QString &text){
+        submitTonyPrompt(text);
+    });
 
     connect(&agent_, &AgentClient::stateChanged, this, [this](const QString &s){
         agentState_=s.trimmed().toLower();
@@ -97,7 +100,6 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr) {
     });
     connect(&agent_, &AgentClient::textDelta, this, [this](const QString &t){
         answer_ += t;
-        // Streaming text remains visible; the final event starts the dismiss timer.
         showBubble(answer_,0);
     });
     connect(&agent_, &AgentClient::answerFinished, this, [this]{
@@ -157,6 +159,7 @@ PetWindow::PetWindow(QWidget *parent): QWidget(parent), bubble_(nullptr) {
 }
 
 PetWindow::~PetWindow() {
+    composer_.dismiss();
     bubble_.dismiss();
     tunnel_.stop();
 }
@@ -172,13 +175,14 @@ void PetWindow::loadAssets() {
         if(QFileInfo::exists(p) && pet_.load(p)) break;
     }
 
+    const QStringList keys{
+        "idle","working","walk","thinking","celebrate","sleep","shiver",
+        "ask_hug","hug","blush","blush_wave","study","adjust_glasses","remove_glasses","wave"
+    };
+
     const QStringList stateRoots{
         appDir+"/assets/states",
         QDir::currentPath()+"/assets/states"
-    };
-    const QStringList keys{
-        "idle","working","walk","thinking","celebrate","sleep","shiver",
-        "ask_hug","hug","blush","study","adjust_glasses","remove_glasses","wave"
     };
     for(const auto &key:keys) {
         for(const auto &root:stateRoots) {
@@ -186,6 +190,28 @@ void PetWindow::loadAssets() {
             const QString path=root+"/"+key+".png";
             if(QFileInfo::exists(path) && sprite.load(path)) {
                 stateAssets_.insert(key,sprite);
+                break;
+            }
+        }
+    }
+
+    const QStringList animationRoots{
+        appDir+"/assets/animations",
+        QDir::currentPath()+"/assets/animations"
+    };
+    for(const auto &key:keys) {
+        for(const auto &root:animationRoots) {
+            QDir dir(root+"/"+key);
+            if(!dir.exists()) continue;
+            const QStringList files=dir.entryList(QStringList{"frame_*.png"},QDir::Files,QDir::Name);
+            QVector<QPixmap> frames;
+            frames.reserve(files.size());
+            for(const auto &file:files) {
+                QPixmap frame;
+                if(frame.load(dir.filePath(file))) frames.push_back(frame);
+            }
+            if(frames.size()>=2) {
+                animationAssets_.insert(key,frames);
                 break;
             }
         }
@@ -204,6 +230,7 @@ QString PetWindow::assetKeyForAction(Action action) const {
     case Action::AskHug:return "ask_hug";
     case Action::Hug:return "hug";
     case Action::Blush:return "blush";
+    case Action::BlushWave:return "blush_wave";
     case Action::Study:return "study";
     case Action::AdjustGlasses:return "adjust_glasses";
     case Action::RemoveGlasses:return "remove_glasses";
@@ -212,9 +239,42 @@ QString PetWindow::assetKeyForAction(Action action) const {
     return "idle";
 }
 
+int PetWindow::frameStrideForAction(Action action) const {
+    switch(action) {
+    case Action::Shiver:return 2;
+    case Action::Walk:return 3;
+    case Action::Celebrate:return 3;
+    case Action::BlushWave:return 4;
+    case Action::Wave:return 4;
+    case Action::AskHug:return 5;
+    case Action::Hug:return 5;
+    case Action::Study:return 5;
+    case Action::AdjustGlasses:return 5;
+    case Action::RemoveGlasses:return 6;
+    case Action::Think:return 5;
+    case Action::Bob:return 4;
+    case Action::Sleep:return 8;
+    case Action::Blush:return 6;
+    case Action::Idle:return 7;
+    }
+    return 5;
+}
+
 const QPixmap *PetWindow::pixmapForAction(Action action) const {
-    auto it=stateAssets_.constFind(assetKeyForAction(action));
+    const QString key=assetKeyForAction(action);
+    auto framesIt=animationAssets_.constFind(key);
+    if(framesIt!=animationAssets_.constEnd() && !framesIt.value().isEmpty()) {
+        const int stride=qMax(1,frameStrideForAction(action));
+        const int index=(frame_/stride)%framesIt.value().size();
+        return &framesIt.value().at(index);
+    }
+
+    auto it=stateAssets_.constFind(key);
     if(it!=stateAssets_.constEnd()) return &it.value();
+    if(action==Action::BlushWave) {
+        it=stateAssets_.constFind("blush");
+        if(it!=stateAssets_.constEnd()) return &it.value();
+    }
     it=stateAssets_.constFind("idle");
     if(it!=stateAssets_.constEnd()) return &it.value();
     return pet_.isNull() ? nullptr : &pet_;
@@ -237,7 +297,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
         scale=1.0+0.006*qSin(t*.55);
         break;
     case Action::Bob:
-        dy=int(6*qSin(t*1.7));
+        dy=int(5*qSin(t*1.7));
         break;
     case Action::Walk:
         dy=-qAbs(int(3*qSin(t*2.2)));
@@ -278,6 +338,11 @@ void PetWindow::paintEvent(QPaintEvent*) {
         rotation=2.5*qSin(t*.55);
         scale=1.015;
         break;
+    case Action::BlushWave:
+        dy=-qAbs(int(3*qSin(t*1.4)));
+        rotation=3.2*qSin(t*1.35);
+        scale=1.018;
+        break;
     case Action::Study:
         dy=int(3*qSin(t*1.1));
         rotation=-1.2;
@@ -296,7 +361,6 @@ void PetWindow::paintEvent(QPaintEvent*) {
         break;
     }
 
-    // A tiny ground shadow makes the transparent sticker feel planted on the desktop.
     p.save();
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(0,0,0,38));
@@ -324,7 +388,6 @@ void PetWindow::paintEvent(QPaintEvent*) {
     }
     p.restore();
 
-    // Name plate stays readable on both light and dark wallpapers.
     const QRect namePlate(width()/2-35,218,70,23);
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(20,20,20,105));
@@ -368,7 +431,8 @@ PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
     if(n=="shiver") return Action::Shiver;
     if(n=="ask_hug" || n=="offer_hug") return Action::AskHug;
     if(n=="hug") return Action::Hug;
-    if(n=="blush" || n=="blush_wave" || n=="offer_scarf") return Action::Blush;
+    if(n=="blush_wave" || n=="paula_blush" || n=="paula_special") return Action::BlushWave;
+    if(n=="blush" || n=="offer_scarf") return Action::Blush;
     if(n=="study" || n=="study_tired" || n=="study_cozy") return Action::Study;
     if(n=="adjust_glasses") return Action::AdjustGlasses;
     if(n=="remove_glasses") return Action::RemoveGlasses;
@@ -394,7 +458,9 @@ void PetWindow::tickAnimation(){
         }
         move(n);
     }
-    bubble_.follow(mapToGlobal(QPoint(width()/2,20)));
+    const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+    bubble_.follow(anchor);
+    composer_.follow(anchor);
     update();
 }
 
@@ -404,7 +470,7 @@ void PetWindow::scheduleIdleMoment(){
 }
 
 void PetWindow::runIdleMoment(){
-    if(action_!=Action::Idle || dragging_ || agentState_!="idle") {
+    if(action_!=Action::Idle || dragging_ || agentState_!="idle" || composer_.isVisible()) {
         scheduleIdleMoment();
         return;
     }
@@ -453,6 +519,7 @@ QString PetWindow::actionName() const {
     case Action::AskHug:return "asking for a hug";
     case Action::Hug:return "hugging";
     case Action::Blush:return "blushing";
+    case Action::BlushWave:return "blushing and waving";
     case Action::Study:return "studying";
     case Action::AdjustGlasses:return "adjusting glasses";
     case Action::RemoveGlasses:return "no-glasses mode";
@@ -469,7 +536,6 @@ void PetWindow::enterEvent(QEnterEvent*){
 }
 
 void PetWindow::leaveEvent(QEvent*){
-    // Temporary hover wave naturally returns through actionTimer_.
 }
 
 void PetWindow::mousePressEvent(QMouseEvent *e){
@@ -484,7 +550,9 @@ void PetWindow::mouseMoveEvent(QMouseEvent *e){
         move(e->globalPosition().toPoint()-dragOffset_);
         action_=Action::Bob;
         frame_=0;
-        bubble_.follow(mapToGlobal(QPoint(width()/2,20)));
+        const QPoint anchor=mapToGlobal(QPoint(width()/2,20));
+        bubble_.follow(anchor);
+        composer_.follow(anchor);
         update();
     }
 }
@@ -505,6 +573,7 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     QMenu m;
     auto ask=m.addAction("问 Tony…");
     auto hug=m.addAction("抱抱 Tony");
+    auto paula=m.addAction("Paula 来了");
     m.addSeparator();
     auto pair=m.addAction("连接 / 配对新设备…");
     auto localSsh=m.addAction("使用本机 SSH 连接");
@@ -524,6 +593,11 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto chosen=m.exec(e->globalPos());
     if(chosen==ask) askTony();
     else if(chosen==hug) hugTony();
+    else if(chosen==paula) {
+        emotion_="bashful";
+        setAction(Action::BlushWave,3600);
+        showBubble("Paula? Wait—do I look okay?",4300);
+    }
     else if(chosen==pair) configureConnection();
     else if(chosen==localSsh) useLocalSshConnection();
     else if(chosen==idle) setAction(Action::Idle);
@@ -543,15 +617,26 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
 }
 
 void PetWindow::askTony(){
-    bool ok=false;
-    auto text=QInputDialog::getText(this,"Tony","想让我做什么？",QLineEdit::Normal,{},&ok);
-    if(!ok||text.trimmed().isEmpty()) return;
+    bubble_.dismiss();
+    emotion_="curious";
+    if(agentState_=="idle") setAction(Action::Think,0);
+    composer_.openAt(mapToGlobal(QPoint(width()/2,40)));
+}
+
+void PetWindow::submitTonyPrompt(const QString &text){
+    const QString prompt=text.trimmed();
+    if(prompt.isEmpty()) return;
     answer_.clear();
     emotion_="curious";
     agentState_="thinking";
     restoreAgentAction();
-    if(agent_.connected()) agent_.sendMessage(text);
-    else showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\n\n"+text,6500);
+    if(agent_.connected()) {
+        agent_.sendMessage(prompt);
+    } else {
+        agentState_="idle";
+        setAction(Action::Think,2600);
+        showBubble("服务器还没连接好。右键 Tony 可以选择“连接 / 配对新设备…”。\n\n"+prompt,6500);
+    }
 }
 
 void PetWindow::hugTony(){
