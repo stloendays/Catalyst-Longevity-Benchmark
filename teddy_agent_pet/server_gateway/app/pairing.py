@@ -125,6 +125,17 @@ def _append_device(data: dict[str, Any], clean_name: str, now: int, paired_via: 
     return token, device_id
 
 
+def issue_trusted_device(device_name: str, paired_via: str = "ssh_bootstrap") -> tuple[str, str]:
+    """Issue a device token only after the caller has already established trusted transport."""
+    clean_name = " ".join(device_name.split()).strip()[:80] or "Tony desktop"
+    now = int(time.time())
+    with _LOCK:
+        data = _read_store()
+        token, device_id = _append_device(data, clean_name, now, paired_via)
+        _write_store(data)
+    return token, device_id
+
+
 def consume_pairing_code(code: str, device_name: str) -> tuple[str, str]:
     normalized = _normalize_code(code)
     if len(normalized) != 12:
