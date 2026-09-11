@@ -1,8 +1,20 @@
 #include "SshTunnel.h"
 
+#include <QHostAddress>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStringList>
+#include <QTcpSocket>
+
+namespace {
+bool localForwardReady(int port) {
+    QTcpSocket socket;
+    socket.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
+    const bool ok=socket.waitForConnected(300);
+    if(ok) socket.disconnectFromHost();
+    return ok;
+}
+}
 
 SshTunnel::SshTunnel(QObject *parent): QObject(parent) {
     retryTimer_.setInterval(15000);
@@ -13,14 +25,19 @@ SshTunnel::SshTunnel(QObject *parent): QObject(parent) {
         emit statusChanged("SSH tunnel running");
     });
     connect(&process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError){
-        emit statusChanged("SSH tunnel unavailable");
+        const auto detail=process_.errorString().trimmed();
+        emit statusChanged(detail.isEmpty()
+            ? "SSH tunnel unavailable"
+            : "SSH tunnel unavailable: "+detail.left(180));
         if(!stopping_ && !retryTimer_.isActive()) retryTimer_.start();
     });
     connect(&process_, qOverload<int,QProcess::ExitStatus>(&QProcess::finished), this,
             [this](int, QProcess::ExitStatus){
         if(stopping_) return;
         const auto err=QString::fromUtf8(process_.readAllStandardError()).trimmed();
-        emit statusChanged(err.isEmpty() ? "SSH tunnel stopped" : "SSH tunnel waiting for local SSH access");
+        emit statusChanged(err.isEmpty()
+            ? "SSH tunnel waiting for local SSH access"
+            : "SSH tunnel unavailable: "+err.left(220));
         if(!retryTimer_.isActive()) retryTimer_.start();
     });
 }
@@ -43,18 +60,27 @@ void SshTunnel::launch() {
     if(stopping_ || running()) return;
 
     QSettings s;
-    const QString program=QStandardPaths::findExecutable("ssh");
-    if(program.isEmpty()) {
-        emit statusChanged("Windows OpenSSH client not found");
-        if(!retryTimer_.isActive()) retryTimer_.start();
-        return;
-    }
-
     const QString host=s.value("ssh/host","150.158.27.206").toString().trimmed();
     const QString user=s.value("ssh/user","ubuntu").toString().trimmed();
     const int localPort=s.value("ssh/local_port",18790).toInt();
     const int remotePort=s.value("ssh/remote_port",18790).toInt();
     const QString identity=s.value("ssh/identity_file","").toString().trimmed();
+
+    // A user may already have opened the required forwarding tunnel manually.
+    // Reuse that listener instead of starting a duplicate ssh.exe that would fail
+    // with "address already in use" and produce a misleading warning.
+    if(localForwardReady(localPort)) {
+        emit statusChanged("SSH tunnel ready (existing local forward)");
+        if(!retryTimer_.isActive()) retryTimer_.start();
+        return;
+    }
+
+    const QString program=QStandardPaths::findExecutable("ssh");
+    if(program.isEmpty()) {
+        emit statusChanged("SSH tunnel unavailable: Windows OpenSSH client not found");
+        if(!retryTimer_.isActive()) retryTimer_.start();
+        return;
+    }
 
     QStringList args{
         "-N",
