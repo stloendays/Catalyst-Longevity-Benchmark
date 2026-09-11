@@ -100,7 +100,8 @@ jobs:
               printf '%s=%s\n' "$key" "$value" >> "$ENVFILE"
             fi
           }
-          set_env BEAR_AGENT_REQUIRE_AUTH false
+          # Public WSS is protected by per-device bearer tokens issued during pairing.
+          set_env BEAR_AGENT_REQUIRE_AUTH true
           set_env BEAR_TONY_PERSONA true
           set_env BEAR_LOCAL_MODEL "$MODEL_ID"
           set_env BEAR_LOCAL_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
@@ -113,7 +114,7 @@ jobs:
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
-          Description=Tony English Boyfriend Desktop Companion Gateway
+          Description=Tony Boyfriend Desktop Companion Gateway
           After=network-online.target rhocodec-llm.service
           Wants=network-online.target rhocodec-llm.service
 
@@ -155,17 +156,16 @@ jobs:
           assert d['service'] == 'Tony Desktop Companion', d
           assert d['backend'] == 'local-qwen-chat-only', d
           assert d['local_model'] == expected, (d, expected)
-          assert d['language'] == 'English', d
+          assert d['default_language'] == 'English', d
+          assert 'Simplified Chinese' in d['languages'], d
           assert d['persona'] == 'Paula-boyfriend', d
           assert d['chat_only'] is True, d
+          assert d['pairing_mode'] == 'reusable-friend-code', d
           assert d['local_tools_enabled'] is False, d
           assert d['openclaw_enabled'] is False, d
           print('TONY_CHAT_GATEWAY_HEALTH=PASS')
           PY
 
-          # Generation quality/latency belongs to bear-agent-e2e.yml. Keeping it out of
-          # deployment avoids a timed-out request occupying llama.cpp's single slot and
-          # making an otherwise healthy gateway deployment fail.
           echo 'TONY_CHAT_GENERATION_GATE=DELEGATED_TO_E2E'
           systemctl --no-pager --full status bear-agent-gateway.service | head -n 18
           REMOTE
