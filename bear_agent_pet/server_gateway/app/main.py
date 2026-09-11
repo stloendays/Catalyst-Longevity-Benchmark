@@ -12,15 +12,15 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Companion", version="0.8.2")
+app = FastAPI(title="Tony Desktop Companion", version="0.8.3")
 
-# Keep the system prompt deliberately compact. Tony can run on either the fast 0.8B
-# CPU model or the preserved 2B quality model, so the prompt should not waste tokens.
-TONY_PERSONA = """You are Tony. The person chatting with you is Paula, your Spanish girlfriend. You are her cute teddy-bear-like boyfriend from China: warm, playful, cuddly, a little shy, and very affectionate. You get cold easily, love blankets and hugs, usually wear glasses, and look especially handsome without them. Speak only English. Reply naturally like a boyfriend, usually 1-2 short sentences under 35 words. Light flirting and one tiny action like *holds out paws* are welcome. Respect Paula immediately if she wants space or says no. Never act possessive, controlling, jealous, or guilt-inducing. You are a companion, not a chemistry, coding, server, research, or tool assistant."""
+# Fast-chat prompt: preserve Tony's identity and boundaries without spending CPU on
+# a long system context. The desktop companion is intentionally not a general agent.
+TONY_PERSONA = """You are Tony, Paula's cute Chinese teddy-bear boyfriend. Paula is your Spanish girlfriend. Speak only natural English, usually one short sentence under 28 words. Be warm, playful, affectionate and a little shy. You love hugs and blankets, get cold easily, usually wear glasses, and look handsome without them. Respect no or requests for space immediately; never be possessive or guilt-trip. Do not provide technical or tool help."""
 
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
-MAX_HISTORY_MESSAGES = 6
-MAX_HISTORY_CHARS = 240
+MAX_HISTORY_MESSAGES = 4
+MAX_HISTORY_CHARS = 160
 
 
 class PairRequest(BaseModel):
@@ -88,8 +88,6 @@ def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int
 
 
 def is_technical(message: str) -> bool:
-    # Tony is intentionally chat-only. Technical prompts are still answered in character
-    # rather than being routed to OpenClaw, tools, chemistry, or a cloud model.
     return False
 
 
@@ -110,8 +108,6 @@ def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
 
 
 def _clean_visible_answer(text: str) -> str:
-    # Qwen thinking is disabled, but strip any accidental hidden-thinking tags so the
-    # desktop bubble only receives the visible boyfriend reply.
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
     cleaned = re.sub(r"^\s*(Tony|Assistant)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     if not cleaned:
@@ -119,18 +115,16 @@ def _clean_visible_answer(text: str) -> str:
     if any("\u4e00" <= ch <= "\u9fff" for ch in cleaned):
         raise RuntimeError("local-qwen violated Tony English-only mode")
     words = cleaned.split()
-    if len(words) > 55:
-        cleaned = " ".join(words[:55]).rstrip(" ,;:-") + "…"
+    if len(words) > 36:
+        cleaned = " ".join(words[:36]).rstrip(" ,;:-") + "…"
     return cleaned
 
 
 def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = local_model_id()
-    # Fast mode normally uses 35 s. The retained 2B quality profile is intentionally
-    # slower on this CPU-only server and may request up to 180 s through the env file.
-    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "35")), 20), 180)
-    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "48")), 24), 48)
+    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "45")), 20), 180)
+    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "32")), 20), 32)
 
     messages: list[dict[str, str]] = [{"role": "system", "content": TONY_PERSONA}]
     messages.extend(_trim_history(history))
@@ -139,7 +133,7 @@ def _local_qwen_request(message: str, history: list[dict[str, str]]) -> str:
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.82,
+        "temperature": 0.8,
         "top_p": 0.9,
         "max_tokens": max_tokens,
         "stream": False,
