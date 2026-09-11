@@ -87,6 +87,7 @@ private:
     void hugTony();
     void startAutomaticPairing();
     void showCurrentPairingCode(bool copyToClipboard=false);
+    void configureRecoveryConnection();
     void useLocalSshConnection();
     void showBubble(const QString &text, int timeoutMs=5200);
     void restorePosition();
