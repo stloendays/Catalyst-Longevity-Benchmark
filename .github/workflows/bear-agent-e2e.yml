@@ -12,7 +12,7 @@ permissions:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Prepare SSH key
         env:
@@ -25,7 +25,7 @@ jobs:
           chmod 600 "$HOME/.ssh/server_key"
           ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
 
-      - name: Send a real message through Tony Gateway to OpenClaw
+      - name: Exercise real Tony conversations through the deployed gateway
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
           set -euo pipefail
@@ -39,43 +39,64 @@ jobs:
           import json
           import websockets
 
-          async def main():
+          async def recv_json(ws, timeout=280):
+              return json.loads(await asyncio.wait_for(ws.recv(), timeout))
+
+          async def ask(ws, content, label):
+              await ws.send(json.dumps({
+                  'type':'message',
+                  'id':f'github-actions-e2e-{label}',
+                  'content':content,
+              }, ensure_ascii=False))
               events=[]
               final=None
-              async with websockets.connect('ws://127.0.0.1:18790/agent/ws', ping_interval=20, ping_timeout=20) as ws:
-                  # consume initial idle + wave
-                  for _ in range(2):
-                      events.append(json.loads(await asyncio.wait_for(ws.recv(), 10)))
-                  await ws.send(json.dumps({
-                      'type':'message',
-                      'id':'github-actions-e2e',
-                      'content':'In one short sentence, introduce yourself as Tony.'
-                  }))
-                  deadline=asyncio.get_running_loop().time()+260
-                  while asyncio.get_running_loop().time() < deadline:
-                      msg=json.loads(await asyncio.wait_for(ws.recv(), 270))
-                      events.append(msg)
-                      if msg.get('type') == 'error':
-                          raise RuntimeError(msg.get('message','Tony Gateway error'))
-                      if msg.get('type') == 'final':
-                          final=msg
-                          break
-
-              assert final is not None, events[-10:]
+              while True:
+                  msg=await recv_json(ws)
+                  events.append(msg)
+                  if msg.get('type') == 'error':
+                      raise RuntimeError(f"{label}: {msg.get('message','Tony Gateway error')}")
+                  if msg.get('type') == 'final':
+                      final=msg
+                      break
               text=str(final.get('content','')).strip()
-              assert text, final
-              assert 'tony' in text.casefold(), text
-              assert final.get('action'), final
-              assert final.get('emotion'), final
+              assert text, (label, final)
+              assert final.get('action'), (label, final)
+              assert final.get('emotion'), (label, final)
               kinds=[e.get('type') for e in events]
-              assert 'agent_state' in kinds, kinds
-              assert 'avatar_action' in kinds, kinds
-              assert 'text_delta' in kinds, kinds
-              print('TONY_E2E=PASS')
-              print('EVENT_TYPES=', kinds)
-              print('FINAL_ACTION=', final.get('action'))
-              print('FINAL_EMOTION=', final.get('emotion'))
-              print('FINAL_TEXT=', text[:500].replace('\n',' '))
+              assert 'agent_state' in kinds, (label, kinds)
+              assert 'text_delta' in kinds, (label, kinds)
+              print(f'{label}_AGENT=', final.get('agent'))
+              print(f'{label}_FALLBACK=', final.get('fallback'))
+              print(f'{label}_ACTION=', final.get('action'))
+              print(f'{label}_EMOTION=', final.get('emotion'))
+              print(f'{label}_TEXT=', text[:800].replace('\n',' '))
+              return text, final
+
+          async def main():
+              async with websockets.connect(
+                  'ws://127.0.0.1:18790/agent/ws', ping_interval=20, ping_timeout=20
+              ) as ws:
+                  first=await recv_json(ws, 10)
+                  second=await recv_json(ws, 10)
+                  assert first == {'type':'agent_state','state':'idle'}, first
+                  assert second.get('type') == 'avatar_action', second
+
+                  en, _ = await ask(ws, 'In one short sentence, introduce yourself as Tony.', 'CASUAL_EN')
+                  assert 'tony' in en.casefold(), en
+
+                  zh, _ = await ask(ws, '你怕冷吗？请只用一句自然的中文回答。', 'CASUAL_ZH')
+                  assert any('\u4e00' <= ch <= '\u9fff' for ch in zh), zh
+
+                  chem, _ = await ask(ws, 'Chemistry check: in one short sentence, what is the oxidation state of oxygen in H2O?', 'CHEMISTRY')
+                  normalized=chem.replace('−','-').replace('–','-').replace('—','-').replace(' ','')
+                  assert '-2' in normalized or '−2' in chem, chem
+
+                  marker='CATALYST-731'
+                  await ask(ws, f'Remember this exact test marker for my next message: {marker}. Reply briefly.', 'MEMORY_SET')
+                  recalled, _ = await ask(ws, 'What exact test marker did I ask you to remember in my previous message?', 'MEMORY_GET')
+                  assert marker.casefold() in recalled.casefold(), recalled
+
+                  print('TONY_REAL_CONVERSATION_E2E=PASS')
 
           asyncio.run(main())
           PY
