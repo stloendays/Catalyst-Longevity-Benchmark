@@ -1,0 +1,39 @@
+name: Integrate tested Tony full exposure
+
+on:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/workflows/tony-full-exposure-integrate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-full-exposure-integration
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bear-agent-pet
+          fetch-depth: 0
+
+      - name: Cherry-pick Windows-tested rendering patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin cloud-tony-full-exposure-work
+          git cherry-pick d1a36ff133a9d380176248a7b631faa8c892bbcb
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          git pull --rebase origin feature/bear-agent-pet
+          git push origin HEAD:feature/bear-agent-pet
+          echo 'TONY_FULL_EXPOSURE_INTEGRATION=PASS'
