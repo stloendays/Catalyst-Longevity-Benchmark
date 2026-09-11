@@ -1,0 +1,140 @@
+name: Local2B MCP Step 3C fresh balanced server training
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - training/local2b_mcp/.stage3c-train-trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local2b-server-lora-training
+  cancel-in-progress: false
+
+jobs:
+  train-stage3c:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 420
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Validate server runner syntax
+        run: bash -n training/local2b_mcp/run_server_qvac_lora.sh
+
+      - name: Rebuild and verify frozen Stage 3C curriculum
+        run: |
+          set -euo pipefail
+          rm -rf build/step3c-server
+          mkdir -p build/step3c-server
+          python3 training/local2b_mcp/generate_stage2_dataset.py \
+            --out build/step3c-server/stage2 \
+            --train 16000 --val 1600 --test 1600 --seed 20260908
+          python3 training/local2b_mcp/validate_dataset.py build/step3c-server/stage2
+          python3 training/local2b_mcp/prepare_qvac_sft_stage3c.py \
+            --input build/step3c-server/stage2/train.jsonl \
+            --output build/step3c-server/train.jsonl \
+            --manifest build/step3c-server/manifest.json \
+            --seed 20260908
+          test "$(sha256sum build/step3c-server/train.jsonl | awk '{print $1}')" = 8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b
+          python3 - <<'PY'
+          import json
+          m=json.load(open('build/step3c-server/manifest.json'))
+          assert m['records']==48
+          assert m['selected_tool_count_distribution']=={'7':48}
+          assert len(m['task_counts'])==16
+          assert m['training_initialization']=='fresh_from_base_no_lora_init'
+          print('STAGE3C_FROZEN_INPUT=PASS')
+          PY
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Transfer frozen Stage 3C input and runner
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'mkdir -p /home/ubuntu/local2b-training/step3c && rm -rf /home/ubuntu/local2b-training/step3c/checkpoints'
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            build/step3c-server/train.jsonl \
+            build/step3c-server/manifest.json \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3c/
+          scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+            training/local2b_mcp/run_server_qvac_lora.sh \
+            ubuntu@150.158.27.206:/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 \
+            'chmod +x /home/ubuntu/local2b-training/run_server_qvac_lora.sh && bash -n /home/ubuntu/local2b-training/run_server_qvac_lora.sh && test "$(sha256sum /home/ubuntu/local2b-training/step3c/train.jsonl | awk '\''{print $1}'\'')" = 8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b'
+
+      - name: Train fresh Stage 3C LoRA from base
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=240 -o ConnectTimeout=15 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT=/home/ubuntu/local2b-training/step3c
+          WRAPPER=/home/ubuntu/local2b-training/run_server_qvac_lora.sh
+          MODEL=/opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf
+          BASE_SHA=d6bd9f4175302658c1d704e44858842606652bbe53c56cd542e31ff10d0cfd58
+          DATA_SHA=8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b
+          test "$(sha256sum "$MODEL" | awk '{print $1}')" = "$BASE_SHA"
+          test "$(sha256sum "$ROOT/train.jsonl" | awk '{print $1}')" = "$DATA_SHA"
+          test -x /home/ubuntu/qvac-trainer-step3/llama-finetune-lora
+          bash -n "$WRAPPER"
+
+          # Fresh-from-base: intentionally NO --lora-init and NO --install.
+          flock -n /home/ubuntu/local2b-training/server-lora.lock \
+            "$WRAPPER" \
+            --data "$ROOT/train.jsonl" \
+            --output "$ROOT/local2b-mcp-step3c-r4a4-qv.gguf" \
+            --context 1024 --batch 8 --ubatch 4 \
+            --rank 4 --alpha 4 --modules attn_q,attn_v \
+            --epochs 1 --learning-rate 2e-6 --seed 20260908 \
+            --timeout-seconds 21600 \
+            --checkpoint-steps 10 \
+            --checkpoint-dir "$ROOT/checkpoints" \
+            --log "$ROOT/train.log" \
+            --result "$ROOT/result.txt"
+
+          test -s "$ROOT/local2b-mcp-step3c-r4a4-qv.gguf"
+          test -s "$ROOT/result.txt"
+          grep -q '^lora_init=$' "$ROOT/result.txt"
+          grep -q '^lora_init_sha256=$' "$ROOT/result.txt"
+          grep -q '^data_sha256=8987d23fb7be09da32854b6c37f868d8057ea4e7602332b54aa8c4056f6ae14b$' "$ROOT/result.txt"
+          grep -q '^alpha=4$' "$ROOT/result.txt"
+          grep -q '^learning_rate=2e-6$' "$ROOT/result.txt"
+          grep -q '^context=1024$' "$ROOT/result.txt"
+          curl -fsS http://127.0.0.1:18080/v1/models >/dev/null
+          echo 'STAGE3C_TRAINING_BODY=PASS'
+          cat "$ROOT/result.txt"
+          REMOTE
+
+      - name: Collect Stage 3C training evidence
+        if: always()
+        run: |
+          mkdir -p build/step3c-server-result
+          for f in result.txt train.log manifest.json; do
+            scp -o BatchMode=yes -o ConnectTimeout=15 -i "$HOME/.ssh/server_key" \
+              "ubuntu@150.158.27.206:/home/ubuntu/local2b-training/step3c/$f" \
+              build/step3c-server-result/ || true
+          done
+
+      - name: Upload Stage 3C training evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local2b-mcp-step3c-server-result
+          path: build/step3c-server-result/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/server_key"
