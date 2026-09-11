@@ -17,7 +17,6 @@ jobs:
     timeout-minutes: 10
     env:
       TONY_SERVER_IP: 150.158.27.206
-      TONY_HOST: 150-158-27-206.sslip.io
     steps:
       - name: Prepare SSH key
         shell: bash
@@ -30,30 +29,44 @@ jobs:
           chmod 600 "$RUNNER_TEMP/tony_server_key"
           echo "TONY_SSH_KEY=$RUNNER_TEMP/tony_server_key" >> "$GITHUB_ENV"
 
-      - name: Inspect Caddy TLS configuration
+      - name: Probe public IP-mapped hostnames
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" \
-            "echo '=== CADDYFILE ==='; sudo cat /etc/caddy/Caddyfile; echo '=== SERVICE ENV ==='; sudo systemctl show caddy -p Environment --no-pager; echo '=== STAGING REFERENCES ==='; sudo grep -R -n -E 'acme-staging|CADDY_ACME_CA' /etc/caddy /etc/systemd/system /etc/default /etc/environment 2>/dev/null || true; echo '=== LISTENERS ==='; sudo ss -lntp | grep -E ':(80|443)\\b' || true"
+          chosen=''
+          for host in 150.158.27.206.nip.io 150-158-27-206.nip.io 150-158-27-206.sslip.io; do
+            echo "=== $host ==="
+            addrs="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u | tr '\n' ' ')"
+            echo "A=$addrs"
+            if printf '%s\n' "$addrs" | grep -qw "$TONY_SERVER_IP"; then
+              chosen="$host"
+              break
+            fi
+          done
+          test -n "$chosen" || { echo 'No candidate hostname resolves directly to Tony server IP'; exit 1; }
+          echo "TONY_HOST=$chosen" >> "$GITHUB_ENV"
+          echo "CHOSEN_TONY_HOST=$chosen"
 
-      - name: Restart Caddy and force certificate retry
+      - name: Configure Caddy for chosen hostname and request certificate
         shell: bash
         run: |
           set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" \
-            "sudo systemctl restart caddy; sleep 12; sudo systemctl --no-pager --full status caddy | head -n 35; echo '=== RECENT TLS LOGS ==='; sudo journalctl -u caddy -n 100 --no-pager | grep -E 'certificate|obtaining|challenge|tls.obtain|error|serving|renew' || true"
+          remote_cmd="printf '%s\\n' '$TONY_HOST {' '    encode zstd gzip' '    reverse_proxy 127.0.0.1:18790' '}' | sudo tee /etc/caddy/Caddyfile >/dev/null; sudo caddy validate --config /etc/caddy/Caddyfile; sudo systemctl restart caddy; sleep 15; sudo systemctl is-active caddy; echo ===CADDYFILE===; sudo cat /etc/caddy/Caddyfile; echo ===TLS_LOGS===; sudo journalctl -u caddy -n 120 --no-pager | grep -E 'certificate|obtaining|challenge|tls.obtain|error|serving|renew' || true"
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i "$TONY_SSH_KEY" "ubuntu@$TONY_SERVER_IP" "$remote_cmd"
 
-      - name: Verify public HTTP and HTTPS from outside server
+      - name: Verify chosen hostname over public HTTPS
         shell: bash
         run: |
           set -euo pipefail
+          echo "HOST=$TONY_HOST"
           echo '=== TCP ==='
           timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/80" && echo PUBLIC_TCP_80=OPEN
           timeout 8 bash -c "</dev/tcp/$TONY_SERVER_IP/443" && echo PUBLIC_TCP_443=OPEN
+          echo '=== DNS ==='
+          getent ahostsv4 "$TONY_HOST" | head
           echo '=== HTTP ==='
           curl -sS -D - --max-time 15 -o /dev/null "http://$TONY_HOST/health"
           echo '=== HTTPS ==='
-          curl -fsS --max-time 20 "https://$TONY_HOST/health" | tee /tmp/health.json
+          curl -fsS --retry 4 --retry-delay 5 --max-time 20 "https://$TONY_HOST/health" | tee /tmp/health.json
           grep -q '"ok":true' /tmp/health.json
           echo PUBLIC_HTTPS_HEALTH=PASS
