@@ -8,7 +8,7 @@ on:
     paths:
       - 'bear_agent_pet/client/**'
       - 'bear_agent_pet/server_gateway/**'
-      - '.github/scripts/apply_tony_v096_visual_safety.py'
+      - '.github/scripts/apply_tony_v096_connection_ux.py'
       - '.github/workflows/_temporary-tony-v096-device-code.yml'
 
 permissions:
@@ -27,8 +27,8 @@ jobs:
           ref: feature/tony-v096-device-code
           fetch-depth: 0
 
-      - name: Apply visual safety and first-run regression fixes
-        run: python .github/scripts/apply_tony_v096_visual_safety.py
+      - name: Apply default device-code connection UX
+        run: python .github/scripts/apply_tony_v096_connection_ux.py
 
       - name: Compile server pairing modules
         run: python -m compileall -q bear_agent_pet/server_gateway/app bear_agent_pet/server_gateway/tools
@@ -44,7 +44,9 @@ jobs:
           set -euo pipefail
           grep -q 'requestDevicePairing' bear_agent_pet/client/src/AgentClient.h
           grep -q 'pairingCodeReady' bear_agent_pet/client/src/AgentClient.h
-          grep -q 'startAutomaticPairing' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'void PetWindow::configureConnection(){' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -A2 'void PetWindow::configureConnection(){' bear_agent_pet/client/src/PetWindowV7.cpp | grep -q 'startAutomaticPairing();'
+          grep -q 'configureRecoveryConnection' bear_agent_pet/client/src/PetWindowV7.cpp
           grep -q '连接码：%1' bear_agent_pet/client/src/PetWindowV7.cpp
           grep -q 'blinkSequence\[\].*{-1, 1, 1, -1, -1}' bear_agent_pet/client/src/PetWindowV7.cpp
           if grep -q 'blinkSequence\[\].*2' bear_agent_pet/client/src/PetWindowV7.cpp; then
@@ -64,12 +66,12 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/src/main.cpp
           if git diff --cached --quiet; then
             echo 'TONY_V096_SOURCE_ALREADY_INTEGRATED=PASS'
             exit 0
           fi
-          git commit -m 'Fix Tony blink timing and hug safety regressions'
+          git commit -m 'Make Tony device code the default connection flow'
           git push origin HEAD:feature/tony-v096-device-code
 
   windows:
