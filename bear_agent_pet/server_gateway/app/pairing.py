@@ -55,12 +55,28 @@ def _write_store(data: dict[str, Any]) -> None:
         path.parent.chmod(0o700)
     except OSError:
         pass
+
+    # pairing_cli is often run from an administrative root shell while the gateway
+    # itself runs as the owner of the pairing-store directory (normally ubuntu).
+    # Preserve that service ownership on atomic replacement so root approval cannot
+    # turn pairing.json into root:root 0600 and make every saved device disappear
+    # from the gateway's point of view.
+    try:
+        parent_stat = path.parent.stat()
+    except OSError:
+        parent_stat = None
+
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     try:
         temp.chmod(0o600)
     except OSError:
         pass
+    if parent_stat is not None and hasattr(os, "geteuid") and os.geteuid() == 0:
+        try:
+            os.chown(temp, parent_stat.st_uid, parent_stat.st_gid)
+        except OSError:
+            pass
     temp.replace(path)
 
 
