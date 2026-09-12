@@ -30,6 +30,7 @@ _PAIR_REQUESTS: dict[str, list[float]] = {}
 _PAIR_WINDOW_SECONDS = 600
 _PAIR_MAX_FAILURES = 8
 _PAIR_MAX_REQUESTS = 12
+_DEVICE_PAIR_TTL_SECONDS = 72 * 60 * 60
 _BATCH_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_BATCH_BYTES = 768 * 1024
 _MAX_EVENTS = 10000
@@ -209,6 +210,7 @@ async def health() -> dict[str, Any]:
         "pairing_supported": True,
         "pairing_mode": "device-code+recovery",
         "device_code_pairing": True,
+        "device_code_ttl_seconds": _DEVICE_PAIR_TTL_SECONDS,
         "reusable_friend_code_recovery": reusable_friend_code_enabled(),
         "paired_devices": paired_device_count(),
         "local_tools_enabled": False,
@@ -223,7 +225,10 @@ async def request_device_pairing(pair_request: DevicePairStartRequest, request: 
     if _device_request_rate_limited(key):
         raise HTTPException(status_code=429, detail="Too many device pairing requests. Try again later.")
     _record_device_request(key)
-    request_id, code, expires_at = create_device_pairing_request(pair_request.device_name, ttl_seconds=600)
+    request_id, code, expires_at = create_device_pairing_request(
+        pair_request.device_name,
+        ttl_seconds=_DEVICE_PAIR_TTL_SECONDS,
+    )
     return {
         "ok": True,
         "status": "pending",
