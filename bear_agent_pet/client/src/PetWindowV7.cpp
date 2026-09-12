@@ -402,6 +402,13 @@ QString PetWindow::assetKeyForAction(Action action) const {
     case Action::AdjustGlasses:return "adjust_glasses";
     case Action::RemoveGlasses:return "remove_glasses";
     case Action::Wave:return "wave";
+    case Action::HeadTilt:return "curious";
+    case Action::Nod:return "idle";
+    case Action::Paw:return "wave";
+    case Action::Hop:return "celebrate";
+    case Action::Spin:return "celebrate";
+    case Action::Sniff:return "curious";
+    case Action::Dance:return "celebrate";
     }
     return "idle";
 }
@@ -421,6 +428,13 @@ int PetWindow::frameStrideForAction(Action action) const {
     case Action::Celebrate:return 3;
     case Action::BlushWave:return 4;
     case Action::Wave:return 4;
+    case Action::HeadTilt:return 5;
+    case Action::Nod:return 4;
+    case Action::Paw:return 3;
+    case Action::Hop:return 3;
+    case Action::Spin:return 2;
+    case Action::Sniff:return 4;
+    case Action::Dance:return 3;
     case Action::AskHug:return 5;
     case Action::Hug:return 5;
     case Action::Study:return 5;
@@ -530,6 +544,13 @@ void PetWindow::paintEvent(QPaintEvent*) {
     case Action::AdjustGlasses: dy=-qAbs(int(2*qSin(t*1.6))); rotation=-1.8*qSin(t*1.2); break;
     case Action::RemoveGlasses: scale=1.04+0.012*qSin(t*.8); rotation=-1.0; break;
     case Action::Wave: dy=-qAbs(int(3*qSin(t*1.6))); rotation=3.0*qSin(t*1.8); break;
+    case Action::HeadTilt: dx=int(2*qSin(t*.4)); rotation=5.5*qSin(t*.55); scale=1.008; break;
+    case Action::Nod: dy=int(3*qSin(t*1.4)); scale=1.0+0.008*qSin(t*1.4); break;
+    case Action::Paw: dy=-qAbs(int(2*qSin(t*1.7))); rotation=4.2*qSin(t*1.7); scale=1.012; break;
+    case Action::Hop: dy=-qAbs(int(10*qSin(t*1.15))); scale=1.0+0.025*qSin(t*1.15); rotation=1.5*qSin(t*.9); break;
+    case Action::Spin: rotation=(frame_%40)*9.0; scale=.985; break;
+    case Action::Sniff: dx=int(3*qSin(t*1.2)); dy=qAbs(int(2*qSin(t*.8))); rotation=-2.0+1.5*qSin(t*.9); break;
+    case Action::Dance: dx=int(5*qSin(t*1.1)); dy=-qAbs(int(5*qSin(t*1.7))); rotation=5.0*qSin(t*1.1); scale=1.01+0.015*qSin(t*1.4); break;
     }
 
     if(!dragging_) {
@@ -708,6 +729,13 @@ PetWindow::Action PetWindow::actionFromWire(const QString &name) const {
     if(n=="adjust_glasses") return Action::AdjustGlasses;
     if(n=="remove_glasses") return Action::RemoveGlasses;
     if(n=="wave" || n=="paw_wave" || n=="ear_wiggle" || n=="wake") return Action::Wave;
+    if(n=="head_tilt" || n=="tilt_head" || n=="curious_tilt") return Action::HeadTilt;
+    if(n=="nod" || n=="agree" || n=="yes") return Action::Nod;
+    if(n=="paw" || n=="high_five" || n=="paw_up") return Action::Paw;
+    if(n=="hop" || n=="jump" || n=="bounce") return Action::Hop;
+    if(n=="spin" || n=="twirl") return Action::Spin;
+    if(n=="sniff" || n=="smell") return Action::Sniff;
+    if(n=="dance" || n=="happy_dance" || n=="wiggle") return Action::Dance;
     if(n=="blanket" || n=="warm_hands" || n=="tea") return Action::Shiver;
     return Action::Idle;
 }
@@ -752,6 +780,19 @@ void PetWindow::runIdleMoment(){
        QRandomGenerator::global()->bounded(100)<26) {
         emotion_="curious";
         setAction(Action::Peek,1700);
+        scheduleIdleMoment();
+        return;
+    }
+
+    // Small, quiet micro-actions make Tony feel alive without turning idle mode
+    // into a distraction. Flashy actions remain user/agent initiated.
+    if(QRandomGenerator::global()->bounded(100)<18) {
+        switch(QRandomGenerator::global()->bounded(4)) {
+        case 0: emotion_="curious"; setAction(Action::HeadTilt,1500); break;
+        case 1: emotion_="content"; setAction(Action::Nod,1100); break;
+        case 2: emotion_="curious"; setAction(Action::Sniff,1700); break;
+        default: emotion_="friendly"; setAction(Action::Paw,1300); break;
+        }
         scheduleIdleMoment();
         return;
     }
@@ -1519,6 +1560,8 @@ QString PetWindow::actionName() const {
     case Action::Shiver:return "shivering"; case Action::AskHug:return "asking for a hug"; case Action::Hug:return "hugging";
     case Action::Blush:return "blushing"; case Action::BlushWave:return "blushing for Paula"; case Action::Study:return "studying";
     case Action::AdjustGlasses:return "adjusting glasses"; case Action::RemoveGlasses:return "no-glasses mode"; case Action::Wave:return "waving";
+    case Action::HeadTilt:return "tilting his head"; case Action::Nod:return "nodding"; case Action::Paw:return "raising a paw";
+    case Action::Hop:return "hopping"; case Action::Spin:return "spinning"; case Action::Sniff:return "sniffing curiously"; case Action::Dance:return "happy dancing";
     }
     return "idle";
 }
@@ -1680,6 +1723,14 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto noGlasses=actions->addAction(uiText("Take off glasses","摘掉眼镜"));
     auto cold=actions->addAction(uiText("Feeling cold","有点冷"));
     auto sleep=actions->addAction(uiText("Sleep","睡觉"));
+    actions->addSeparator();
+    auto headTilt=actions->addAction(uiText("Tilt head","歪歪头"));
+    auto nod=actions->addAction(uiText("Nod","点点头"));
+    auto paw=actions->addAction(uiText("High-five / paw","举爪 / 击掌"));
+    auto sniff=actions->addAction(uiText("Sniff around","好奇地闻一闻"));
+    auto hop=actions->addAction(uiText("Hop","开心跳一下"));
+    auto spin=actions->addAction(uiText("Spin","转一圈"));
+    auto dance=actions->addAction(uiText("Happy dance","开心舞"));
 
     m.addSeparator();
     auto quit=m.addAction(uiText("Quit Tony","退出 Tony"));
@@ -1765,6 +1816,13 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);
     else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }
     else if(chosen==sleep) setAction(Action::Sleep);
+    else if(chosen==headTilt) { emotion_="curious"; setAction(Action::HeadTilt,1700); }
+    else if(chosen==nod) { emotion_="content"; setAction(Action::Nod,1300); }
+    else if(chosen==paw) { emotion_="friendly"; setAction(Action::Paw,1600); }
+    else if(chosen==sniff) { emotion_="curious"; setAction(Action::Sniff,1900); }
+    else if(chosen==hop) { emotion_="happy"; setAction(Action::Hop,1700); }
+    else if(chosen==spin) { emotion_="playful"; setAction(Action::Spin,1800); }
+    else if(chosen==dance) { emotion_="happy"; setAction(Action::Dance,2600); }
     else if(chosen==quit) qApp->quit();
 }
 
