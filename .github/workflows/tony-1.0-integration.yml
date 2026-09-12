@@ -1,3 +1,4 @@
+# Tony 1.0 isolated integration gate: preserves v0.99 full-exposure rendering while merging connectivity fixes.
 name: Tony 1.0 integration
 
 on:
@@ -163,7 +164,6 @@ jobs:
           if (-not $pet.Contains('if(action_==Action::Walk && walkDirection_>0) p.scale(-1.0,1.0);')) { throw 'Walk facing fix missing' }
           if ($pet.Contains('if(action_==Action::Walk && walkDirection_<0) p.scale(-1.0,1.0);')) { throw 'Reversed walk facing rule remains' }
 
-          # Preserve the v0.99 no-auto-crop/full-exposure rendering line in Tony 1.0.
           if (-not $pet.Contains('setFixedSize(280,250);')) { throw 'Wide full-exposure canvas missing' }
           if (-not $pet.Contains('QRectF(0,0,sprite->width(),sprite->height())')) { throw 'Full source-canvas draw missing' }
           if ($pet.Contains('source=QRect(QPoint(minX,minY)')) { throw 'Legacy source auto-cropping returned' }
