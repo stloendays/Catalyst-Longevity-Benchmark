@@ -1,0 +1,102 @@
+name: Tony zero-crop guard
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/tony-102-zero-crop-guard
+    paths:
+      - '.github/scripts/apply_tony_zero_crop_guard.py'
+      - '.github/workflows/tony-zero-crop-guard.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-zero-crop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    outputs:
+      patched_sha: ${{ steps.sha.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-102-zero-crop-guard
+          fetch-depth: 0
+
+      - name: Apply zero-crop source patch
+        run: python .github/scripts/apply_tony_zero_crop_guard.py
+
+      - name: Verify source invariant
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'if(qAlpha(line[x])>0)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'const qreal zeroCropFit=qMin(' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'qBound(minCenterX,desiredCenterX,maxCenterX)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'qBound(minCenterY,desiredCenterY,maxCenterY)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'QRectF(0,0,sprite->width(),sprite->height())' bear_agent_pet/client/src/PetWindowV7.cpp
+          ! grep -F 'if(qAlpha(line[x])>8)' bear_agent_pet/client/src/PetWindowV7.cpp
+          ! grep -F 'p.translate(QPointF(width()/2.0+dx,pivotY));' bear_agent_pet/client/src/PetWindowV7.cpp
+          echo TONY_ZERO_CROP_SOURCE_GUARD=PASS
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          if git diff --cached --quiet; then
+            echo 'Source already patched'
+          else
+            git commit -m 'Guarantee zero-crop Tony rendering'
+            git push origin HEAD:fix/tony-102-zero-crop-guard
+          fi
+
+      - name: Record patched SHA
+        id: sha
+        shell: bash
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows-build:
+    needs: patch
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-102-zero-crop-guard
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony state artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Verify compiled zero-crop source invariants
+        shell: pwsh
+        run: |
+          $src = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          if ($src -notmatch 'if\(qAlpha\(line\[x\]\)>0\)') { throw 'alpha zero-crop threshold missing' }
+          if ($src -notmatch 'zeroCropFit') { throw 'zeroCropFit missing' }
+          if ($src -notmatch 'qBound\(minCenterX,desiredCenterX,maxCenterX\)') { throw 'X clamp missing' }
+          if ($src -notmatch 'qBound\(minCenterY,desiredCenterY,maxCenterY\)') { throw 'Y clamp missing' }
+          if ($src -match 'if\(qAlpha\(line\[x\]\)>8\)') { throw 'legacy alpha threshold remains' }
+          Write-Host 'TONY_ZERO_CROP_WINDOWS_BUILD=PASS'
