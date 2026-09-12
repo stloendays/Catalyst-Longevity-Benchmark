@@ -3,208 +3,96 @@ name: Build Tony desktop pet
 on:
   workflow_dispatch:
   push:
+    branches:
+      - integration/tony-v102-zero-crop-release
     paths:
-      - 'bear_agent_pet/client/**'
-      - '.github/tony_assets_bootstrap/**'
+      - '.github/scripts/apply_tony_zero_crop_guard_release.py'
       - '.github/workflows/bear-agent-build-windows.yml'
 
 permissions:
   contents: write
 
 concurrency:
-  group: tony-windows-${{ github.ref }}
-  cancel-in-progress: true
+  group: tony-v102-release-replay
+  cancel-in-progress: false
 
 jobs:
-  integrate-artwork:
+  patch:
     runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.integrate.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/bear-agent-pet
+          ref: integration/tony-v102-zero-crop-release
           fetch-depth: 0
-
-      - name: Integrate seven Tony living-interaction animations
-        id: integrate
-        shell: bash
+      - name: Apply verified zero-crop logic on latest release head
+        run: python3 .github/scripts/apply_tony_zero_crop_guard_release.py
+      - name: Verify zero-crop source invariant
         run: |
-          set -euo pipefail
-          PAYLOAD_DIR='.github/tony_assets_bootstrap'
-          echo 'changed=false' >> "$GITHUB_OUTPUT"
-          if ! compgen -G "$PAYLOAD_DIR/chunk_*" > /dev/null; then
-            echo 'TONY_V010_ARTWORK_ALREADY_INTEGRATED=PASS'
-            exit 0
-          fi
-
-          cat "$PAYLOAD_DIR"/chunk_* | tr -d '\r\n ' | base64 -d > /tmp/tony-v010-assets.zip
-          unzip -t /tmp/tony-v010-assets.zip
-          unzip -o /tmp/tony-v010-assets.zip -d .
-          python bear_agent_pet/client/tools/apply_v010_interactions.py
-          python bear_agent_pet/client/tools/validate_state_assets.py
-
-          rm -rf "$PAYLOAD_DIR"
-          rm -f .github/workflows/tony-v010-integrate.yml
-          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.h
-          rm -f bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h
-          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.cpp
-          rm -f bear_agent_pet/client/src/EmbeddedActionAssets_pat.cpp
-
+          grep -F 'const qreal zeroCropFit=qMin(' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'qBound(minCenterX,desiredCenterX,maxCenterX)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'qBound(minCenterY,desiredCenterY,maxCenterY)' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -F 'if(qAlpha(line[x])>0)' bear_agent_pet/client/src/PetWindowV7.cpp
+          ! grep -F 'if(qAlpha(line[x])>8)' bear_agent_pet/client/src/PetWindowV7.cpp
+      - name: Commit source fix
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Add seven living Tony interaction animations'
-          git push origin HEAD:feature/bear-agent-pet
-          echo 'changed=true' >> "$GITHUB_OUTPUT"
-          echo 'TONY_V010_ARTWORK_INTEGRATION=PASS'
+          git add bear_agent_pet/client/src/PetWindowV7.cpp
+          git commit -m 'Replay zero-crop rendering on Tony v1.01 release head'
+          git push origin HEAD:integration/tony-v102-zero-crop-release
 
-  build:
-    needs: integrate-artwork
-    if: needs.integrate-artwork.outputs.changed != 'true'
+  windows-build:
+    needs: patch
     runs-on: windows-2022
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
-      - name: Read Tony version
-        id: version
-        shell: pwsh
-        run: |
-          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid Tony VERSION: $version" }
-          "TONY_VERSION=$version" >> $env:GITHUB_ENV
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "TONY_VERSION=$version"
-
+        with:
+          ref: integration/tony-v102-zero-crop-release
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
           arch: 'win64_msvc2022_64'
           modules: 'qtwebsockets'
           cache: true
-
-      - name: Validate Tony state artwork
+      - name: Verify release version and artwork
         shell: pwsh
-        run: python bear_agent_pet/client/tools/validate_state_assets.py
-
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.1') { throw "Expected 1.0.1, got $version" }
+          python bear_agent_pet/client/tools/validate_state_assets.py
       - name: Configure
         shell: pwsh
         run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
-
       - name: Build
         shell: pwsh
         run: cmake --build bear_agent_pet/client/build --config Release --parallel
-
-      - name: Deploy Qt runtime and Tony artwork
+      - name: Verify compiled zero-crop source invariant
         shell: pwsh
         run: |
-          $package = "$PWD/bear_agent_pet/client/package"
-          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
-          cmake --install bear_agent_pet/client/build --config Release --prefix $package
-          if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
-          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
-          "TonyDesktopPet $env:TONY_VERSION`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
-          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
-          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
-
-          $root = (Resolve-Path $package).Path
-          $managed = Get-ChildItem $package -Recurse -File | ForEach-Object {
-            $_.FullName.Substring($root.Length + 1)
-          } | Sort-Object
-          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
-          if (-not (Test-Path "$package/tony-install-root.marker")) { throw 'Managed install marker missing' }
-          if (-not (Test-Path "$package/tony-file-list.txt")) { throw 'Managed file list missing' }
-
-      - name: Verify packaged artwork and executable
-        shell: pwsh
-        run: |
-          $source = (Resolve-Path bear_agent_pet/client/assets).Path
-          $package = (Resolve-Path bear_agent_pet/client/package).Path
-          foreach ($required in @('TonyDesktopPet.exe', 'VERSION', 'VERSION.txt', 'tony-install-root.marker', 'tony-file-list.txt', 'assets/states', 'assets/animations')) {
-            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          $src=Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          foreach($token in @('const qreal zeroCropFit=qMin(','qBound(minCenterX,desiredCenterX,maxCenterX)','qBound(minCenterY,desiredCenterY,maxCenterY)','if(qAlpha(line[x])>0)','QRectF(0,0,sprite->width(),sprite->height())')) {
+            if(-not $src.Contains($token)) { throw "Missing zero-crop token: $token" }
           }
-          if ((Get-Content "$package/VERSION" -Raw).Trim() -ne $env:TONY_VERSION) { throw 'Packaged VERSION mismatch' }
-          $productVersion = (Get-Item "$package/TonyDesktopPet.exe").VersionInfo.ProductVersion
-          if ($productVersion -notlike "$env:TONY_VERSION*") { throw "EXE ProductVersion mismatch: $productVersion" }
-          foreach ($file in Get-ChildItem $source -File -Recurse) {
-            $relative = [IO.Path]::GetRelativePath($source, $file.FullName)
-            $deployed = Join-Path "$package/assets" $relative
-            if (-not (Test-Path $deployed)) { throw "Missing artwork: $relative" }
-            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $deployed).Hash) {
-              throw "Packaged artwork differs: $relative"
-            }
-          }
-          Write-Host "TONY_VERSION_SYNC=PASS version=$env:TONY_VERSION exe=$productVersion"
-          Write-Host 'TONY_PACKAGE_ASSETS=PASS (formal assets validated and all packaged bytes match SHA256)'
-          $originalPath = $env:PATH
-          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-          try {
-            $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
-            try {
-              Start-Sleep -Seconds 6
-              if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
-              Write-Host 'TONY_DEPLOYED_SMOKE=PASS'
-            } finally {
-              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-            }
-          } finally { $env:PATH = $originalPath }
+          if($src.Contains('if(qAlpha(line[x])>8)')) { throw 'Legacy alpha threshold remains' }
+          Write-Host 'TONY_RELEASE_ZERO_CROP_BUILD=PASS'
 
-      - uses: actions/upload-artifact@v4
+  cleanup:
+    needs: windows-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: TonyDesktopPet-${{ steps.version.outputs.version }}-windows-x64
-          path: bear_agent_pet/client/package
-          if-no-files-found: error
-
-      - name: Build signed-by-hash update manifest
-        if: github.ref == 'refs/heads/feature/bear-agent-pet'
-        id: update_package
-        shell: pwsh
+          ref: integration/tony-v102-zero-crop-release
+          fetch-depth: 0
+      - name: Restore registered workflow and remove temporary replay files
         run: |
-          $version = $env:TONY_VERSION
-          $zip = Join-Path $PWD 'TonyDesktopPet-windows-x64.zip'
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path bear_agent_pet/client/package/* -DestinationPath $zip -CompressionLevel Optimal
-          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          $size = (Get-Item $zip).Length
-          $download = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/tony-desktop-latest/TonyDesktopPet-windows-x64.zip?run=$env:GITHUB_RUN_ID"
-          $manifest = [ordered]@{
-            schema = 1
-            product = 'Tony Desktop Pet'
-            platform = 'windows-x64'
-            version = $version
-            url = $download
-            sha256 = $sha
-            size = $size
-            published_at = (Get-Date).ToUniversalTime().ToString('o')
-            commit = $env:GITHUB_SHA
-            minimum_updater_version = '0.9.0'
-          } | ConvertTo-Json
-          Set-Content -LiteralPath latest.json -Value $manifest -Encoding utf8
-          Write-Host "TONY_UPDATE_MANIFEST=PASS version=$version sha256=$sha size=$size"
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "sha256=$sha" >> $env:GITHUB_OUTPUT
-
-      - name: Publish Tony automatic update source
-        if: github.ref == 'refs/heads/feature/bear-agent-pet'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          gh release view tony-desktop-latest --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create tony-desktop-latest `
-              --repo $env:GITHUB_REPOSITORY `
-              --target $env:GITHUB_SHA `
-              --prerelease `
-              --title 'Tony Desktop Pet automatic update channel' `
-              --notes 'Managed automatically by the Tony Windows build. latest.json is the updater manifest.'
-            if ($LASTEXITCODE -ne 0) { throw 'Could not create Tony update release.' }
-          }
-          gh release upload tony-desktop-latest `
-            TonyDesktopPet-windows-x64.zip latest.json `
-            --repo $env:GITHUB_REPOSITORY `
-            --clobber
-          if ($LASTEXITCODE -ne 0) { throw 'Could not publish Tony update assets.' }
-          Write-Host "TONY_UPDATE_PUBLISH=PASS version=${{ steps.update_package.outputs.version }} sha256=${{ steps.update_package.outputs.sha256 }}"
+          git fetch origin release/tony-1.0-integration
+          git checkout origin/release/tony-1.0-integration -- .github/workflows/bear-agent-build-windows.yml
+          rm -f .github/scripts/apply_tony_zero_crop_guard_release.py
+          rm -f .github/workflows/tony-v102-release-zero-crop-replay.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Clean temporary Tony v1.02 replay machinery'
+          git push origin HEAD:integration/tony-v102-zero-crop-release
