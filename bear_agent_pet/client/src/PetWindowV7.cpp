@@ -569,7 +569,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
         for(int y=0; y<image.height(); ++y) {
             const QRgb *line=reinterpret_cast<const QRgb*>(image.constScanLine(y));
             for(int x=0; x<image.width(); ++x) {
-                if(qAlpha(line[x])>8) {
+                if(qAlpha(line[x])>0) {
                     minX=qMin(minX,x); minY=qMin(minY,y);
                     maxX=qMax(maxX,x); maxY=qMax(maxY,y);
                 }
@@ -591,22 +591,46 @@ void PetWindow::paintEvent(QPaintEvent*) {
         const qreal visibleCy=(minY+maxY+1)/2.0;
         const qreal groundY=205.0+dy;
 
-        // Reserve a real top margin after rotation, not just before it. Hug is the
-        // widest/most expanded pose and gets 16 px; other poses keep at least 8 px.
-        const qreal topSafety=(action_==Action::Hug) ? 16.0 : 8.0;
-        const qreal sideSafety=14.0;
+        // Zero-crop invariant: after scaling and rotation, every visible alpha
+        // pixel must remain inside the client area. Animation offsets are only
+        // preferences; the rendered center is clamped inward whenever a pose
+        // would otherwise push an ear, paw, tail or prop outside the window.
+        const qreal topSafety=(action_==Action::Hug) ? 16.0 : 10.0;
+        const qreal sideSafety=10.0;
+        const qreal bottomSafety=34.0; // reserve space for the Tony name plate
+        const qreal safeLeft=sideSafety;
+        const qreal safeRight=width()-sideSafety;
+        const qreal safeTop=topSafety;
+        const qreal safeBottom=height()-bottomSafety;
+
         const qreal radians=qDegreesToRadians(rotation);
         const qreal absCos=qAbs(qCos(radians));
         const qreal absSin=qAbs(qSin(radians));
         const qreal rotatedUnitW=visibleW*absCos+visibleH*absSin;
         const qreal rotatedUnitH=visibleH*absCos+visibleW*absSin;
-        const qreal safetyFit=qMin(
-            qMax<qreal>(1.0,width()-2.0*sideSafety)/qMax<qreal>(1.0,rotatedUnitW),
-            qMax<qreal>(1.0,groundY-topSafety)/qMax<qreal>(1.0,rotatedUnitH));
-        const qreal fit=qMin(desiredFit,safetyFit);
-        const qreal pivotY=groundY-visibleH*fit/2.0;
+        const qreal safeWidth=qMax<qreal>(1.0,safeRight-safeLeft);
+        const qreal safeHeight=qMax<qreal>(1.0,safeBottom-safeTop);
+        const qreal zeroCropFit=qMin(
+            safeWidth/qMax<qreal>(1.0,rotatedUnitW),
+            safeHeight/qMax<qreal>(1.0,rotatedUnitH));
+        const qreal fit=qMin(desiredFit,zeroCropFit);
 
-        p.translate(QPointF(width()/2.0+dx,pivotY));
+        const qreal rotatedW=rotatedUnitW*fit;
+        const qreal rotatedH=rotatedUnitH*fit;
+        const qreal desiredCenterX=width()/2.0+dx;
+        const qreal desiredCenterY=groundY-visibleH*fit/2.0;
+        const qreal minCenterX=safeLeft+rotatedW/2.0;
+        const qreal maxCenterX=safeRight-rotatedW/2.0;
+        const qreal minCenterY=safeTop+rotatedH/2.0;
+        const qreal maxCenterY=safeBottom-rotatedH/2.0;
+        const qreal centerX=(minCenterX<=maxCenterX)
+            ? qBound(minCenterX,desiredCenterX,maxCenterX)
+            : (safeLeft+safeRight)/2.0;
+        const qreal centerY=(minCenterY<=maxCenterY)
+            ? qBound(minCenterY,desiredCenterY,maxCenterY)
+            : (safeTop+safeBottom)/2.0;
+
+        p.translate(QPointF(centerX,centerY));
         p.rotate(rotation);
         // The source walk artwork faces left. Mirror it only while moving right,
         // so visual facing always matches the actual X movement direction.
