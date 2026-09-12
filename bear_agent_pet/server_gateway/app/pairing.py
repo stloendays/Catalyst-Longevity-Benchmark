@@ -365,3 +365,159 @@ def revoke_device(device_id: str) -> bool:
         if changed:
             _write_store(data)
         return changed
+
+
+def _ensure_owner_device_id(data: dict[str, Any]) -> str:
+    """Persist the earliest non-revoked paired device as the owner on first use.
+
+    Existing installations predate owner roles. The one-time migration deliberately
+    ignores revoked CI/test devices and then freezes the selected id in the pairing store.
+    """
+    current = str(data.get("owner_device_id") or "").strip()
+    if current:
+        return current
+    active = [
+        device for device in (data.get("devices") or [])
+        if isinstance(device, dict) and not device.get("revoked") and str(device.get("id") or "").strip()
+    ]
+    if not active:
+        return ""
+    active.sort(key=lambda device: int(device.get("created_at") or 0))
+    owner_id = str(active[0].get("id") or "").strip()
+    if owner_id:
+        data["owner_device_id"] = owner_id
+    return owner_id
+
+
+def owner_device_for_token(token: str) -> dict[str, Any] | None:
+    """Return safe owner-device metadata when token belongs to the frozen owner device."""
+    if not token:
+        return None
+    target = _digest(token)
+    with _LOCK:
+        data = _read_store()
+        had_owner = bool(str(data.get("owner_device_id") or "").strip())
+        owner_id = _ensure_owner_device_id(data)
+        if owner_id and not had_owner:
+            _write_store(data)
+        for device in data.get("devices") or []:
+            if not isinstance(device, dict) or device.get("revoked"):
+                continue
+            if str(device.get("id") or "") != owner_id:
+                continue
+            if secrets.compare_digest(str(device.get("token_hash") or ""), target):
+                return {
+                    "id": device.get("id"),
+                    "name": device.get("name"),
+                    "created_at": device.get("created_at"),
+                    "paired_via": device.get("paired_via", "legacy"),
+                }
+    return None
+
+
+def token_is_owner(token: str) -> bool:
+    return owner_device_for_token(token) is not None
+
+
+def list_owner_pairing_requests() -> list[dict[str, Any]]:
+    """List live pairing requests with opaque approval ids for the owner UI."""
+    now = int(time.time())
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        changed = False
+        rows: list[dict[str, Any]] = []
+        for row in requests:
+            if int(row.get("expires_at") or 0) < now:
+                continue
+            approval_id = str(row.get("approval_id") or "").strip()
+            if not approval_id:
+                approval_id = secrets.token_urlsafe(12)
+                row["approval_id"] = approval_id
+                changed = True
+            rows.append(
+                {
+                    "approval_id": approval_id,
+                    "device_name": row.get("device_name") or "Tony desktop",
+                    "created_at": int(row.get("created_at") or 0),
+                    "expires_at": int(row.get("expires_at") or 0),
+                    "approved": bool(row.get("approved")),
+                    "paired": bool(row.get("device_id")),
+                }
+            )
+        if changed:
+            _write_store(data)
+    rows.sort(key=lambda row: int(row.get("created_at") or 0), reverse=True)
+    return rows
+
+
+def approve_device_pairing_request_by_id(approval_id: str) -> dict[str, Any]:
+    """Approve a request selected from the owner UI without exposing its connection code."""
+    approval_id = approval_id.strip()
+    if len(approval_id) < 8 or len(approval_id) > 80:
+        raise ValueError("Pairing approval id is invalid")
+    now = int(time.time())
+    with _LOCK:
+        data = _read_store()
+        requests = _prune_device_requests(data, now)
+        for row in requests:
+            if not secrets.compare_digest(str(row.get("approval_id") or ""), approval_id):
+                continue
+            if int(row.get("expires_at") or 0) < now:
+                raise ValueError("This device connection request has expired")
+            row["approved"] = True
+            row["approved_at"] = now
+            _write_store(data)
+            return {
+                "device_name": row.get("device_name") or "Tony desktop",
+                "expires_at": int(row.get("expires_at") or 0),
+                "already_paired": bool(row.get("device_id")),
+            }
+    raise ValueError("Pairing approval request was not found")
+
+
+def list_owner_devices() -> list[dict[str, Any]]:
+    with _LOCK:
+        data = _read_store()
+        owner_id = _ensure_owner_device_id(data)
+        if owner_id and not data.get("owner_device_id"):
+            data["owner_device_id"] = owner_id
+            _write_store(data)
+        rows: list[dict[str, Any]] = []
+        for device in data.get("devices") or []:
+            if not isinstance(device, dict):
+                continue
+            rows.append(
+                {
+                    "id": device.get("id"),
+                    "name": device.get("name"),
+                    "created_at": device.get("created_at"),
+                    "revoked": bool(device.get("revoked")),
+                    "paired_via": device.get("paired_via", "legacy"),
+                    "owner": str(device.get("id") or "") == owner_id,
+                }
+            )
+    rows.sort(key=lambda row: int(row.get("created_at") or 0), reverse=True)
+    return rows
+
+
+def revoke_device_as_owner(device_id: str) -> bool:
+    """Revoke a non-owner device. The owner cannot revoke itself through the public API."""
+    device_id = device_id.strip()
+    if not device_id:
+        return False
+    with _LOCK:
+        data = _read_store()
+        owner_id = _ensure_owner_device_id(data)
+        if device_id == owner_id:
+            raise ValueError("The owner device cannot revoke itself")
+        changed = False
+        for device in data.get("devices") or []:
+            if isinstance(device, dict) and str(device.get("id") or "") == device_id and not device.get("revoked"):
+                device["revoked"] = True
+                device["revoked_at"] = int(time.time())
+                changed = True
+                break
+        if changed:
+            _write_store(data)
+        return changed
