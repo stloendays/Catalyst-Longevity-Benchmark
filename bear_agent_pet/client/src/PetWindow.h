@@ -28,6 +28,10 @@ public slots:
     void configureConnection();
     void applyUiLanguage(const QString &language);
     void syncOperatorLogsForUpdate(const QString &targetVersion);
+
+signals:
+    void settingsRequested();
+
 protected:
     void paintEvent(QPaintEvent*) override;
     void mousePressEvent(QMouseEvent*) override;
