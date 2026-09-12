@@ -1,0 +1,228 @@
+name: Tony v0.9.9 delayed pairing fix build
+
+on:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-v099-delayed-pairing-fix-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-v098-icon-connection
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Apply v0.9.9 delayed-approval polling fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $p = 'bear_agent_pet/client/src/AgentClient.cpp'
+          $s = Get-Content $p -Raw
+
+          $old = @'
+              pairingPollTimer_.setInterval(2000);
+              pairingPollTimer_.setSingleShot(false);
+              connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
+          '@.Trim()
+          $new = @'
+              // Use one completed HTTPS status request to schedule the next. This is
+              // robust on the desktop when owner approval happens seconds/minutes later.
+              pairingPollTimer_.setInterval(2000);
+              pairingPollTimer_.setSingleShot(true);
+              connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
+          '@.Trim()
+          if (-not $s.Contains($old)) { throw 'timer block not found' }
+          $s = $s.Replace($old,$new)
+
+          $old = @'
+                  pairingPollTimer_.setInterval(pollMs);
+                  pairingPollTimer_.start();
+                  emit connectionStageChanged(QStringLiteral("approval_required"));
+                  emit pairingCodeReady(code,pairingExpiresAt_);
+                  reply->deleteLater();
+          '@.Trim()
+          $new = @'
+                  pairingPollTimer_.setInterval(pollMs);
+                  emit connectionStageChanged(QStringLiteral("approval_required"));
+                  emit pairingCodeReady(code,pairingExpiresAt_);
+                  reply->deleteLater();
+                  QTimer::singleShot(250, this, [this]{
+                      if(!pairingRequestId_.isEmpty() && !pairingPollInFlight_)
+                          pollDevicePairing();
+                  });
+          '@.Trim()
+          if (-not $s.Contains($old)) { throw 'request success block not found' }
+          $s = $s.Replace($old,$new)
+
+          $old = '    if(pairingPollInFlight_ || pairingRequestId_.isEmpty() || !pairingWsUrl_.isValid()) return;'
+          $new = @'
+              if(pairingRequestId_.isEmpty() || !pairingWsUrl_.isValid()) return;
+              if(pairingPollInFlight_) {
+                  pairingPollTimer_.start(500);
+                  return;
+              }
+          '@.TrimEnd()
+          if (-not $s.Contains($old)) { throw 'poll entry block not found' }
+          $s = $s.Replace($old,$new)
+
+          $old = @'
+                  if(reply->error()!=QNetworkReply::NoError || httpStatus<200 || httpStatus>=300) {
+                      // Transient transport/server failures are retried until the code expires.
+                      reply->deleteLater();
+                      return;
+                  }
+
+                  if(obj.value("status").toString()!=QStringLiteral("approved")) {
+                      reply->deleteLater();
+                      return;
+                  }
+          '@.Trim()
+          $new = @'
+                  if(reply->error()!=QNetworkReply::NoError || httpStatus<200 || httpStatus>=300) {
+                      // Retry only after the previous HTTPS request has completed.
+                      reply->deleteLater();
+                      if(!pairingRequestId_.isEmpty()) pairingPollTimer_.start();
+                      return;
+                  }
+
+                  if(obj.value("status").toString()!=QStringLiteral("approved")) {
+                      reply->deleteLater();
+                      if(!pairingRequestId_.isEmpty()) pairingPollTimer_.start();
+                      return;
+                  }
+          '@.Trim()
+          if (-not $s.Contains($old)) { throw 'status retry block not found' }
+          $s = $s.Replace($old,$new)
+          Set-Content $p $s -Encoding utf8
+
+          $p = 'bear_agent_pet/client/src/PetWindowV7.cpp'
+          $s = Get-Content $p -Raw
+          $old = @'
+              connect(&agent_, &AgentClient::pairingCodeReady, this,
+                      [this](const QString &code, qint64 expiresAt){
+                  pairingRequestActive_=false;
+          '@.Trim()
+          $new = @'
+              connect(&agent_, &AgentClient::pairingCodeReady, this,
+                      [this](const QString &code, qint64 expiresAt){
+                  // A displayed code still has a live /pair/status request behind it.
+                  pairingRequestActive_=true;
+          '@.Trim()
+          if (-not $s.Contains($old)) { throw 'UI pairing state block not found' }
+          $s = $s.Replace($old,$new)
+          Set-Content $p $s -Encoding utf8
+          Set-Content 'bear_agent_pet/client/VERSION' '0.9.9' -Encoding ascii
+
+      - name: Build Tony v0.9.9
+        shell: pwsh
+        run: |
+          cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
+          cmake --build bear_agent_pet/client/build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+
+      - name: Test delayed human approval polling
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $d = Join-Path $PWD '.ci_delayed_pairing'
+          New-Item -ItemType Directory -Force $d | Out-Null
+          @'
+          import json, time
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          count = 0
+          class H(BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args): pass
+              def do_POST(self):
+                  global count
+                  n = int(self.headers.get('Content-Length','0'))
+                  self.rfile.read(n)
+                  if self.path == '/pair/request':
+                      body = {'ok':True,'status':'pending','request_id':'delayed-test-request-id-abcdefghijklmnopqrstuvwxyz','code':'TEST-POLL','expires_at':int(time.time())+120,'poll_after_ms':1000}
+                  elif self.path == '/pair/status':
+                      count += 1
+                      if count < 4:
+                          body = {'ok':True,'status':'pending'}
+                      else:
+                          body = {'ok':True,'status':'approved','device_id':'deadbeef12345678','token':'local-test-token','ws_path':'/agent/ws'}
+                  else:
+                      self.send_response(404); self.end_headers(); return
+                  raw=json.dumps(body).encode()
+                  self.send_response(200); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(raw))); self.end_headers(); self.wfile.write(raw)
+          ThreadingHTTPServer(('127.0.0.1',18990),H).serve_forever()
+          '@ | Set-Content (Join-Path $d 'server.py') -Encoding utf8
+          $server = Start-Process python -ArgumentList (Join-Path $d 'server.py') -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 1
+
+          @'
+          cmake_minimum_required(VERSION 3.24)
+          project(DelayedPairing LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_AUTOMOC ON)
+          find_package(Qt6 REQUIRED COMPONENTS Core Network WebSockets)
+          add_executable(delayed main.cpp ../bear_agent_pet/client/src/AgentClient.cpp ../bear_agent_pet/client/src/AgentClient.h ../bear_agent_pet/client/src/AppLogger.cpp ../bear_agent_pet/client/src/AppLogger.h)
+          target_include_directories(delayed PRIVATE ../bear_agent_pet/client/src)
+          target_compile_definitions(delayed PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+          target_link_libraries(delayed PRIVATE Qt6::Core Qt6::Network Qt6::WebSockets Crypt32)
+          '@ | Set-Content (Join-Path $d 'CMakeLists.txt') -Encoding utf8
+
+          @'
+          #include "AgentClient.h"
+          #include <QCoreApplication>
+          #include <QTimer>
+          #include <iostream>
+          #include <cstdlib>
+          int main(int argc,char**argv){
+            QCoreApplication app(argc,argv);
+            QCoreApplication::setApplicationVersion("0.9.9");
+            AgentClient c;
+            int codeSeen=0;
+            QObject::connect(&c,&AgentClient::pairingCodeReady,[&](const QString &code,qint64){
+              ++codeSeen; std::cout << "CODE=" << code.toStdString() << std::endl;
+            });
+            QObject::connect(&c,&AgentClient::paired,[&](const QString&,const QString&,const QUrl&){
+              std::cout << "DELAYED_APPROVAL_POLL=PASS codeSeen=" << codeSeen << std::endl;
+              std::cout.flush(); std::_Exit(0);
+            });
+            QObject::connect(&c,&AgentClient::pairingFailed,[&](const QString &m){ std::cerr << m.toStdString() << std::endl; app.exit(2); });
+            QTimer::singleShot(15000,[&]{ std::cerr << "DELAYED_APPROVAL_POLL=TIMEOUT" << std::endl; app.exit(3); });
+            c.requestDevicePairing(QUrl("ws://127.0.0.1:18990/agent/ws"),"Delayed approval test");
+            return app.exec();
+          }
+          '@ | Set-Content (Join-Path $d 'main.cpp') -Encoding utf8
+
+          cmake -S $d -B (Join-Path $d 'build') -G "Visual Studio 17 2022" -A x64
+          cmake --build (Join-Path $d 'build') --config Release --parallel
+          & (Join-Path $d 'build/Release/delayed.exe')
+          $rc=$LASTEXITCODE
+          Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          if($rc -ne 0){ throw "delayed pairing test failed rc=$rc" }
+
+      - name: Package fixed Tony
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package-v099"
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          Compress-Archive -Path "$package/*" -DestinationPath "$PWD/TonyDesktopPet-0.9.9-windows-x64-pairing-fix.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-0.9.9-windows-x64-pairing-fix
+          path: TonyDesktopPet-0.9.9-windows-x64-pairing-fix.zip
+          if-no-files-found: error
