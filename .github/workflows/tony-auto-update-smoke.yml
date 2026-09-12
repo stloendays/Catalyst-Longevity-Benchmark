@@ -1,0 +1,82 @@
+name: Tony automatic update smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/bear-agent-pet
+    paths:
+      - '.github/workflows/tony-auto-update-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Validate live update manifest and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = 'https://github.com/stloendays/Catalyst-Longevity-Benchmark/releases/download/tony-desktop-latest'
+          $root = Join-Path $env:RUNNER_TEMP 'tony-update-smoke'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $manifestPath = Join-Path $root 'latest.json'
+          Invoke-WebRequest -Uri "$base/latest.json?smoke=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" -OutFile $manifestPath -MaximumRedirection 10
+          $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if ($m.schema -ne 1) { throw 'Manifest schema mismatch' }
+          if ($m.product -ne 'Tony Desktop Pet') { throw 'Manifest product mismatch' }
+          if ($m.platform -ne 'windows-x64') { throw 'Manifest platform mismatch' }
+          if ($m.version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid manifest version: $($m.version)" }
+          if ($m.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Invalid manifest SHA-256' }
+          if (-not $m.url.StartsWith('https://github.com/')) { throw "Unexpected update URL: $($m.url)" }
+          Write-Host "LIVE_UPDATE_VERSION=$($m.version)"
+
+          $zip = Join-Path $root 'update.zip'
+          Invoke-WebRequest -Uri $m.url -OutFile $zip -MaximumRedirection 10
+          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $m.sha256.ToLowerInvariant()) { throw "SHA mismatch expected=$($m.sha256) actual=$actual" }
+          Write-Host "TONY_UPDATE_SHA256=PASS sha256=$actual"
+
+          $stage = Join-Path $root 'stage'
+          Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+          foreach ($required in @('TonyDesktopPet.exe','VERSION','tony-install-root.marker','tony-file-list.txt')) {
+            if (-not (Test-Path (Join-Path $stage $required))) { throw "Update package missing $required" }
+          }
+          $packageVersion = (Get-Content (Join-Path $stage 'VERSION') -Raw).Trim()
+          if ($packageVersion -ne $m.version) { throw "Package/manifest version mismatch package=$packageVersion manifest=$($m.version)" }
+          Write-Host 'TONY_AUTO_UPDATE_CHANNEL=PASS'
+
+      - name: Simulate local managed-file update apply
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'tony-update-smoke'
+          $stage = Join-Path $root 'stage'
+          $dest = Join-Path $root 'installed'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Set-Content -LiteralPath (Join-Path $dest 'obsolete-owned-file.txt') -Value 'old'
+          Set-Content -LiteralPath (Join-Path $dest 'user-note.txt') -Value 'keep me'
+          Set-Content -LiteralPath (Join-Path $dest 'tony-install-root.marker') -Value 'old marker'
+          @('obsolete-owned-file.txt','tony-install-root.marker','tony-file-list.txt') | Set-Content -LiteralPath (Join-Path $dest 'tony-file-list.txt')
+
+          $oldManaged = Join-Path $dest 'tony-file-list.txt'
+          Get-Content -LiteralPath $oldManaged | ForEach-Object {
+            if ([string]::IsNullOrWhiteSpace($_) -or [IO.Path]::IsPathRooted($_)) { return }
+            $rootFull = [IO.Path]::GetFullPath($dest).TrimEnd('\') + '\'
+            $candidate = [IO.Path]::GetFullPath((Join-Path $dest $_.Trim()))
+            if ($candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path $candidate -PathType Leaf)) {
+              Remove-Item -LiteralPath $candidate -Force
+            }
+          }
+
+          & robocopy $stage $dest /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed: $LASTEXITCODE" }
+          if (Test-Path (Join-Path $dest 'obsolete-owned-file.txt')) { throw 'Old managed file was not removed' }
+          if (-not (Test-Path (Join-Path $dest 'user-note.txt'))) { throw 'Unmanaged user file was incorrectly removed' }
+          foreach ($required in @('TonyDesktopPet.exe','VERSION','tony-install-root.marker','tony-file-list.txt')) {
+            if (-not (Test-Path (Join-Path $dest $required))) { throw "Applied install missing $required" }
+          }
+          Write-Host 'TONY_AUTO_UPDATE_APPLY=PASS'
