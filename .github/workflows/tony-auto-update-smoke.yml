@@ -63,12 +63,14 @@ jobs:
           @('obsolete-owned-file.txt','tony-install-root.marker','tony-file-list.txt') | Set-Content -LiteralPath (Join-Path $dest 'tony-file-list.txt')
 
           $oldManaged = Join-Path $dest 'tony-file-list.txt'
-          Get-Content -LiteralPath $oldManaged | ForEach-Object {
-            if ([string]::IsNullOrWhiteSpace($_) -or [IO.Path]::IsPathRooted($_)) { return }
-            $rootFull = [IO.Path]::GetFullPath($dest).TrimEnd('\') + '\'
-            $candidate = [IO.Path]::GetFullPath((Join-Path $dest $_.Trim()))
-            if ($candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path $candidate -PathType Leaf)) {
-              Remove-Item -LiteralPath $candidate -Force
+          if (Test-Path -LiteralPath $oldManaged) {
+            Get-Content -LiteralPath $oldManaged -ErrorAction Stop | ForEach-Object {
+              if ([string]::IsNullOrWhiteSpace($_) -or [IO.Path]::IsPathRooted($_)) { return }
+              $rootFull = [IO.Path]::GetFullPath($dest).TrimEnd('\') + '\'
+              $candidate = [IO.Path]::GetFullPath((Join-Path $dest $_.Trim()))
+              if ($candidate.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path $candidate -PathType Leaf)) {
+                Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+              }
             }
           }
 
