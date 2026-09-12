@@ -1,0 +1,120 @@
+name: Tony v0.9.8.1 visual convergence
+
+on:
+  push:
+    branches:
+      - fix/tony-v0981-visual-convergence
+    paths:
+      - '.github/workflows/tony-v0981-visual-convergence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TONY_VISUAL_CHUNKS: >-
+    6ba80ddd22e4f25bfd18a84a543716473963c6a3
+    bc2b3493d3904af408ec585ffae1c80486148f3a
+    f3609273234cbd4a1b9787ca6a822fb345e26d7d
+    ccae3c04e90fadd6b07f01ef53f163fefc0040a6
+    0009e30ee462f74354d29511b356a6e6c59c3420
+    1aa341178adf0baae6d85ea84acf2a8985b7e7ea
+    5563dbdeb8cdb493d9e38367ec52b6607c2e57d1
+    6fce8f7fc9a17e9e1380b88de3333d79333dd1cd
+    994769926bf05523c986010a40ee09918d194e4e
+    f4a2f2ea9238bc45e64a9b6333b3af5404c4a570
+    e223eaaeee15111444b148447244c73e7f2887a5
+    cfb5f5038ebe9c530b28be966f99990278fbe7ef
+    1de456398239f070f4f998b71558e900268bd45e
+    06592341502a5ccd57bb59e9cf23cea923293aee
+
+jobs:
+  recover-validate-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-v0981-visual-convergence
+          fetch-depth: 0
+
+      - name: Verify convergence base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '0.9.8'
+          grep -q 'wss://150.158.27.206/agent/ws' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'authoredAlias="pat"' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'authoredAlias="lifted"' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'authoredAlias="landing"' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'authoredAlias="cursor_watch"' bear_agent_pet/client/src/PetWindowV7.cpp
+          echo 'TONY_V0981_BASE=PASS'
+
+      - name: Recover 21 authored interaction frames
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > /tmp/tony-v0981-assets.b64
+          for sha in $TONY_VISUAL_CHUNKS; do
+            gh api "/repos/$GITHUB_REPOSITORY/git/blobs/$sha" --jq '.content' \
+              | tr -d '\r\n' | base64 -d >> /tmp/tony-v0981-assets.b64
+          done
+          tr -d '\r\n ' < /tmp/tony-v0981-assets.b64 | base64 -d > /tmp/tony-v0981-assets.zip
+          unzip -t /tmp/tony-v0981-assets.zip
+          for action in pat lifted landing dizzy stretch yawn cursor_watch; do
+            rm -rf "bear_agent_pet/client/assets/animations/$action"
+          done
+          unzip -o /tmp/tony-v0981-assets.zip -d .
+          for action in pat lifted landing dizzy stretch yawn cursor_watch; do
+            for n in 01 02 03; do
+              test -f "bear_agent_pet/client/assets/animations/$action/frame_${n}.png"
+            done
+            count=$(find "bear_agent_pet/client/assets/animations/$action" -maxdepth 1 -type f -name 'frame_*.png' | wc -l)
+            test "$count" -eq 3
+          done
+          total=$(find bear_agent_pet/client/assets/animations \
+            \( -path '*/pat/frame_*.png' -o -path '*/lifted/frame_*.png' -o -path '*/landing/frame_*.png' -o -path '*/dizzy/frame_*.png' -o -path '*/stretch/frame_*.png' -o -path '*/yawn/frame_*.png' -o -path '*/cursor_watch/frame_*.png' \) \
+            -type f | wc -l)
+          test "$total" -eq 21
+          echo 'TONY_V0981_RECOVERY=PASS frames=21'
+
+      - name: Validate artwork contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          echo 'TONY_V0981_ASSET_VALIDATION=PASS'
+
+      - name: Remove abandoned embedded-asset fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.cpp
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h
+          rm -f bear_agent_pet/client/src/EmbeddedActionAssets_pat.cpp
+          if grep -R -n 'EmbeddedActionAssets' bear_agent_pet/client/CMakeLists.txt bear_agent_pet/client/src/PetWindowV7.cpp; then
+            echo 'Embedded action asset references still exist in active build path.'
+            exit 1
+          fi
+          printf '0.9.8.1\n' > bear_agent_pet/client/VERSION
+
+      - name: Guard against network-code drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD -- bear_agent_pet/client/src/AgentClient.cpp bear_agent_pet/client/src/AgentClient.h bear_agent_pet/server_gateway
+          echo 'TONY_V0981_NETWORK_UNCHANGED=PASS'
+
+      - name: Commit recovered visual resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A bear_agent_pet/client/VERSION bear_agent_pet/client/assets/animations bear_agent_pet/client/src/EmbeddedActionAssets.cpp bear_agent_pet/client/src/EmbeddedActionAssets.h bear_agent_pet/client/src/EmbeddedActionAssetsInternal.h bear_agent_pet/client/src/EmbeddedActionAssets_pat.cpp
+          git commit -m 'Recover Tony 0.9.8.1 interaction artwork'
+          git push origin HEAD:fix/tony-v0981-visual-convergence
+          echo 'TONY_V0981_COMMIT=PASS'
