@@ -1,0 +1,127 @@
+name: Tony v1.0.2 actions gate
+
+on:
+  push:
+    branches:
+      - feature/tony-v102-more-actions
+    paths:
+      - '.github/scripts/apply_tony_v102_actions.py'
+      - '.github/workflows/tony-v102-actions-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v102-actions
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v102-more-actions
+          fetch-depth: 0
+      - name: Apply v1.0.2 action expansion
+        run: python3 .github/scripts/apply_tony_v102_actions.py
+      - name: Verify action and zero-crop source invariants
+        run: |
+          grep -F 'HeadTilt, Nod, Paw, Hop, Spin, Sniff, Dance' bear_agent_pet/client/src/PetWindow.h
+          for token in 'Action::HeadTilt' 'Action::Nod' 'Action::Paw' 'Action::Hop' 'Action::Spin' 'Action::Sniff' 'Action::Dance' 'const qreal zeroCropFit=qMin(' 'qBound(minCenterX,desiredCenterX,maxCenterX)' 'if(qAlpha(line[x])>0)'; do
+            grep -F "$token" bear_agent_pet/client/src/PetWindowV7.cpp
+          done
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '1.0.2'
+          echo 'TONY_V102_ACTION_SOURCE=PASS'
+      - name: Commit product changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client/src/PetWindow.h bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/VERSION
+          git commit -m 'Add seven Tony living actions for v1.0.2'
+          git push origin HEAD:feature/tony-v102-more-actions
+
+  windows-build:
+    needs: patch
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v102-more-actions
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+      - name: Validate version and Tony artwork
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if($version -ne '1.0.2') { throw "Expected Tony 1.0.2, got $version" }
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          Write-Host 'TONY_V102_ASSETS=PASS'
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+      - name: Package runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v102-actions"
+          if(Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+      - name: Smoke-test all seven new actions
+        shell: pwsh
+        run: |
+          $exe="$PWD/bear_agent_pet/client/package-v102-actions/TonyDesktopPet.exe"
+          foreach($action in @('head_tilt','nod','paw','hop','spin','sniff','dance')) {
+            $env:TONY_VISUAL_ACTION=$action
+            $p=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -WindowStyle Hidden -PassThru
+            try {
+              Start-Sleep -Seconds 2
+              if($p.HasExited) { throw "Tony action $action crashed/exited: $($p.ExitCode)" }
+              Write-Host "TONY_ACTION_SMOKE=PASS action=$action"
+            } finally {
+              if(-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            }
+          }
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+      - name: Verify action and zero-crop invariants after build
+        shell: pwsh
+        run: |
+          $h=Get-Content bear_agent_pet/client/src/PetWindow.h -Raw
+          $src=Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          foreach($token in @('HeadTilt, Nod, Paw, Hop, Spin, Sniff, Dance')) {
+            if(-not $h.Contains($token)) { throw "Missing action enum token: $token" }
+          }
+          foreach($token in @('Action::HeadTilt','Action::Nod','Action::Paw','Action::Hop','Action::Spin','Action::Sniff','Action::Dance','const qreal zeroCropFit=qMin(','qBound(minCenterX,desiredCenterX,maxCenterX)','qBound(minCenterY,desiredCenterY,maxCenterY)','if(qAlpha(line[x])>0)','QRectF(0,0,sprite->width(),sprite->height())')) {
+            if(-not $src.Contains($token)) { throw "Missing runtime invariant: $token" }
+          }
+          if($src.Contains('if(qAlpha(line[x])>8)')) { throw 'Legacy crop threshold returned' }
+          Write-Host 'TONY_V102_WINDOWS_BUILD=PASS'
+
+  cleanup:
+    needs: windows-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v102-more-actions
+          fetch-depth: 0
+      - name: Remove temporary action gate machinery
+        run: |
+          rm -f .github/scripts/apply_tony_v102_actions.py
+          rm -f .github/workflows/tony-v102-actions-gate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Remove temporary Tony v1.0.2 actions gate'
+          git push origin HEAD:feature/tony-v102-more-actions
