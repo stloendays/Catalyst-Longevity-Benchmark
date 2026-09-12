@@ -237,7 +237,7 @@ async def health() -> dict[str, Any]:
         "streaming": True,
         "persona_core": True,
         "pairing_supported": True,
-        "pairing_mode": "device-code+owner-approval+recovery",
+        "pairing_mode": "device-code+recovery",
         "device_code_pairing": True,
         "device_code_ttl_seconds": _DEVICE_PAIR_TTL_SECONDS,
         "owner_device_management": True,
