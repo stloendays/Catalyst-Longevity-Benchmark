@@ -125,9 +125,11 @@ def _prune_device_requests(data: dict[str, Any], now: int) -> list[dict[str, Any
     return data["device_requests"]
 
 
-def create_device_pairing_request(device_name: str, ttl_seconds: int = 600) -> tuple[str, str, int]:
+def create_device_pairing_request(device_name: str, ttl_seconds: int = 259200) -> tuple[str, str, int]:
     """Create an approval-gated code that the desktop can display automatically."""
-    ttl_seconds = max(120, min(int(ttl_seconds), 900))
+    # Desktop connection codes remain valid for up to 72 hours so an owner can approve
+    # a remote computer without racing a short 10-minute window.
+    ttl_seconds = max(120, min(int(ttl_seconds), 259200))
     now = int(time.time())
     expires_at = now + ttl_seconds
     request_id = secrets.token_urlsafe(24)
