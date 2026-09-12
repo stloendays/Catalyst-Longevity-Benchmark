@@ -1,0 +1,75 @@
+name: Tony v1.0.2 zero-crop gate
+
+on:
+  push:
+    branches:
+      - fix/tony-v102-zero-crop-v101
+    paths:
+      - '.github/workflows/tony-v102-zero-crop.yml'
+      - '.github/scripts/apply_tony_v102_zero_crop.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-verify:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tony-v102-zero-crop-v101
+          fetch-depth: 0
+
+      - name: Apply zero-crop patch
+        shell: pwsh
+        run: python .github/scripts/apply_tony_v102_zero_crop.py
+
+      - name: Verify source invariants
+        shell: pwsh
+        run: |
+          $pet = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.2') { throw "Expected 1.0.2, got $version" }
+          if (-not $pet.Contains('if(qAlpha(line[x])>0)')) { throw 'Full alpha-bound detection missing' }
+          if (-not $pet.Contains('const qreal zeroCropFit=qMin(')) { throw 'Zero-crop fit guard missing' }
+          if (-not $pet.Contains('qBound(minCenterX,desiredCenterX,maxCenterX)')) { throw 'Horizontal clamp missing' }
+          if (-not $pet.Contains('qBound(minCenterY,desiredCenterY,maxCenterY)')) { throw 'Vertical clamp missing' }
+          if (-not $pet.Contains('QRectF(0,0,sprite->width(),sprite->height())')) { throw 'Full source canvas draw missing' }
+          if ($pet.Contains('if(qAlpha(line[x])>8)')) { throw 'Legacy alpha threshold remains' }
+          if ($pet.Contains('p.translate(QPointF(width()/2.0+dx,pivotY));')) { throw 'Unclamped motion center remains' }
+          Write-Host 'TONY_V102_ZERO_CROP_SOURCE=PASS'
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          modules: qtwebsockets
+          cache: true
+
+      - name: Validate artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Build Tony v1.0.2
+        shell: pwsh
+        run: |
+          cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
+          cmake --build bear_agent_pet/client/build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+          Write-Host 'TONY_V102_WINDOWS_BUILD=PASS'
+
+      - name: Commit verified patch
+        shell: pwsh
+        run: |
+          git config user.name "Tony CI"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add bear_agent_pet/client/src/PetWindowV7.cpp bear_agent_pet/client/VERSION
+          if (git diff --cached --quiet) {
+            Write-Host 'No source changes to commit'
+          } else {
+            git commit -m "Fix Tony v1.0.2 zero-crop rendering"
+            git push origin HEAD:fix/tony-v102-zero-crop-v101
+          }
