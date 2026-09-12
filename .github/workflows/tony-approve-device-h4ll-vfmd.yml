@@ -1,0 +1,25 @@
+name: Approve current Tony desktop pairing
+
+on:
+  push:
+    branches:
+      - fix/tony-v098-icon-connection
+    paths:
+      - '.github/workflows/tony-approve-device-h4ll-vfmd.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    runs-on: [self-hosted, linux, x64, rhocodec]
+    timeout-minutes: 5
+    steps:
+      - name: Approve current desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /home/ubuntu/.local/share/bear-agent/app
+          /home/ubuntu/.local/share/bear-agent/venv/bin/python -m app.pairing_cli approve 'H4LL-VFMD'
+          systemctl is-active bear-agent-gateway.service
+          curl -fsS http://127.0.0.1:18790/health
