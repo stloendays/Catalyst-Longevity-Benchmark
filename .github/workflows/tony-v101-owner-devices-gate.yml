@@ -27,7 +27,7 @@ jobs:
         env:
           BEAR_PAIRING_STORE: ${{ runner.temp }}/tony-v101-pairing.json
         run: |
-          export PYTHONPATH="$PWD/bear_agent_pet/server_gateway"
+          cd bear_agent_pet/server_gateway
           python3 - <<'PY'
           from app.pairing import (
               approve_device_pairing_request,
