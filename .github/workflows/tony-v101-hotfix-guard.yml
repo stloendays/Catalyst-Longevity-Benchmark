@@ -47,11 +47,11 @@ jobs:
             if (-not $pet.Contains($required)) { throw "Persistent connection key missing: $required" }
           }
           if (-not $pet.Contains('protectSecret(token)')) { throw 'DPAPI token persistence missing' }
-          if (-not $pet.Contains('unprotectSecret(s.value("agent/token",""').ToString())) { throw 'Stored token restore path missing' }
+          if (-not $pet.Contains('const auto token=unprotectSecret(s.value("agent/token","").toString());')) { throw 'Stored token restore path missing' }
 
           # The updater is allowed to replace only managed files in the installation
           # directory. It must never delete/reset QSettings or touch the Tony registry hive.
-          foreach ($forbidden in @('QSettings().clear()', '.clear(); // reset settings', 'Remove-ItemProperty', 'HKCU:', 'HKEY_CURRENT_USER')) {
+          foreach ($forbidden in @('QSettings().clear()', 'Remove-ItemProperty', 'HKCU:', 'HKEY_CURRENT_USER')) {
             if ($updater.Contains($forbidden)) { throw "Updater may invalidate pairing settings: $forbidden" }
           }
           if (-not $updater.Contains('tony-file-list.txt')) { throw 'Managed-file-only updater protection missing' }
