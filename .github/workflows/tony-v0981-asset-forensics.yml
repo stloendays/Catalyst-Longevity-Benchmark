@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-fragments:
+  recover-windowed-fragments:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -22,7 +22,7 @@ jobs:
           ref: fix/tony-v0981-visual-convergence
           fetch-depth: 0
 
-      - name: Diagnose every Base64-aligned local header inside each surviving chunk
+      - name: Brute-force Base64 phase across one-to-three adjacent fragment windows
         shell: bash
         run: |
           set -euo pipefail
@@ -30,58 +30,82 @@ jobs:
           from pathlib import Path
           import base64, struct, zlib
 
-          marker='UEsDB'
-          png_magic=b'\x89PNG\r\n\x1a\n'
-          rows=[]
+          texts=[]
           for i in range(11):
-              text=''.join(Path(f'.github/tony_assets_forensics/chunk_{i:02d}').read_text(encoding='ascii').split())
-              start=0
-              while True:
-                  at=text.find(marker,start)
-                  if at<0:
-                      break
-                  start=at+1
-                  suffix=text[at:]
-                  usable=suffix[:(len(suffix)//4)*4]
-                  try:
-                      raw=base64.b64decode(usable,validate=False)
-                  except Exception as exc:
-                      rows.append((i,at,'<decode>',f'base64:{exc}'))
-                      continue
-                  try:
-                      if not raw.startswith(b'PK\x03\x04') or len(raw)<30:
-                          raise ValueError('no local header')
-                      version,flags,method,mtime,mdate,crc32,csize,usize,nlen,xlen=struct.unpack_from('<HHHHHIIIHH',raw,4)
-                      ns=30; ne=ns+nlen; ps=ne+xlen; pe=ps+csize
-                      name=raw[ns:ne].decode('utf-8','strict')
-                      available=max(0,len(raw)-ps)
-                      status=f'need={csize} available={available} method={method} flags=0x{flags:04x}'
-                      if pe<=len(raw) and not (flags&0x08):
-                          payload=raw[ps:pe]
-                          out=payload if method==0 else zlib.decompress(payload,-15) if method==8 else b''
-                          if len(out)==usize:
-                              status += f' COMPLETE usize={usize}'
-                              if name.endswith('.png'):
-                                  status += ' PNG_OK' if out.startswith(png_magic) else ' PNG_BAD'
-                          else:
-                              status += f' SIZE_BAD={len(out)}/{usize}'
-                      else:
-                          status += ' INCOMPLETE'
-                      rows.append((i,at,name,status))
-                  except Exception as exc:
-                      rows.append((i,at,'<parse>',f'error:{exc}'))
+              texts.append(''.join(Path(f'.github/tony_assets_forensics/chunk_{i:02d}').read_text(encoding='ascii').split()))
 
-          print(f'TONY_CHUNK_HEADER_ROWS={len(rows)}')
-          for i,at,name,status in rows:
-              if '/assets/animations/' in name or name in ('<decode>','<parse>'):
-                  print(f'CHUNK_HEADER chunk={i:02d} offset={at} name={name} {status}')
-          Path('/tmp/tony-v0981-header-diagnostic.txt').write_text(
-              '\n'.join(f'chunk={i:02d} offset={at} name={name} {status}' for i,at,name,status in rows) + '\n',
-              encoding='utf-8')
+          sig=b'PK\x03\x04'
+          png_magic=b'\x89PNG\r\n\x1a\n'
+          recovered={}
+          sources={}
+          header_hits=0
+
+          def scan(raw,label):
+              global header_hits
+              cursor=0
+              while True:
+                  p=raw.find(sig,cursor)
+                  if p<0:
+                      return
+                  cursor=p+4
+                  header_hits+=1
+                  try:
+                      if p+30>len(raw):
+                          continue
+                      version,flags,method,mtime,mdate,crc32,csize,usize,nlen,xlen=struct.unpack_from('<HHHHHIIIHH',raw,p+4)
+                      ns=p+30; ne=ns+nlen; ps=ne+xlen; pe=ps+csize
+                      if ne>len(raw) or ps>len(raw) or pe>len(raw) or flags&0x08:
+                          continue
+                      name=raw[ns:ne].decode('utf-8','strict')
+                      if not name.startswith('bear_agent_pet/client/assets/animations/') or not name.endswith('.png'):
+                          continue
+                      payload=raw[ps:pe]
+                      if method==0:
+                          out=payload
+                      elif method==8:
+                          out=zlib.decompress(payload,-15)
+                      else:
+                          continue
+                      if len(out)!=usize or not out.startswith(png_magic):
+                          continue
+                      recovered.setdefault(name,out)
+                      sources.setdefault(name,label)
+                  except Exception:
+                      continue
+
+          for width in (1,2,3):
+              for i in range(0,11-width+1):
+                  stream=''.join(texts[i:i+width])
+                  for phase in range(4):
+                      s=stream[phase:]
+                      usable=s[:(len(s)//4)*4]
+                      try:
+                          raw=base64.b64decode(usable,validate=False)
+                      except Exception:
+                          continue
+                      scan(raw,f'chunks_{i:02d}-{i+width-1:02d}/phase{phase}')
+
+          actions=['pat','lifted','landing','dizzy','stretch','yawn','cursor_watch']
+          expected=[f'bear_agent_pet/client/assets/animations/{a}/frame_{n:02d}.png' for a in actions for n in range(1,4)]
+          missing=[x for x in expected if x not in recovered]
+          print(f'TONY_WINDOWED_HEADER_HITS={header_hits}')
+          print(f'TONY_WINDOWED_RECOVERED_COUNT={len(recovered)}')
+          for name in sorted(recovered):
+              print(f'RECOVERED {name} SOURCE={sources[name]} BYTES={len(recovered[name])}')
+          print(f'TONY_WINDOWED_MISSING_COUNT={len(missing)}')
+          for name in missing:
+              print('MISSING '+name)
+          Path('/tmp/tony-v0981-windowed-manifest.txt').write_text(
+              '\n'.join([
+                  f'recovered={len(recovered)}',
+                  *('RECOVERED '+x+' SOURCE='+sources[x] for x in sorted(recovered)),
+                  f'missing={len(missing)}',
+                  *('MISSING '+x for x in missing),
+              ])+'\n',encoding='utf-8')
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Tony-v0981-header-diagnostic
-          path: /tmp/tony-v0981-header-diagnostic.txt
+          name: Tony-v0981-windowed-forensics
+          path: /tmp/tony-v0981-windowed-manifest.txt
           if-no-files-found: error
