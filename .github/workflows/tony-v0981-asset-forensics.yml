@@ -26,14 +26,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          : > /tmp/tony-v0981-prefix.b64
-          for i in $(seq -w 0 10); do
-            test -f ".github/tony_assets_forensics/chunk_${i}"
-            cat ".github/tony_assets_forensics/chunk_${i}" >> /tmp/tony-v0981-prefix.b64
-          done
-          tr -d '\r\n ' < /tmp/tony-v0981-prefix.b64 | base64 -d > /tmp/tony-v0981-prefix.zip.partial
-          bytes=$(wc -c < /tmp/tony-v0981-prefix.zip.partial)
-          echo "TONY_FORENSIC_PREFIX_BYTES=$bytes"
+          python - <<'PY'
+          from pathlib import Path
+          import base64
+          parts = []
+          for i in range(11):
+              p = Path(f'.github/tony_assets_forensics/chunk_{i:02d}')
+              if not p.is_file():
+                  raise SystemExit(f'missing forensic chunk: {p}')
+              parts.append(p.read_text(encoding='ascii'))
+          text = ''.join(parts)
+          text = ''.join(text.split())
+          usable = text[:(len(text)//4)*4]
+          raw = base64.b64decode(usable, validate=False)
+          Path('/tmp/tony-v0981-prefix.zip.partial').write_bytes(raw)
+          print(f'TONY_FORENSIC_BASE64_CHARS={len(text)}')
+          print(f'TONY_FORENSIC_USABLE_BASE64_CHARS={len(usable)}')
+          print(f'TONY_FORENSIC_PREFIX_BYTES={len(raw)}')
+          PY
 
       - name: Parse complete ZIP local entries without central directory
         shell: bash
@@ -74,12 +84,12 @@ jobs:
               if payload_end > len(data):
                   incomplete = (name, p, payload_end - len(data))
                   break
-              raw = data[payload_start:payload_end]
+              payload = data[payload_start:payload_end]
               try:
                   if method == 0:
-                      out = raw
+                      out = payload
                   elif method == 8:
-                      out = zlib.decompress(raw, -15)
+                      out = zlib.decompress(payload, -15)
                   else:
                       skipped.append((name, f'compression_{method}'))
                       pos = payload_end
@@ -110,8 +120,7 @@ jobs:
           print(f'TONY_FORENSIC_MISSING_COUNT={len(missing)}')
           for name in missing:
               print('MISSING ' + name)
-          if incomplete:
-              print('TONY_FORENSIC_FIRST_INCOMPLETE=' + repr(incomplete))
+          print('TONY_FORENSIC_FIRST_INCOMPLETE=' + repr(incomplete))
           for item in skipped:
               print('SKIPPED ' + repr(item))
 
