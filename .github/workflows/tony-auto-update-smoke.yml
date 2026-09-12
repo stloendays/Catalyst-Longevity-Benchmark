@@ -16,6 +16,17 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 10
     steps:
+      - name: Verify live 72-hour pairing TTL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $health = Invoke-RestMethod -Uri 'https://150.158.27.206/health' -Method Get -TimeoutSec 20
+          if (-not $health.ok) { throw 'Tony health endpoint is not healthy' }
+          if ([int64]$health.device_code_ttl_seconds -ne 259200) {
+            throw "Unexpected pairing TTL: $($health.device_code_ttl_seconds)"
+          }
+          Write-Host 'TONY_PAIRING_TTL_72H=PASS seconds=259200'
+
       - name: Validate live update manifest and package
         shell: pwsh
         run: |
@@ -75,10 +86,12 @@ jobs:
           }
 
           & robocopy $stage $dest /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-          if ($LASTEXITCODE -ge 8) { throw "robocopy failed: $LASTEXITCODE" }
+          $robocopyExit = $LASTEXITCODE
+          if ($robocopyExit -ge 8) { throw "robocopy failed: $robocopyExit" }
           if (Test-Path (Join-Path $dest 'obsolete-owned-file.txt')) { throw 'Old managed file was not removed' }
           if (-not (Test-Path (Join-Path $dest 'user-note.txt'))) { throw 'Unmanaged user file was incorrectly removed' }
           foreach ($required in @('TonyDesktopPet.exe','VERSION','tony-install-root.marker','tony-file-list.txt')) {
             if (-not (Test-Path (Join-Path $dest $required))) { throw "Applied install missing $required" }
           }
-          Write-Host 'TONY_AUTO_UPDATE_APPLY=PASS'
+          Write-Host "TONY_AUTO_UPDATE_APPLY=PASS robocopy=$robocopyExit"
+          exit 0
