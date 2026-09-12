@@ -45,7 +45,7 @@ jobs:
           print(f'TONY_FORENSIC_PREFIX_BYTES={len(raw)}')
           PY
 
-      - name: Parse complete ZIP local entries without central directory
+      - name: Scan every surviving ZIP local entry independently
         shell: bash
         run: |
           set -euo pipefail
@@ -56,81 +56,79 @@ jobs:
           data = Path('/tmp/tony-v0981-prefix.zip.partial').read_bytes()
           sig = b'PK\x03\x04'
           png_magic = b'\x89PNG\r\n\x1a\n'
-          pos = 0
-          recovered = []
-          incomplete = None
-          skipped = []
-
+          positions = []
+          cursor = 0
           while True:
-              p = data.find(sig, pos)
+              p = data.find(sig, cursor)
               if p < 0:
                   break
-              if p + 30 > len(data):
-                  incomplete = ('header', p, len(data) - p)
-                  break
-              version, flags, method, mtime, mdate, crc32, csize, usize, nlen, xlen = struct.unpack_from('<HHHHHIIIHH', data, p + 4)
-              name_start = p + 30
-              name_end = name_start + nlen
-              payload_start = name_end + xlen
-              if name_end > len(data) or payload_start > len(data):
-                  incomplete = ('name_or_extra', p, len(data) - p)
-                  break
-              name = data[name_start:name_end].decode('utf-8', 'replace')
-              if flags & 0x08:
-                  skipped.append((name, 'data_descriptor'))
-                  pos = payload_start
-                  continue
-              payload_end = payload_start + csize
-              if payload_end > len(data):
-                  incomplete = (name, p, payload_end - len(data))
-                  break
-              payload = data[payload_start:payload_end]
+              positions.append(p)
+              cursor = p + 4
+
+          recovered = {}
+          rejected = []
+          for p in positions:
               try:
+                  if p + 30 > len(data):
+                      raise ValueError('short header')
+                  version, flags, method, mtime, mdate, crc32, csize, usize, nlen, xlen = struct.unpack_from('<HHHHHIIIHH', data, p + 4)
+                  name_start = p + 30
+                  name_end = name_start + nlen
+                  payload_start = name_end + xlen
+                  payload_end = payload_start + csize
+                  if name_end > len(data) or payload_start > len(data):
+                      raise ValueError('short name/extra')
+                  name = data[name_start:name_end].decode('utf-8', 'replace')
+                  if not name.startswith('bear_agent_pet/'):
+                      raise ValueError(f'unexpected name {name!r}')
+                  if flags & 0x08:
+                      raise ValueError('data descriptor unsupported')
+                  if payload_end > len(data):
+                      raise ValueError(f'incomplete payload need={payload_end-len(data)}')
+                  payload = data[payload_start:payload_end]
                   if method == 0:
                       out = payload
                   elif method == 8:
                       out = zlib.decompress(payload, -15)
                   else:
-                      skipped.append((name, f'compression_{method}'))
-                      pos = payload_end
-                      continue
+                      raise ValueError(f'compression method {method}')
+                  if len(out) != usize:
+                      raise ValueError(f'size {len(out)} != {usize}')
+                  if name.endswith('.png') and '/assets/animations/' in name:
+                      if not out.startswith(png_magic):
+                          raise ValueError('PNG magic mismatch')
+                      recovered[name] = out
               except Exception as exc:
-                  incomplete = (name, p, f'decompress:{exc}')
-                  break
-              if len(out) != usize:
-                  incomplete = (name, p, f'size:{len(out)}!={usize}')
-                  break
-              if name.endswith('.png') and '/assets/animations/' in name:
-                  if not out.startswith(png_magic):
-                      raise SystemExit(f'PNG magic mismatch: {name}')
-                  target = Path('/tmp/recovered') / name
-                  target.parent.mkdir(parents=True, exist_ok=True)
-                  target.write_bytes(out)
-                  recovered.append(name)
-              pos = payload_end
+                  rejected.append((p, str(exc)))
 
           actions = ['pat','lifted','landing','dizzy','stretch','yawn','cursor_watch']
           expected = [f'bear_agent_pet/client/assets/animations/{a}/frame_{n:02d}.png' for a in actions for n in range(1,4)]
-          have = set(recovered)
-          missing = [x for x in expected if x not in have]
+          for name, out in recovered.items():
+              target = Path('/tmp/recovered') / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(out)
+          missing = [x for x in expected if x not in recovered]
 
+          print(f'TONY_FORENSIC_LOCAL_HEADERS={len(positions)}')
           print(f'TONY_FORENSIC_RECOVERED_COUNT={len(recovered)}')
-          for name in recovered:
+          for name in sorted(recovered):
               print('RECOVERED ' + name)
           print(f'TONY_FORENSIC_MISSING_COUNT={len(missing)}')
           for name in missing:
               print('MISSING ' + name)
-          print('TONY_FORENSIC_FIRST_INCOMPLETE=' + repr(incomplete))
-          for item in skipped:
-              print('SKIPPED ' + repr(item))
+          print(f'TONY_FORENSIC_REJECTED_HEADERS={len(rejected)}')
+          for item in rejected:
+              print('REJECTED ' + repr(item))
 
           Path('/tmp/tony-v0981-forensic-manifest.txt').write_text(
               '\n'.join([
+                  f'headers={len(positions)}',
                   f'recovered={len(recovered)}',
-                  *('RECOVERED ' + x for x in recovered),
+                  *('RECOVERED ' + x for x in sorted(recovered)),
                   f'missing={len(missing)}',
                   *('MISSING ' + x for x in missing),
-                  'incomplete=' + repr(incomplete),
+                  f'rejected={len(rejected)}',
+                  *('REJECTED ' + repr(x) for x in rejected),
               ]) + '\n', encoding='utf-8')
           PY
 
