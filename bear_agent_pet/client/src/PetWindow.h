@@ -44,7 +44,8 @@ private:
         Idle, Curious, Peek, Pet, Carried, Land, Dizzy, Stretch, Yawn,
         Bob, Walk, Think, Celebrate, Sleep,
         Shiver, AskHug, Hug, Blush, BlushWave, Study,
-        AdjustGlasses, RemoveGlasses, Wave
+        AdjustGlasses, RemoveGlasses, Wave,
+        HeadTilt, Nod, Paw, Hop, Spin, Sniff, Dance
     };
 
     void loadAssets();
