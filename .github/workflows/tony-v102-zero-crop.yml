@@ -1,4 +1,5 @@
 name: Tony v1.0.2 zero-crop gate
+# Re-triggered after workflow creation so GitHub runs the gate from this branch.
 
 on:
   push:
