@@ -1,0 +1,58 @@
+name: Tony v1.0.1 hotfix guard
+
+on:
+  push:
+    branches:
+      - fix/tony-v101-zero-crop-hotfix
+    paths:
+      - 'bear_agent_pet/client/VERSION'
+      - 'bear_agent_pet/client/src/PetWindowV7.cpp'
+      - 'bear_agent_pet/client/src/main.cpp'
+      - 'bear_agent_pet/client/src/UpdateManager.cpp'
+      - '.github/workflows/tony-v101-hotfix-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-guard:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify v1.0.1 and zero-crop invariants
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          $pet = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          if ($version -ne '1.0.1') { throw "Tony hotfix must remain 1.0.1, got $version" }
+          if (-not $pet.Contains('if(qAlpha(line[x])>0)')) { throw 'Full alpha bounds are not enabled' }
+          if (-not $pet.Contains('const qreal zeroCropFit=qMin(')) { throw 'Zero-crop fit guard missing' }
+          if (-not $pet.Contains('qBound(minCenterX,desiredCenterX,maxCenterX)')) { throw 'Horizontal zero-crop clamp missing' }
+          if (-not $pet.Contains('qBound(minCenterY,desiredCenterY,maxCenterY)')) { throw 'Vertical zero-crop clamp missing' }
+          if (-not $pet.Contains('QRectF(0,0,sprite->width(),sprite->height())')) { throw 'Full source canvas draw missing' }
+          Write-Host 'TONY_V101_ZERO_CROP=PASS'
+
+      - name: Guard persistent server identity and pairing settings
+        shell: pwsh
+        run: |
+          $main = Get-Content bear_agent_pet/client/src/main.cpp -Raw
+          $pet = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          $updater = Get-Content bear_agent_pet/client/src/UpdateManager.cpp -Raw
+
+          if (-not $main.Contains('QCoreApplication::setOrganizationName("TonyAgent");')) { throw 'QSettings organization changed; this would orphan existing pairing data' }
+          if (-not $main.Contains('QCoreApplication::setApplicationName("Tony Desktop Pet");')) { throw 'QSettings application name changed; this would orphan existing pairing data' }
+
+          foreach ($required in @('agent/url','agent/token','agent/device_id')) {
+            if (-not $pet.Contains($required)) { throw "Persistent connection key missing: $required" }
+          }
+          if (-not $pet.Contains('protectSecret(token)')) { throw 'DPAPI token persistence missing' }
+          if (-not $pet.Contains('unprotectSecret(s.value("agent/token",""').ToString())) { throw 'Stored token restore path missing' }
+
+          # The updater is allowed to replace only managed files in the installation
+          # directory. It must never delete/reset QSettings or touch the Tony registry hive.
+          foreach ($forbidden in @('QSettings().clear()', '.clear(); // reset settings', 'Remove-ItemProperty', 'HKCU:', 'HKEY_CURRENT_USER')) {
+            if ($updater.Contains($forbidden)) { throw "Updater may invalidate pairing settings: $forbidden" }
+          }
+          if (-not $updater.Contains('tony-file-list.txt')) { throw 'Managed-file-only updater protection missing' }
+          Write-Host 'TONY_V101_CONNECTION_PERSISTENCE=PASS'
