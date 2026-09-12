@@ -1,0 +1,238 @@
+name: Tony 1.0 real Windows E2E
+
+on:
+  push:
+    branches:
+      - release/tony-1.0-integration
+    paths:
+      - '.github/workflows/tony-1.0-real-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-1-0-real-windows-e2e
+  cancel-in-progress: true
+
+jobs:
+  windows-tony-public-e2e:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      TONY_WSS_URL: wss://150.158.27.206/agent/ws
+      TONY_HTTPS_BASE: https://150.158.27.206
+      TONY_SERVER_IP: 150.158.27.206
+      TONY_E2E_DEVICE: Tony 1.0 Windows real E2E
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/tony-1.0-integration
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          modules: qtwebsockets
+          cache: true
+
+      - name: Public HTTPS and 72-hour pairing preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $health = Invoke-RestMethod -Uri "$env:TONY_HTTPS_BASE/health" -Method Get -TimeoutSec 20
+          if (-not $health.ok) { throw 'Tony public health did not return ok=true' }
+          if ($health.service -ne 'Tony Desktop Companion') { throw "Unexpected service: $($health.service)" }
+          if (-not $health.device_code_pairing) { throw 'Device-code pairing is disabled' }
+          if ([int64]$health.device_code_ttl_seconds -ne 259200) { throw "Unexpected TTL: $($health.device_code_ttl_seconds)" }
+          Write-Host 'TONY_1_0_PUBLIC_HTTPS=PASS'
+          Write-Host 'TONY_1_0_PAIR_TTL_72H=PASS'
+
+      - name: Build Tony 1.0 real AgentClient harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $src = Join-Path $PWD '.ci_tony_1_0_real_e2e'
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          @'
+          cmake_minimum_required(VERSION 3.24)
+          project(Tony10RealE2E LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 20)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_AUTOMOC ON)
+          find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network WebSockets)
+          add_executable(tony_1_0_real_e2e
+              main.cpp
+              ../bear_agent_pet/client/src/AgentClient.cpp
+              ../bear_agent_pet/client/src/AgentClient.h
+              ../bear_agent_pet/client/src/AppLogger.cpp
+              ../bear_agent_pet/client/src/AppLogger.h
+          )
+          target_include_directories(tony_1_0_real_e2e PRIVATE ../bear_agent_pet/client/src)
+          target_compile_definitions(tony_1_0_real_e2e PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+          target_link_libraries(tony_1_0_real_e2e PRIVATE Qt6::Core Qt6::Network Qt6::WebSockets Crypt32)
+          '@ | Set-Content (Join-Path $src 'CMakeLists.txt') -Encoding utf8
+
+          @'
+          #include "AgentClient.h"
+          #include <QCoreApplication>
+          #include <QProcess>
+          #include <QTimer>
+          #include <QUrl>
+          #include <iostream>
+          #include <cstdlib>
+
+          int main(int argc, char **argv) {
+              QCoreApplication app(argc, argv);
+              QCoreApplication::setApplicationName("TonyDesktopPet-1.0-E2E");
+              QCoreApplication::setApplicationVersion("1.0.0");
+
+              AgentClient client;
+              client.setLanguage("en");
+              QString reply;
+              bool sent = false;
+              bool approved = false;
+
+              QObject::connect(&client, &AgentClient::pairingCodeReady,
+                               [&](const QString &code, qint64 expiresAt) {
+                  std::cout << "PAIRING_CODE=" << code.toStdString() << std::endl;
+                  std::cout << "PAIRING_EXPIRES_AT=" << expiresAt << std::endl;
+                  if (approved) return;
+
+                  const QString key = QString::fromUtf8(qgetenv("TONY_SSH_KEY"));
+                  const QString ip = QString::fromUtf8(qgetenv("TONY_SERVER_IP"));
+                  if (key.isEmpty() || ip.isEmpty()) {
+                      std::cerr << "E2E_FAILURE=missing_approval_credentials" << std::endl;
+                      app.exit(13);
+                      return;
+                  }
+                  const QString remote = QString(
+                      "cd /home/ubuntu/.local/share/bear-agent/app && "
+                      "/home/ubuntu/.local/share/bear-agent/venv/bin/python -m app.pairing_cli approve '%1'").arg(code);
+                  QProcess ssh;
+                  QStringList args{
+                      "-o", "BatchMode=yes",
+                      "-o", "ConnectTimeout=20",
+                      "-o", "StrictHostKeyChecking=accept-new",
+                      "-i", key,
+                      QString("ubuntu@%1").arg(ip),
+                      remote
+                  };
+                  ssh.start("ssh.exe", args);
+                  if (!ssh.waitForStarted(10000) || !ssh.waitForFinished(30000) || ssh.exitCode() != 0) {
+                      std::cerr << "SERVER_APPROVAL_FAILURE="
+                                << ssh.readAllStandardError().toStdString() << std::endl;
+                      app.exit(14);
+                      return;
+                  }
+                  approved = true;
+                  std::cout << "SERVER_PAIR_APPROVAL=PASS" << std::endl;
+              });
+
+              QObject::connect(&client, &AgentClient::paired,
+                               [&](const QString &, const QString &deviceId, const QUrl &endpoint) {
+                  std::cout << "PAIRING_APPROVED=PASS" << std::endl;
+                  std::cout << "DEVICE_ID=" << deviceId.toStdString() << std::endl;
+                  std::cout << "WSS_ENDPOINT=" << endpoint.toString().toStdString() << std::endl;
+              });
+
+              QObject::connect(&client, &AgentClient::connectionChanged,
+                               [&](bool connected) {
+                  if (!connected || sent) return;
+                  sent = true;
+                  std::cout << "WSS_AUTHENTICATED=PASS" << std::endl;
+                  QTimer::singleShot(500, [&] {
+                      client.sendMessage("Tony, reply with one short friendly sentence to confirm you can hear me.");
+                      std::cout << "TONY_MESSAGE_SENT=PASS" << std::endl;
+                  });
+              });
+
+              QObject::connect(&client, &AgentClient::textDelta,
+                               [&](const QString &piece) { reply += piece; });
+
+              QObject::connect(&client, &AgentClient::answerFinished, [&] {
+                  std::cout << "QWEN_STREAM_REPLY=" << reply.toStdString() << std::endl;
+                  if (reply.trimmed().isEmpty()) {
+                      std::cerr << "E2E_FAILURE=empty_model_reply" << std::endl;
+                      app.exit(21);
+                      return;
+                  }
+                  std::cout << "TONY_FINAL_RECEIVED=PASS" << std::endl;
+                  std::cout << "TONY_1_0_WINDOWS_HTTPS_PAIR_WSS_QWEN_FINAL=PASS" << std::endl;
+                  std::cout.flush();
+                  std::cerr.flush();
+                  std::_Exit(0);
+              });
+
+              QObject::connect(&client, &AgentClient::pairingFailed,
+                               [&](const QString &message) {
+                  std::cerr << "PAIRING_FAILURE=" << message.toStdString() << std::endl;
+                  app.exit(11);
+              });
+              QObject::connect(&client, &AgentClient::errorMessage,
+                               [&](const QString &message) {
+                  std::cerr << "TONY_ERROR=" << message.toStdString() << std::endl;
+              });
+
+              QTimer watchdog;
+              watchdog.setSingleShot(true);
+              QObject::connect(&watchdog, &QTimer::timeout, [&] {
+                  std::cerr << "E2E_FAILURE=watchdog_timeout" << std::endl;
+                  app.exit(12);
+              });
+              watchdog.start(120000);
+
+              client.requestDevicePairing(
+                  QUrl(QString::fromUtf8(qgetenv("TONY_WSS_URL"))),
+                  QString::fromUtf8(qgetenv("TONY_E2E_DEVICE")));
+              return app.exec();
+          }
+          '@ | Set-Content (Join-Path $src 'main.cpp') -Encoding utf8
+
+          cmake -S $src -B (Join-Path $src 'build') -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+          cmake --build (Join-Path $src 'build') --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'E2E harness build failed' }
+          Write-Host 'TONY_1_0_AGENTCLIENT_BUILD=PASS'
+
+      - name: Prepare server approval key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:SERVER_SSH_KEY)) { throw 'SERVER_SSH_KEY is empty' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'tony_server_key'
+          [IO.File]::WriteAllText($keyPath, $env:SERVER_SSH_KEY.Replace("`r", '') + "`n", [Text.UTF8Encoding]::new($false))
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+          "TONY_SSH_KEY=$keyPath" >> $env:GITHUB_ENV
+          Write-Host 'SERVER_APPROVAL_KEY=READY'
+
+      - name: Execute real Tony 1.0 public round trip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $PWD '.ci_tony_1_0_real_e2e/build/Release/tony_1_0_real_e2e.exe'
+          $log = Join-Path $env:RUNNER_TEMP 'tony-1.0-real-e2e.log'
+          & $exe 2>&1 | Tee-Object -FilePath $log
+          $rc = $LASTEXITCODE
+          $out = Get-Content $log -Raw
+          if ($rc -ne 0) { throw "Tony 1.0 E2E exited with code $rc" }
+          if ($out -notmatch 'TONY_1_0_WINDOWS_HTTPS_PAIR_WSS_QWEN_FINAL=PASS') { throw 'E2E PASS marker missing' }
+
+          $m = [regex]::Match($out, '(?m)^DEVICE_ID=([0-9a-f]+)\s*$')
+          if ($m.Success) {
+            $deviceId = $m.Groups[1].Value
+            $remote = "cd /home/ubuntu/.local/share/bear-agent/app && /home/ubuntu/.local/share/bear-agent/venv/bin/python -m app.pairing_cli revoke '$deviceId'"
+            & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $remote
+            if ($LASTEXITCODE -eq 0) { Write-Host "TEMP_DEVICE_REVOKED=PASS device=$deviceId" }
+          }
+
+      - name: Confirm server services after E2E
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not $env:TONY_SSH_KEY -or -not (Test-Path $env:TONY_SSH_KEY)) { exit 0 }
+          $remote = "systemctl is-active bear-agent-gateway.service; systemctl is-active rhocodec-llm.service; curl -fsS http://127.0.0.1:18790/health"
+          & ssh -o BatchMode=yes -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new -i $env:TONY_SSH_KEY "ubuntu@$env:TONY_SERVER_IP" $remote
