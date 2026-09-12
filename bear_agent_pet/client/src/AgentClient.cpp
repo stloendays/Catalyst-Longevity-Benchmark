@@ -71,8 +71,10 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
         scheduleReconnect();
     });
 
+    // Re-arm only after each HTTPS status request completes. This stays reliable
+    // when owner approval happens seconds, minutes, or hours after the code is shown.
     pairingPollTimer_.setInterval(2000);
-    pairingPollTimer_.setSingleShot(false);
+    pairingPollTimer_.setSingleShot(true);
     connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
 
     connect(&socket_, &QWebSocket::connected, this, [this]{
@@ -196,15 +198,25 @@ void AgentClient::requestDevicePairing(const QUrl &wsUrl, const QString &deviceN
         }
 
         pairingPollTimer_.setInterval(pollMs);
-        pairingPollTimer_.start();
         emit connectionStageChanged(QStringLiteral("approval_required"));
         emit pairingCodeReady(code,pairingExpiresAt_);
         reply->deleteLater();
+
+        // Check once almost immediately, then each completed pending response
+        // re-arms the single-shot timer below.
+        QTimer::singleShot(250, this, [this]{
+            if(!pairingRequestId_.isEmpty() && !pairingPollInFlight_)
+                pollDevicePairing();
+        });
     });
 }
 
 void AgentClient::pollDevicePairing() {
-    if(pairingPollInFlight_ || pairingRequestId_.isEmpty() || !pairingWsUrl_.isValid()) return;
+    if(pairingRequestId_.isEmpty() || !pairingWsUrl_.isValid()) return;
+    if(pairingPollInFlight_) {
+        pairingPollTimer_.start(500);
+        return;
+    }
     if(pairingExpiresAt_>0 && QDateTime::currentSecsSinceEpoch()>=pairingExpiresAt_) {
         pairingPollTimer_.stop();
         pairingRequestId_.clear();
@@ -245,13 +257,15 @@ void AgentClient::pollDevicePairing() {
             return;
         }
         if(reply->error()!=QNetworkReply::NoError || httpStatus<200 || httpStatus>=300) {
-            // Transient transport/server failures are retried until the code expires.
+            // Retry only after the previous HTTPS request has completed.
             reply->deleteLater();
+            if(!pairingRequestId_.isEmpty()) pairingPollTimer_.start();
             return;
         }
 
         if(obj.value("status").toString()!=QStringLiteral("approved")) {
             reply->deleteLater();
+            if(!pairingRequestId_.isEmpty()) pairingPollTimer_.start();
             return;
         }
 
@@ -454,3 +468,4 @@ void AgentClient::onText(const QString &message) {
         emit errorMessage(o.value("message").toString());
     }
 }
+

@@ -223,7 +223,9 @@ PetWindow::PetWindow(QWidget *parent)
     });
     connect(&agent_, &AgentClient::pairingCodeReady, this,
             [this](const QString &code, qint64 expiresAt){
-        pairingRequestActive_=false;
+        // A displayed code still owns a live /pair/status request. Keep this
+        // true so UI/reconnect paths cannot accidentally start a second request.
+        pairingRequestActive_=true;
         pairingCode_=code;
         pairingCodeExpiresAt_=expiresAt;
         emotion_="curious";
@@ -606,7 +608,9 @@ void PetWindow::paintEvent(QPaintEvent*) {
 
         p.translate(QPointF(width()/2.0+dx,pivotY));
         p.rotate(rotation);
-        if(action_==Action::Walk && walkDirection_<0) p.scale(-1.0,1.0);
+        // The source walk artwork faces left. Mirror it only while moving right,
+        // so visual facing always matches the actual X movement direction.
+        if(action_==Action::Walk && walkDirection_>0) p.scale(-1.0,1.0);
         const QRectF target(-visibleCx*fit,-visibleCy*fit,image.width()*fit,image.height()*fit);
         p.drawPixmap(target,*sprite,QRectF(0,0,sprite->width(),sprite->height()));
     } else {
@@ -1853,3 +1857,4 @@ void PetWindow::savePosition(){
     s.setValue("pet/dock_mode",dockModeName(dockMode_));
     s.setValue("pet/dock_screen",dockScreenName_);
 }
+
