@@ -16,14 +16,20 @@ from pydantic import BaseModel, Field
 
 from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, send_json
 from .pairing import (
+    approve_device_pairing_request,
+    approve_device_pairing_request_by_id,
     claim_device_pairing_request,
     consume_pairing_code,
     create_device_pairing_request,
+    list_owner_devices,
+    list_owner_pairing_requests,
+    owner_device_for_token,
     paired_device_count,
     reusable_friend_code_enabled,
+    revoke_device_as_owner,
 )
 
-app = FastAPI(title="Tony Desktop Companion", version="0.9.1")
+app = FastAPI(title="Tony Desktop Companion", version="1.0.1")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
 _PAIR_REQUESTS: dict[str, list[float]] = {}
@@ -44,9 +50,32 @@ class DevicePairStatusRequest(BaseModel):
     request_id: str = Field(min_length=24, max_length=128)
 
 
+class OwnerApprovalRequest(BaseModel):
+    approval_id: str = Field(default="", max_length=80)
+    code: str = Field(default="", max_length=20)
+
+
+class OwnerRevokeRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=80)
+
+
 def _pair_client_key(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
     return forwarded or (request.client.host if request.client else "unknown")
+
+
+def _request_bearer(request: Request) -> str:
+    header = request.headers.get("authorization", "").strip()
+    if not header.lower().startswith("bearer "):
+        return ""
+    return header[7:].strip()
+
+
+def _require_owner(request: Request) -> dict[str, Any]:
+    owner = owner_device_for_token(_request_bearer(request))
+    if owner is None:
+        raise HTTPException(status_code=403, detail="Owner device authorization required.")
+    return owner
 
 
 def _pair_rate_limited(key: str) -> bool:
@@ -196,7 +225,7 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "0.9.1",
+        "version": "1.0.1",
         "backend": "local-qwen-chat-only",
         "local_model": model,
         "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
@@ -208,9 +237,10 @@ async def health() -> dict[str, Any]:
         "streaming": True,
         "persona_core": True,
         "pairing_supported": True,
-        "pairing_mode": "device-code+recovery",
+        "pairing_mode": "device-code+owner-approval+recovery",
         "device_code_pairing": True,
         "device_code_ttl_seconds": _DEVICE_PAIR_TTL_SECONDS,
+        "owner_device_management": True,
         "reusable_friend_code_recovery": reusable_friend_code_enabled(),
         "paired_devices": paired_device_count(),
         "local_tools_enabled": False,
@@ -272,6 +302,51 @@ async def pair_device(pair_request: PairRequest, request: Request) -> dict[str, 
     return {"ok": True, "device_id": device_id, "token": token, "ws_path": "/agent/ws"}
 
 
+@app.get("/owner/status")
+async def owner_status(request: Request) -> dict[str, Any]:
+    owner = _require_owner(request)
+    return {"ok": True, "owner": True, "device": owner}
+
+
+@app.get("/owner/pairing/requests")
+async def owner_pairing_requests(request: Request) -> dict[str, Any]:
+    _require_owner(request)
+    return {"ok": True, "requests": list_owner_pairing_requests()}
+
+
+@app.post("/owner/pairing/approve")
+async def owner_pairing_approve(payload: OwnerApprovalRequest, request: Request) -> dict[str, Any]:
+    owner = _require_owner(request)
+    try:
+        if payload.approval_id.strip():
+            result = approve_device_pairing_request_by_id(payload.approval_id)
+        elif payload.code.strip():
+            result = approve_device_pairing_request(payload.code)
+        else:
+            raise ValueError("Choose a pending request or enter a connection code")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "approved_by": owner.get("id"), **result}
+
+
+@app.get("/owner/devices")
+async def owner_devices(request: Request) -> dict[str, Any]:
+    _require_owner(request)
+    return {"ok": True, "devices": list_owner_devices()}
+
+
+@app.post("/owner/devices/revoke")
+async def owner_device_revoke(payload: OwnerRevokeRequest, request: Request) -> dict[str, Any]:
+    _require_owner(request)
+    try:
+        changed = revoke_device_as_owner(payload.device_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not changed:
+        raise HTTPException(status_code=404, detail="Device was not found or is already revoked.")
+    return {"ok": True, "device_id": payload.device_id, "revoked": True}
+
+
 @app.websocket("/agent/ws")
 async def agent_ws(ws: WebSocket) -> None:
     if not authorized(ws):
@@ -300,8 +375,12 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "0.9.1",
-                    "accepted_capabilities": ["operator_log_sync_v1", "device_code_pairing_v1"],
+                    "server_version": "1.0.1",
+                    "accepted_capabilities": [
+                        "operator_log_sync_v1",
+                        "device_code_pairing_v1",
+                        "owner_device_management_v1",
+                    ],
                     "chat_only": True,
                     "streaming": True,
                     "local_model": local_model_id(),
