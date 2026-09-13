@@ -1,0 +1,77 @@
+name: Split repository - keep Tony only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify catalyst migration completed
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/stloendays/Copyright/main/app.py -o /tmp/copyright-app.py
+          test -s /tmp/copyright-app.py
+
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone Tony source branch
+        run: |
+          git clone --depth 1 --branch archive/tony-mixed-before-split-20260913 \
+            https://github.com/stloendays/Catalyst-Longevity-Benchmark.git /tmp/tony-source
+
+      - name: Keep only Tony desktop pet and its infrastructure
+        shell: bash
+        run: |
+          mkdir -p /tmp/keep/.github/workflows /tmp/keep/.github/scripts
+          cp -a /tmp/tony-source/bear_agent_pet /tmp/keep/
+
+          for f in /tmp/tony-source/.github/workflows/*.yml; do
+            n=$(basename "$f")
+            case "$n" in
+              bear-agent-*|tony-*|deploy-tony-chat-model.yml|deploy-local-llm.yml|deploy-local-llm-v2.yml|local2b-mcp-*|openclaw-*|self-hosted-runner-smoke.yml|server-*|terminate-stuck-llama-install.yml)
+                cp "$f" /tmp/keep/.github/workflows/ ;;
+            esac
+          done
+
+          for f in /tmp/tony-source/.github/scripts/*; do
+            [ -f "$f" ] && cp "$f" /tmp/keep/.github/scripts/
+          done
+
+          if [ -d /tmp/tony-source/training/local2b_mcp ]; then
+            mkdir -p /tmp/keep/training
+            cp -a /tmp/tony-source/training/local2b_mcp /tmp/keep/training/
+          fi
+          if [ -f /tmp/tony-source/scripts/setup_self_hosted_runner.sh ]; then
+            mkdir -p /tmp/keep/scripts
+            cp /tmp/tony-source/scripts/setup_self_hosted_runner.sh /tmp/keep/scripts/
+          fi
+
+          cat > /tmp/keep/README.md <<'EOF'
+          # Tony Desktop Pet
+
+          Tony is a Teddy / toy-poodle-style desktop pet with a Qt 6 C++ client, server-agent gateway, pairing, local logging, model integration, training data, and GitHub Actions based deployment/build workflows.
+
+          The catalyst patent / software-copyright project previously stored in this repository has been split into `stloendays/Copyright`.
+
+          ## Main project
+          - `bear_agent_pet/client` — Windows Qt desktop pet
+          - `bear_agent_pet/server_gateway` — HTTPS/WSS agent gateway and pairing
+          - `bear_agent_pet/training` — Tony persona and training corpus pipeline
+          - `bear_agent_pet/operator_logs` — operator-log archival specification
+          - `.github/workflows` — Tony build, release, deployment and server workflows
+          EOF
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/keep/. .
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: split catalyst project and keep Tony desktop pet only"
+          git push origin main
