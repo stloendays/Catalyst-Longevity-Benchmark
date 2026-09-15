@@ -174,7 +174,7 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
                 {QString::fromUtf8("我现在还没有你明确让我保存的本地记忆。")},
                 "head_tilt","curious",3200);
 
-        const int first=qMax(0,facts.size()-6);
+        const qsizetype first=facts.size()>6 ? facts.size()-6 : 0;
         const QStringList recent=facts.mid(first);
         out.route=Route::LocalFixed;
         out.intent="memory_recall";
@@ -193,7 +193,6 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
         return out;
     }
 
-    // Questions needing reasoning, tools or domain knowledge go to the Agent.
     if(looksTechnical(p)) {
         out.intent="agent_task";
         return out;
