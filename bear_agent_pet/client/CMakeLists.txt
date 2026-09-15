@@ -19,6 +19,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindow.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
+    src/TonyResponseRouter.cpp
+    src/TonyResponseRouter.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
     src/ChatComposer.cpp

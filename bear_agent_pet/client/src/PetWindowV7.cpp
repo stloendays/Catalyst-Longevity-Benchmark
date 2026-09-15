@@ -1,4 +1,6 @@
 #include "PetWindow.h"
+#include "AppLogger.h"
+#include "TonyResponseRouter.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -1839,10 +1841,41 @@ void PetWindow::submitTonyPrompt(const QString &text){
     markInteraction();
     behavior_.onConversation();
     if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
-    answer_.clear(); emotion_="curious"; agentState_="thinking"; restoreAgentAction();
-    if(agent_.connected()) agent_.sendMessage(prompt);
-    else {
-        agentState_="idle"; setAction(Action::Think,2800);
+
+    TonyResponseRouter router;
+    const auto decision=router.resolve(prompt,uiLanguage(),agent_.connected(),behavior_.snapshot());
+    AppLogger::recordOperatorEvent(
+        QStringLiteral("chat_route"),
+        prompt,
+        QJsonObject{
+            {QStringLiteral("route"),TonyResponseRouter::routeName(decision.route)},
+            {QStringLiteral("intent"),decision.intent},
+            {QStringLiteral("connected"),agent_.connected()},
+            {QStringLiteral("action"),decision.action}
+        });
+
+    answer_.clear();
+    if(decision.handledLocally()) {
+        agentState_="idle";
+        if(decision.intent==QStringLiteral("hug")) behavior_.onHugged();
+        emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;
+        if(!decision.action.isEmpty())
+            setAction(actionFromWire(decision.action),decision.durationMs);
+        else
+            restoreAgentAction();
+        if(!decision.reply.isEmpty())
+            showBubble(decision.reply,qMax(3000,decision.durationMs+1100));
+        return;
+    }
+
+    emotion_="curious";
+    agentState_="thinking";
+    restoreAgentAction();
+    if(agent_.connected()) {
+        agent_.sendMessage(decision.forwardText.isEmpty() ? prompt : decision.forwardText);
+    } else {
+        agentState_="idle";
+        setAction(Action::Think,2800);
         if(pairingCode_.isEmpty()) startAutomaticPairing();
         else showCurrentPairingCode(false);
     }
