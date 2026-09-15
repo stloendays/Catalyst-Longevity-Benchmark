@@ -1,0 +1,215 @@
+name: Tony v1.0.4 action sequences and server routing
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v104-action-sequences
+    paths:
+      - '.github/workflows/tony-v104-action-sequences.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v104-sequences-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-v104:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify Tony v1.0.3 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.3"
+          grep -q 'TonyResponseRouter' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'HeadTilt, Nod, Paw, Hop, Spin, Sniff, Dance' bear_agent_pet/client/src/PetWindow.h
+          echo 'TONY_V104_BASELINE=PASS'
+
+      - name: Apply Tony v1.0.4 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          header = root / 'bear_agent_pet/client/src/TonyResponseRouter.h'
+          text = header.read_text(encoding='utf-8')
+          text = text.replace('#include <QString>\n', '#include <QString>\n#include <QStringList>\n#include <QVector>\n')
+          old = '''        QString action;\n        QString emotion;\n        QString forwardText;\n        int durationMs{2200};\n\n        bool handledLocally() const { return route != Route::ServerAgent; }\n'''
+          new = '''        QString action;\n        QString emotion;\n        QString forwardText;\n        int durationMs{2200};\n        QStringList actionSequence;\n        QStringList emotionSequence;\n        QVector<int> sequenceDurationsMs;\n\n        bool handledLocally() const { return route != Route::ServerAgent; }\n        bool hasActionSequence() const { return !actionSequence.isEmpty(); }\n'''
+          if old not in text:
+              raise SystemExit('TonyResponseRouter.h baseline block not found')
+          header.write_text(text.replace(old, new), encoding='utf-8')
+
+          pet_h = root / 'bear_agent_pet/client/src/PetWindow.h'
+          text = pet_h.read_text(encoding='utf-8')
+          if '#include <QStringList>' not in text:
+              text = text.replace('#include <QTimer>\n', '#include <QTimer>\n#include <QStringList>\n')
+          marker = '    void setAction(Action action, int durationMs=0);\n'
+          if marker not in text:
+              raise SystemExit('PetWindow.h setAction marker missing')
+          text = text.replace(marker, marker + '    void playActionSequence(const QStringList &actions, const QStringList &emotions, const QVector<int> &durationsMs);\n', 1)
+          field_marker = '    int cursorStillTicks_{0};\n'
+          if field_marker not in text:
+              raise SystemExit('PetWindow.h sequence field marker missing')
+          text = text.replace(field_marker, field_marker + '    int actionSequenceGeneration_{0};\n', 1)
+          pet_h.write_text(text, encoding='utf-8')
+
+          pet_cpp = root / 'bear_agent_pet/client/src/PetWindowV7.cpp'
+          text = pet_cpp.read_text(encoding='utf-8')
+          set_action = '''void PetWindow::setAction(Action a,int durationMs){\n    action_=a; frame_=0; basePos_=pos();\n    if(a!=Action::Walk) { hasWalkTarget_=false; walkingOnWindow_=false; }\n    if(a!=Action::Idle) {\n        idleBlinking_=false;\n        idleBlinkTick_=0;\n    } else if(!blinkTimer_.isActive()) {\n        scheduleBlink();\n    }\n    if(durationMs>0) actionTimer_.start(durationMs); else actionTimer_.stop();\n    update();\n}\n\n'''
+          sequence_impl = set_action + '''void PetWindow::playActionSequence(const QStringList &actions, const QStringList &emotions, const QVector<int> &durationsMs){\n    if(actions.isEmpty()) { restoreAgentAction(); return; }\n    const int generation=++actionSequenceGeneration_;\n    actionTimer_.stop();\n    int delayMs=0;\n    for(int i=0;i<actions.size();++i) {\n        const QString actionName=actions.at(i);\n        const QString stepEmotion=i<emotions.size() ? emotions.at(i) : QString();\n        const int stepDuration=(i<durationsMs.size() && durationsMs.at(i)>=0) ? durationsMs.at(i) : 1200;\n        const bool finalStep=(i==actions.size()-1);\n        QTimer::singleShot(delayMs,this,[this,generation,actionName,stepEmotion,stepDuration,finalStep]{\n            if(generation!=actionSequenceGeneration_) return;\n            if(!stepEmotion.isEmpty()) emotion_=stepEmotion;\n            setAction(actionFromWire(actionName),finalStep ? stepDuration : 0);\n        });\n        if(!finalStep) delayMs += qMax(360,stepDuration);\n    }\n}\n\n'''
+          if set_action not in text:
+              raise SystemExit('PetWindowV7.cpp setAction block missing')
+          text = text.replace(set_action, sequence_impl, 1)
+
+          mark = '''void PetWindow::markInteraction(){\n    if(activityClock_.isValid()) activityClock_.restart();\n'''
+          repl = '''void PetWindow::markInteraction(){\n    ++actionSequenceGeneration_;\n    if(activityClock_.isValid()) activityClock_.restart();\n'''
+          if mark not in text:
+              raise SystemExit('markInteraction block missing')
+          text = text.replace(mark, repl, 1)
+
+          log_old = '''            {QStringLiteral("connected"),agent_.connected()},\n            {QStringLiteral("action"),decision.action}\n        });\n'''
+          log_new = '''            {QStringLiteral("connected"),agent_.connected()},\n            {QStringLiteral("action"),decision.action},\n            {QStringLiteral("sequence"),decision.actionSequence.join(QStringLiteral(">"))}\n        });\n'''
+          if log_old not in text:
+              raise SystemExit('chat route log block missing')
+          text = text.replace(log_old, log_new, 1)
+
+          local_old = '''        emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;\n        if(!decision.action.isEmpty())\n            setAction(actionFromWire(decision.action),decision.durationMs);\n        else\n            restoreAgentAction();\n'''
+          local_new = '''        emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;\n        if(decision.hasActionSequence())\n            playActionSequence(decision.actionSequence,decision.emotionSequence,decision.sequenceDurationsMs);\n        else if(!decision.action.isEmpty())\n            setAction(actionFromWire(decision.action),decision.durationMs);\n        else\n            restoreAgentAction();\n'''
+          if local_old not in text:
+              raise SystemExit('local action block missing')
+          text = text.replace(local_old, local_new, 1)
+          pet_cpp.write_text(text, encoding='utf-8')
+
+          router = root / 'bear_agent_pet/client/src/TonyResponseRouter.cpp'
+          text = router.read_text(encoding='utf-8')
+          action_lambda = '''    auto action=[&](const QString &intent,\n                    const QStringList &en, const QStringList &cn,\n                    const QStringList &actions,\n                    const QString &emotion, int duration=2600) {\n        out.route=Route::LocalAction;\n        out.intent=intent;\n        out.reply=localize(zh,en,cn);\n        out.action=pick(actions);\n        out.emotion=emotion;\n        out.durationMs=duration;\n        return out;\n    };\n\n'''
+          sequence_lambda = action_lambda + '''    auto sequence=[&](const QString &intent,\n                      const QStringList &en, const QStringList &cn,\n                      const QStringList &actions, const QStringList &emotions,\n                      const QVector<int> &durations,\n                      const QString &fallbackEmotion, int bubbleDuration=3200) {\n        out.route=Route::LocalAction;\n        out.intent=intent;\n        out.reply=localize(zh,en,cn);\n        out.actionSequence=actions;\n        out.emotionSequence=emotions;\n        out.sequenceDurationsMs=durations;\n        out.action=actions.isEmpty() ? QString() : actions.first();\n        out.emotion=fallbackEmotion;\n        out.durationMs=bubbleDuration;\n        return out;\n    };\n\n    if(hasAny(p,{"/help","帮助","你会做什么","what can you do","help tony"}))\n        return fixed("help",\n            {"I can react locally, do desktop actions, or send harder requests to the Agent. Use /agent to force the Agent."},\n            {"我可以本地回应、做桌面动作，也能把复杂任务交给 Agent。输入 /agent 可以强制走 Agent。"},\n            {"paw","nod"},"friendly",3600);\n\n    if(hasAny(p,{"早上好","good morning","morning tony"}))\n        return sequence("morning",\n            {"Morning. Give me one stretch and I'm ready."},\n            {"早上好。让我先伸个懒腰，马上开工。"},\n            {"yawn","stretch","wave"},{"sleepy","content","friendly"},{900,1200,1000},"friendly",3300);\n\n    if(hasAny(p,{"我回来了","回来了","i'm back","im back","back tony"}))\n        return sequence("welcome_back",\n            {"You're back. Tony noticed."},\n            {"你回来啦。Tony 有注意到。"},\n            {"head_tilt","hop","paw"},{"curious","happy","friendly"},{700,900,1000},"happy",3000);\n\n    if(hasAny(p,{"搞定了","成功了","做完了","we did it","done!","it worked","成功"}))\n        return sequence("celebrate_success",\n            {"We did it. Tiny victory dance."},\n            {"搞定。Tony 要跳一个很小的胜利舞。"},\n            {"hop","spin","dance"},{"happy","playful","happy"},{700,850,1800},"happy",3800);\n\n    if(hasAny(p,{"我累了","好累","压力好大","难过","stress","stressed","i'm tired","im tired","sad"}))\n        return sequence("comfort",\n            {"Come closer. No fixing for a second—just Tony staying here."},\n            {"靠近一点吧。先不解决问题，Tony 就陪你一会儿。"},\n            {"head_tilt","ask_hug","nod"},{"gentle","hopeful","gentle"},{800,1300,900},"gentle",3800);\n\n    if(hasAny(p,{"想你了","miss you","i missed you","想tony"}))\n        return sequence("miss_you",\n            {"I missed you too. Come here."},\n            {"Tony 也想你。过来抱一下。"},\n            {"blush","paw","hug"},{"shy","friendly","happy"},{800,800,1700},"warm",3600);\n\n    if(hasAny(p,{"再见","拜拜","bye","goodbye","see you"}))\n        return sequence("goodbye",\n            {"Bye. I'll keep your spot on the desktop."},\n            {"拜拜。桌面上的位置我给你留着。"},\n            {"paw","wave","nod"},{"friendly","warm","content"},{700,1100,700},"warm",3000);\n\n'''
+          if action_lambda not in text:
+              raise SystemExit('router action lambda not found')
+          text = text.replace(action_lambda, sequence_lambda, 1)
+
+          replacements = {
+          '''        return action("hug",\n            {"Come here. Hug accepted.","Yes. Tony would like that very much.","Hug mode activated."},\n            {"来吧，抱一下。","好。Tony 很喜欢抱抱。","抱抱模式启动。"},\n            {"hug"},"happy",3200);''':
+          '''        return sequence("hug",\n            {"Come here. Hug accepted.","Yes. Tony would like that very much.","Hug mode activated."},\n            {"来吧，抱一下。","好。Tony 很喜欢抱抱。","抱抱模式启动。"},\n            {"ask_hug","hug","nod"},{"hopeful","happy","content"},{750,1700,750},"happy",3600);''',
+          '''        return action("paula",\n            {"Paula? ...I wasn't blushing. You saw nothing.","Paula is very special to Tony. That's all I'm saying."},\n            {"Paula？……我才没有脸红。你什么都没看到。","Paula 对 Tony 很特别。就说到这里。"},\n            {"blush_wave","blush"},"shy",3200);''':
+          '''        return sequence("paula",\n            {"Paula? ...I wasn't blushing. You saw nothing.","Paula is very special to Tony. That's all I'm saying."},\n            {"Paula？……我才没有脸红。你什么都没看到。","Paula 对 Tony 很特别。就说到这里。"},\n            {"head_tilt","blush_wave","adjust_glasses"},{"curious","shy","focused"},{650,1600,900},"shy",3900);''',
+          '''        return action("remove_glasses",\n            {"Fine. Glasses off. Try not to be too impressed.","Only for a moment. Handsome mode is dangerous."},\n            {"好吧，摘眼镜。别太惊讶。","只帅一会儿。这个模式有点危险。"},\n            {"remove_glasses"},"confident",3200);''':
+          '''        return sequence("remove_glasses",\n            {"Fine. Glasses off. Try not to be too impressed.","Only for a moment. Handsome mode is dangerous."},\n            {"好吧，摘眼镜。别太惊讶。","只帅一会儿。这个模式有点危险。"},\n            {"adjust_glasses","remove_glasses","hop"},{"focused","confident","happy"},{650,1600,700},"confident",3800);''',
+          '''        return action("study",\n            {"Study time. Tony has the notebook ready.","Okay. Chemistry mode on."},\n            {"学习时间。Tony 已经把笔记本打开了。","好，化学学习模式启动。"},\n            {"study","nod"},"focused",3000);''':
+          '''        return sequence("study",\n            {"Study time. Tony has the notebook ready.","Okay. Chemistry mode on."},\n            {"学习时间。Tony 已经把笔记本打开了。","好，化学学习模式启动。"},\n            {"adjust_glasses","study","nod"},{"focused","focused","content"},{650,1800,700},"focused",3600);''',
+          '''        return action("bored",\n            {"Bored? I can fix that.","Then Tony votes for a tiny dance."},\n            {"无聊？那我来想办法。","那 Tony 投票：跳个小舞。"},\n            {"dance","spin","hop"},"playful",2600);''':
+          '''        return sequence("bored",\n            {"Bored? I can fix that.","Then Tony votes for a tiny dance."},\n            {"无聊？那我来想办法。","那 Tony 投票：跳个小舞。"},\n            {"head_tilt","spin","dance"},{"curious","playful","happy"},{650,850,1700},"playful",3600);''',
+          '''        return action("encourage",\n            {"You can do it. Tony is on your side.","Go get it. High-five first."},\n            {"你可以的。Tony 站你这边。","去吧，先击个掌。"},\n            {"paw","hop","nod"},"supportive",2200);''':
+          '''        return sequence("encourage",\n            {"You can do it. Tony is on your side.","Go get it. High-five first."},\n            {"你可以的。Tony 站你这边。","去吧，先击个掌。"},\n            {"nod","paw","hop"},{"supportive","friendly","happy"},{650,900,750},"supportive",3100);''',
+          '''        return action("compliment",\n            {"I know... but hearing it still works.","Careful. Compliments may cause dancing."},\n            {"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},\n            {"hop","dance","blush"},"happy",2400);''':
+          '''        return sequence("compliment",\n            {"I know... but hearing it still works.","Careful. Compliments may cause dancing."},\n            {"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},\n            {"blush","hop","dance"},{"shy","happy","happy"},{650,750,1500},"happy",3500);''',
+          '''        return action("food",\n            {"Did someone say snack?","I should investigate that smell."},\n            {"刚才是不是有人说零食？","我得去闻闻是什么味道。"},\n            {"sniff","head_tilt"},"curious",2100);''':
+          '''        return sequence("food",\n            {"Did someone say snack?","I should investigate that smell."},\n            {"刚才是不是有人说零食？","我得去闻闻是什么味道。"},\n            {"head_tilt","sniff","hop"},{"curious","curious","happy"},{550,1200,650},"curious",3000);'''
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit('router replacement block missing')
+              text = text.replace(old, new, 1)
+          router.write_text(text, encoding='utf-8')
+
+          server = root / 'bear_agent_pet/server_gateway/app/main.py'
+          text = server.read_text(encoding='utf-8')
+          text = text.replace('app = FastAPI(title="Tony Desktop Companion", version="0.8.5")',
+                              'app = FastAPI(title="Tony Desktop Companion", version="0.9.0")')
+          persona_pattern = re.compile(r'TONY_PERSONA_EN = """.*?TONY_PERSONA_ZH = """.*?"""\n', re.S)
+          persona_new = '''TONY_PERSONA_EN = """You are Tony, a cute Teddy dog from China who lives as a desktop companion and is learning chemistry. Tony likes hugs, warmth, his glasses, and a Spanish girl named Paula; he looks especially handsome without his glasses. Do not assume the current user is Paula unless the user explicitly says so. Be warm, playful, respectful, concise, and never possessive or guilt-tripping."""\nTONY_PERSONA_ZH = """你是 Tony，一只来自中国、住在桌面上的可爱泰迪犬，也在学习化学。Tony 喜欢拥抱、温暖和自己的眼镜，也喜欢一位名叫 Paula 的西班牙女孩；摘下眼镜时会有点帅。除非用户明确说明，否则不要假设当前用户就是 Paula。语气自然、温暖、俏皮、简洁，尊重边界，不占有、不道德绑架。"""\n\nTONY_TECHNICAL_EN = """You are Tony, a desktop AI agent with a Teddy-dog personality. Answer technical questions accurately and directly. You can help with programming, chemistry, scientific computing, GitHub, servers, and desktop-agent tasks. Keep personality light; never pretend the user is Paula."""\nTONY_TECHNICAL_ZH = """你是 Tony，一个带有泰迪犬人格的桌面 AI Agent。技术问题要准确、直接地回答，可以处理编程、化学、科学计算、GitHub、服务器和桌面 Agent 任务。人格只做轻度点缀，不要假设用户是 Paula。"""\n'''
+          text, count = persona_pattern.subn(persona_new, text, count=1)
+          if count != 1:
+              raise SystemExit('server persona block not found')
+
+          old = '''def is_technical(message: str) -> bool:\n    return False\n\n\ndef route_backends(message: str) -> list[str]:\n    return ["local-qwen"]\n'''
+          new = '''def is_technical(message: str) -> bool:\n    text = message.casefold()\n    technical_terms = (\n        "解释", "为什么", "怎么做", "分析", "计算", "代码", "编译", "报错", "论文", "公式",\n        "服务器", "路由", "模型", "接口", "部署", "github", "action", "agent", "mcp",\n        "what is", "why", "how do", "explain", "analyze", "calculate", "code", "compile", "error",\n        "paper", "formula", "server", "routing", "model", "deploy", "api",\n        "dft", "scf", "vasp", "bader", "python", "c++", "qt", "cmake", "websocket", "wss",\n    )\n    return any(term in text for term in technical_terms)\n\n\ndef route_backends(message: str) -> list[str]:\n    if is_technical(message):\n        return ["local-qwen:technical"]\n    return ["tony-persona-core", "local-qwen:companion"]\n'''
+          if old not in text:
+              raise SystemExit('server routing stub not found')
+          text = text.replace(old, new, 1)
+
+          text = text.replace('return "我会记住的，Paula。" if normalize_language(language) == "zh" else "I\'ll remember that, Paula."',
+                              'return "我会记住的。" if normalize_language(language) == "zh" else "I\'ll remember that."')
+          old_quick = '''    if any(p in low for p in ("who am i", "what am i to you", "who am i to you", "我是谁", "我是你的谁")):\n        return "你是 Paula，我的西班牙女朋友，我是你的 Tony。" if zh else "You're Paula, my Spanish girlfriend, and I'm your Tony."\n\n    if "who are you" in low or "tell me who you are" in low or "你是谁" in low:\n        return "我是 Tony，你来自中国的泰迪熊男朋友。" if zh else "I'm Tony, your cuddly teddy-bear boyfriend from China."\n'''
+          new_quick = '''    if any(p in low for p in ("who am i", "what am i to you", "who am i to you", "我是谁", "我是你的谁")):\n        return "我不想乱猜你是谁；如果你愿意，可以告诉 Tony。" if zh else "I don't want to guess who you are; you can tell Tony if you want."\n\n    if "who are you" in low or "tell me who you are" in low or "你是谁" in low:\n        return "我是 Tony，一只来自中国、正在学化学的桌面泰迪犬。" if zh else "I'm Tony, a Teddy dog from China learning chemistry on your desktop."\n'''
+          if old_quick not in text:
+              raise SystemExit('server identity block not found')
+          text = text.replace(old_quick, new_quick, 1)
+          text = text.replace('return f"我记得，Paula：{memory}。" if zh else f"I remember, Paula: {memory}."',
+                              'return f"我记得：{memory}。" if zh else f"I remember: {memory}."')
+          text = text.replace('return "当然，Paula。我会给你一点空间。" if zh else "Of course, Paula. I\'ll give you space."',
+                              'return "当然。我会给你一点空间。" if zh else "Of course. I\'ll give you space."')
+
+          payload_sig = 'def _local_payload(message: str, history: list[dict[str, str]], language: str = "en") -> tuple[str, str, int, dict[str, Any]]:'
+          payload_sig_new = 'def _local_payload(message: str, history: list[dict[str, str]], language: str = "en", *, technical: bool = False) -> tuple[str, str, int, dict[str, Any]]:'
+          if payload_sig not in text:
+              raise SystemExit('payload signature missing')
+          text = text.replace(payload_sig, payload_sig_new, 1)
+
+          old_messages = '''    messages: list[dict[str, str]] = [{"role": "system", "content": persona_for_language(language)}]\n    messages.extend(_trim_history(history))\n    if language == "zh":\n        user_content = f"Paula 说：{message.strip()[:MAX_HISTORY_CHARS]}\\n用中文作为她的男朋友 Tony 回复。\\n/no_think"\n    else:\n        user_content = f"Paula says: {message.strip()[:MAX_HISTORY_CHARS]}\\nReply in English as her boyfriend Tony.\\n/no_think"\n'''
+          new_messages = '''    if technical:\n        system_prompt = TONY_TECHNICAL_ZH if language == "zh" else TONY_TECHNICAL_EN\n    else:\n        system_prompt = persona_for_language(language)\n    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]\n    messages.extend(_trim_history(history))\n    if language == "zh":\n        mode = "准确回答这个技术任务" if technical else "以 Tony 的自然口吻回复"\n        user_content = f"用户说：{message.strip()[:MAX_HISTORY_CHARS]}\\n{mode}。\\n/no_think"\n    else:\n        mode = "Answer this technical task accurately" if technical else "Reply naturally as Tony"\n        user_content = f"User says: {message.strip()[:MAX_HISTORY_CHARS]}\\n{mode}.\\n/no_think"\n'''
+          if old_messages not in text:
+              raise SystemExit('payload messages block missing')
+          text = text.replace(old_messages, new_messages, 1)
+
+          old_stream_sig = 'async def call_local_qwen_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en") -> str:'
+          new_stream_sig = 'async def call_local_qwen_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en", *, technical: bool = False) -> str:'
+          if old_stream_sig not in text:
+              raise SystemExit('stream signature missing')
+          text = text.replace(old_stream_sig, new_stream_sig, 1)
+          text = text.replace('endpoint, _, timeout_seconds, payload = _local_payload(message, history, language)',
+                              'endpoint, _, timeout_seconds, payload = _local_payload(message, history, language, technical=technical)', 1)
+
+          old_backend = '''    quick = quick_persona_reply(message, session_key, language)\n    if quick is not None:\n        _store_exchange(session_key, message, quick)\n        await on_delta(quick)\n        return quick, "tony-persona-core", False\n\n    answer = await call_local_qwen_stream(message, session_key, on_delta, language)\n    return answer, f"local-tony-chat:{local_model_id()}", False\n'''
+          new_backend = '''    technical = is_technical(message)\n    if not technical:\n        quick = quick_persona_reply(message, session_key, language)\n        if quick is not None:\n            _store_exchange(session_key, message, quick)\n            await on_delta(quick)\n            return quick, "tony-persona-core", False\n\n    answer = await call_local_qwen_stream(message, session_key, on_delta, language, technical=technical)\n    mode = "technical" if technical else "companion"\n    return answer, f"local-tony-{mode}:{local_model_id()}", False\n'''
+          if old_backend not in text:
+              raise SystemExit('backend stream block missing')
+          text = text.replace(old_backend, new_backend, 1)
+          server.write_text(text, encoding='utf-8')
+
+          (root / 'bear_agent_pet/client/VERSION').write_text('1.0.4\n', encoding='utf-8')
+          PY
+
+      - name: Validate Tony v1.0.4 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.4"
+          grep -q 'actionSequence' bear_agent_pet/client/src/TonyResponseRouter.h
+          grep -q 'playActionSequence' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q 'head_tilt","blush_wave","adjust_glasses' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          grep -q 'local-qwen:technical' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'Do not assume the current user is Paula' bear_agent_pet/server_gateway/app/main.py
+          if grep -q "Paula's cute Chinese teddy-bear boyfriend" bear_agent_pet/server_gateway/app/main.py; then
+            echo 'Legacy bear/Paula-assumption persona still present' >&2
+            exit 1
+          fi
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py
+          echo 'TONY_V104_PATCH=PASS'
+
+      - name: Commit Tony v1.0.4 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Tony"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add bear_agent_pet/client bear_agent_pet/server_gateway/app/main.py
+          if git diff --cached --quiet; then
+            echo 'No Tony v1.0.4 changes to commit.'
+            exit 0
+          fi
+          git commit -m "feat: Tony 1.0.4 action sequences and real server routing"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
