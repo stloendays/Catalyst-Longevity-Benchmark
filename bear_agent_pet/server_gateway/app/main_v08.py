@@ -29,7 +29,7 @@ from .pairing import (
     revoke_device_as_owner,
 )
 
-app = FastAPI(title="Tony Desktop Companion", version="1.0.1")
+app = FastAPI(title="Tony Desktop Companion", version="1.0.4")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
 _PAIR_REQUESTS: dict[str, list[float]] = {}
@@ -225,14 +225,16 @@ async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "1.0.1",
-        "backend": "local-qwen-chat-only",
+        "version": "1.0.4",
+        "backend": "local-qwen-routed-chat",
         "local_model": model,
         "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
         "language": "English",
         "languages": ["English", "Simplified Chinese"],
         "default_language": "English",
-        "persona": "Paula-boyfriend",
+        "persona": "teddy-companion+technical-agent",
+        "technical_routing": True,
+        "routing_modes": ["persona-core", "companion", "technical"],
         "chat_only": True,
         "streaming": True,
         "persona_core": True,
@@ -355,7 +357,7 @@ async def agent_ws(ws: WebSocket) -> None:
 
     await ws.accept()
     connection_id = secrets.token_hex(6)
-    session_key = f"tony-paula-{connection_id}"
+    session_key = f"tony-{connection_id}"
     preferred_language = "en"
     await send_json(ws, {"type": "agent_state", "state": "idle"})
     await send_json(ws, {"type": "avatar_action", "action": "wave", "emotion": "affectionate", "duration_ms": 1200})
@@ -375,11 +377,12 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "1.0.1",
+                    "server_version": "1.0.4",
                     "accepted_capabilities": [
                         "operator_log_sync_v1",
                         "device_code_pairing_v1",
                         "owner_device_management_v1",
+                        "routed_chat_v1",
                     ],
                     "chat_only": True,
                     "streaming": True,
@@ -406,7 +409,7 @@ async def agent_ws(ws: WebSocket) -> None:
             action, emotion, duration = action_for_text(content)
             await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
-            await send_json(ws, {"type": "agent_state", "state": "working", "agent": "tony-chat"})
+            await send_json(ws, {"type": "agent_state", "state": "working", "agent": "tony-router"})
 
             try:
                 async def emit_delta(piece: str) -> None:
