@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
 #include "TonyBehaviorEngine.h"
 
@@ -16,8 +18,12 @@ public:
         QString emotion;
         QString forwardText;
         int durationMs{2200};
+        QStringList actionSequence;
+        QStringList emotionSequence;
+        QVector<int> sequenceDurationsMs;
 
         bool handledLocally() const { return route != Route::ServerAgent; }
+        bool hasActionSequence() const { return !actionSequence.isEmpty(); }
     };
 
     Decision resolve(const QString &prompt,

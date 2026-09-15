@@ -7,6 +7,7 @@
 #include <QRect>
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <QStringList>
 #include <QVector>
 #include <QWidget>
 #include "AgentClient.h"
@@ -53,6 +54,7 @@ private:
     int frameStrideForAction(Action action) const;
     const QPixmap *pixmapForAction(Action action) const;
     void setAction(Action action, int durationMs=0);
+    void playActionSequence(const QStringList &actions, const QStringList &emotions, const QVector<int> &durationsMs);
     Action actionFromWire(const QString &name) const;
     Action baseActionForAgentState() const;
     void restoreAgentAction();
@@ -148,6 +150,7 @@ private:
     int rapidClicks_{0};
     int lifeSaveTicks_{0};
     int cursorStillTicks_{0};
+    int actionSequenceGeneration_{0};
     int fallVelocity_{0};
     int fallTargetY_{0};
     int bounceCount_{0};

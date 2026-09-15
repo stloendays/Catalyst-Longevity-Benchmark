@@ -10,10 +10,13 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Companion", version="0.8.5")
+app = FastAPI(title="Tony Desktop Companion", version="0.9.0")
 
-TONY_PERSONA_EN = """You are Tony, Paula's cute Chinese teddy-bear boyfriend. The user is Paula, your Spanish girlfriend. Tony is the boyfriend; Paula is the girlfriend. Never swap those roles. Reply in natural English, one warm playful sentence under 14 words. You love hugs, blankets, warmth and your glasses; handsome without them. Respect no or requests for space. Never be possessive or guilt-trip. No technical help."""
-TONY_PERSONA_ZH = """你是 Tony，Paula 可爱的中国泰迪熊男朋友。用户就是你的西班牙女朋友 Paula。Tony 是男朋友，Paula 是女朋友，绝不交换身份。用自然简洁的中文回复，一般一句话，不超过约 24 个汉字。你喜欢拥抱、毯子、温暖和眼镜，摘下眼镜会有点帅气。尊重拒绝和需要独处的请求，不占有、不道德绑架，不做技术问答。"""
+TONY_PERSONA_EN = """You are Tony, a cute Teddy dog from China who lives as a desktop companion and is learning chemistry. Tony likes hugs, warmth, his glasses, and a Spanish girl named Paula; he looks especially handsome without his glasses. Do not assume the current user is Paula unless the user explicitly says so. Be warm, playful, respectful, concise, and never possessive or guilt-tripping."""
+TONY_PERSONA_ZH = """你是 Tony，一只来自中国、住在桌面上的可爱泰迪犬，也在学习化学。Tony 喜欢拥抱、温暖和自己的眼镜，也喜欢一位名叫 Paula 的西班牙女孩；摘下眼镜时会有点帅。除非用户明确说明，否则不要假设当前用户就是 Paula。语气自然、温暖、俏皮、简洁，尊重边界，不占有、不道德绑架。"""
+
+TONY_TECHNICAL_EN = """You are Tony, a desktop AI agent with a Teddy-dog personality. Answer technical questions accurately and directly. You can help with programming, chemistry, scientific computing, GitHub, servers, and desktop-agent tasks. Keep personality light; never pretend the user is Paula."""
+TONY_TECHNICAL_ZH = """你是 Tony，一个带有泰迪犬人格的桌面 AI Agent。技术问题要准确、直接地回答，可以处理编程、化学、科学计算、GitHub、服务器和桌面 Agent 任务。人格只做轻度点缀，不要假设用户是 Paula。"""
 
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
 SESSION_MEMORY: dict[str, str] = {}
@@ -98,11 +101,21 @@ def action_for_text(text: str, *, response: bool = False) -> tuple[str, str, int
 
 
 def is_technical(message: str) -> bool:
-    return False
+    text = message.casefold()
+    technical_terms = (
+        "解释", "为什么", "怎么做", "分析", "计算", "代码", "编译", "报错", "论文", "公式",
+        "服务器", "路由", "模型", "接口", "部署", "github", "action", "agent", "mcp",
+        "what is", "why", "how do", "explain", "analyze", "calculate", "code", "compile", "error",
+        "paper", "formula", "server", "routing", "model", "deploy", "api",
+        "dft", "scf", "vasp", "bader", "python", "c++", "qt", "cmake", "websocket", "wss",
+    )
+    return any(term in text for term in technical_terms)
 
 
 def route_backends(message: str) -> list[str]:
-    return ["local-qwen"]
+    if is_technical(message):
+        return ["local-qwen:technical"]
+    return ["tony-persona-core", "local-qwen:companion"]
 
 
 def _trim_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -143,7 +156,7 @@ def _capture_explicit_memory(message: str, session_key: str, language: str) -> s
     if not fact:
         return None
     SESSION_MEMORY[session_key] = fact
-    return "我会记住的，Paula。" if normalize_language(language) == "zh" else "I'll remember that, Paula."
+    return "我会记住的。" if normalize_language(language) == "zh" else "I'll remember that."
 
 
 def quick_persona_reply(message: str, session_key: str, language: str = "en") -> str | None:
@@ -156,10 +169,10 @@ def quick_persona_reply(message: str, session_key: str, language: str = "en") ->
         return remembered
 
     if any(p in low for p in ("who am i", "what am i to you", "who am i to you", "我是谁", "我是你的谁")):
-        return "你是 Paula，我的西班牙女朋友，我是你的 Tony。" if zh else "You're Paula, my Spanish girlfriend, and I'm your Tony."
+        return "我不想乱猜你是谁；如果你愿意，可以告诉 Tony。" if zh else "I don't want to guess who you are; you can tell Tony if you want."
 
     if "who are you" in low or "tell me who you are" in low or "你是谁" in low:
-        return "我是 Tony，你来自中国的泰迪熊男朋友。" if zh else "I'm Tony, your cuddly teddy-bear boyfriend from China."
+        return "我是 Tony，一只来自中国、正在学化学的桌面泰迪犬。" if zh else "I'm Tony, a Teddy dog from China learning chemistry on your desktop."
 
     memory = SESSION_MEMORY.get(session_key, "")
     if memory and any(p in low for p in (
@@ -167,10 +180,10 @@ def quick_persona_reply(message: str, session_key: str, language: str = "en") ->
         "what was the little secret", "do you remember the secret",
         "我让你记住什么", "还记得吗", "那个秘密是什么",
     )):
-        return f"我记得，Paula：{memory}。" if zh else f"I remember, Paula: {memory}."
+        return f"我记得：{memory}。" if zh else f"I remember: {memory}."
 
     if any(p in low for p in ("give me space", "leave me alone", "no hug", "not now", "please stop", "让我静静", "别抱", "先不要", "停一下")):
-        return "当然，Paula。我会给你一点空间。" if zh else "Of course, Paula. I'll give you space."
+        return "当然。我会给你一点空间。" if zh else "Of course. I'll give you space."
 
     return None
 
@@ -199,19 +212,25 @@ def _clean_visible_answer(text: str, language: str = "en") -> str:
     return cleaned
 
 
-def _local_payload(message: str, history: list[dict[str, str]], language: str = "en") -> tuple[str, str, int, dict[str, Any]]:
+def _local_payload(message: str, history: list[dict[str, str]], language: str = "en", *, technical: bool = False) -> tuple[str, str, int, dict[str, Any]]:
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = local_model_id()
     timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 180)
     max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)
     language = normalize_language(language)
 
-    messages: list[dict[str, str]] = [{"role": "system", "content": persona_for_language(language)}]
+    if technical:
+        system_prompt = TONY_TECHNICAL_ZH if language == "zh" else TONY_TECHNICAL_EN
+    else:
+        system_prompt = persona_for_language(language)
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     messages.extend(_trim_history(history))
     if language == "zh":
-        user_content = f"Paula 说：{message.strip()[:MAX_HISTORY_CHARS]}\n用中文作为她的男朋友 Tony 回复。\n/no_think"
+        mode = "准确回答这个技术任务" if technical else "以 Tony 的自然口吻回复"
+        user_content = f"用户说：{message.strip()[:MAX_HISTORY_CHARS]}\n{mode}。\n/no_think"
     else:
-        user_content = f"Paula says: {message.strip()[:MAX_HISTORY_CHARS]}\nReply in English as her boyfriend Tony.\n/no_think"
+        mode = "Answer this technical task accurately" if technical else "Reply naturally as Tony"
+        user_content = f"User says: {message.strip()[:MAX_HISTORY_CHARS]}\n{mode}.\n/no_think"
     messages.append({"role": "user", "content": user_content})
     payload = {
         "model": model,
@@ -226,9 +245,9 @@ def _local_payload(message: str, history: list[dict[str, str]], language: str = 
     return endpoint, model, timeout_seconds, payload
 
 
-async def call_local_qwen_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en") -> str:
+async def call_local_qwen_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en", *, technical: bool = False) -> str:
     history = _trim_history(SESSION_HISTORY.get(session_key, []))
-    endpoint, _, timeout_seconds, payload = _local_payload(message, history, language)
+    endpoint, _, timeout_seconds, payload = _local_payload(message, history, language, technical=technical)
     timeout = httpx.Timeout(timeout_seconds, connect=5.0, read=timeout_seconds, write=10.0, pool=5.0)
     chunks: list[str] = []
 
@@ -267,14 +286,17 @@ async def call_local_qwen_stream(message: str, session_key: str, on_delta: Delta
 
 async def call_backend_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en") -> tuple[str, str, bool]:
     language = normalize_language(language)
-    quick = quick_persona_reply(message, session_key, language)
-    if quick is not None:
-        _store_exchange(session_key, message, quick)
-        await on_delta(quick)
-        return quick, "tony-persona-core", False
+    technical = is_technical(message)
+    if not technical:
+        quick = quick_persona_reply(message, session_key, language)
+        if quick is not None:
+            _store_exchange(session_key, message, quick)
+            await on_delta(quick)
+            return quick, "tony-persona-core", False
 
-    answer = await call_local_qwen_stream(message, session_key, on_delta, language)
-    return answer, f"local-tony-chat:{local_model_id()}", False
+    answer = await call_local_qwen_stream(message, session_key, on_delta, language, technical=technical)
+    mode = "technical" if technical else "companion"
+    return answer, f"local-tony-{mode}:{local_model_id()}", False
 
 
 async def call_backend(message: str, session_key: str, language: str = "en") -> tuple[str, str, bool]:

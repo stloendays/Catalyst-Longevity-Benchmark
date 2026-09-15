@@ -695,6 +695,25 @@ void PetWindow::setAction(Action a,int durationMs){
     update();
 }
 
+void PetWindow::playActionSequence(const QStringList &actions, const QStringList &emotions, const QVector<int> &durationsMs){
+    if(actions.isEmpty()) { restoreAgentAction(); return; }
+    const int generation=++actionSequenceGeneration_;
+    actionTimer_.stop();
+    int delayMs=0;
+    for(int i=0;i<actions.size();++i) {
+        const QString actionName=actions.at(i);
+        const QString stepEmotion=i<emotions.size() ? emotions.at(i) : QString();
+        const int stepDuration=(i<durationsMs.size() && durationsMs.at(i)>=0) ? durationsMs.at(i) : 1200;
+        const bool finalStep=(i==actions.size()-1);
+        QTimer::singleShot(delayMs,this,[this,generation,actionName,stepEmotion,stepDuration,finalStep]{
+            if(generation!=actionSequenceGeneration_) return;
+            if(!stepEmotion.isEmpty()) emotion_=stepEmotion;
+            setAction(actionFromWire(actionName),finalStep ? stepDuration : 0);
+        });
+        if(!finalStep) delayMs += qMax(360,stepDuration);
+    }
+}
+
 PetWindow::Action PetWindow::baseActionForAgentState() const {
     if(agentState_=="thinking") return Action::Think;
     if(agentState_=="working" || agentState_=="tool_running") return Action::Bob;
@@ -1487,6 +1506,7 @@ void PetWindow::moveToNextScreen(){
 }
 
 void PetWindow::markInteraction(){
+    ++actionSequenceGeneration_;
     if(activityClock_.isValid()) activityClock_.restart();
     else activityClock_.start();
     if(autoRested_) {
@@ -1851,7 +1871,8 @@ void PetWindow::submitTonyPrompt(const QString &text){
             {QStringLiteral("route"),TonyResponseRouter::routeName(decision.route)},
             {QStringLiteral("intent"),decision.intent},
             {QStringLiteral("connected"),agent_.connected()},
-            {QStringLiteral("action"),decision.action}
+            {QStringLiteral("action"),decision.action},
+            {QStringLiteral("sequence"),decision.actionSequence.join(QStringLiteral(">"))}
         });
 
     answer_.clear();
@@ -1859,7 +1880,9 @@ void PetWindow::submitTonyPrompt(const QString &text){
         agentState_="idle";
         if(decision.intent==QStringLiteral("hug")) behavior_.onHugged();
         emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;
-        if(!decision.action.isEmpty())
+        if(decision.hasActionSequence())
+            playActionSequence(decision.actionSequence,decision.emotionSequence,decision.sequenceDurationsMs);
+        else if(!decision.action.isEmpty())
             setAction(actionFromWire(decision.action),decision.durationMs);
         else
             restoreAgentAction();

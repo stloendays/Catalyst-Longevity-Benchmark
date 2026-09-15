@@ -85,6 +85,65 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
         return out;
     };
 
+    auto sequence=[&](const QString &intent,
+                      const QStringList &en, const QStringList &cn,
+                      const QStringList &actions, const QStringList &emotions,
+                      const QVector<int> &durations,
+                      const QString &fallbackEmotion, int bubbleDuration=3200) {
+        out.route=Route::LocalAction;
+        out.intent=intent;
+        out.reply=localize(zh,en,cn);
+        out.actionSequence=actions;
+        out.emotionSequence=emotions;
+        out.sequenceDurationsMs=durations;
+        out.action=actions.isEmpty() ? QString() : actions.first();
+        out.emotion=fallbackEmotion;
+        out.durationMs=bubbleDuration;
+        return out;
+    };
+
+    if(hasAny(p,{"/help","帮助","你会做什么","what can you do","help tony"}))
+        return fixed("help",
+            {"I can react locally, do desktop actions, or send harder requests to the Agent. Use /agent to force the Agent."},
+            {"我可以本地回应、做桌面动作，也能把复杂任务交给 Agent。输入 /agent 可以强制走 Agent。"},
+            {"paw","nod"},"friendly",3600);
+
+    if(hasAny(p,{"早上好","good morning","morning tony"}))
+        return sequence("morning",
+            {"Morning. Give me one stretch and I'm ready."},
+            {"早上好。让我先伸个懒腰，马上开工。"},
+            {"yawn","stretch","wave"},{"sleepy","content","friendly"},{900,1200,1000},"friendly",3300);
+
+    if(hasAny(p,{"我回来了","回来了","i'm back","im back","back tony"}))
+        return sequence("welcome_back",
+            {"You're back. Tony noticed."},
+            {"你回来啦。Tony 有注意到。"},
+            {"head_tilt","hop","paw"},{"curious","happy","friendly"},{700,900,1000},"happy",3000);
+
+    if(hasAny(p,{"搞定了","成功了","做完了","we did it","done!","it worked","成功"}))
+        return sequence("celebrate_success",
+            {"We did it. Tiny victory dance."},
+            {"搞定。Tony 要跳一个很小的胜利舞。"},
+            {"hop","spin","dance"},{"happy","playful","happy"},{700,850,1800},"happy",3800);
+
+    if(hasAny(p,{"我累了","好累","压力好大","难过","stress","stressed","i'm tired","im tired","sad"}))
+        return sequence("comfort",
+            {"Come closer. No fixing for a second—just Tony staying here."},
+            {"靠近一点吧。先不解决问题，Tony 就陪你一会儿。"},
+            {"head_tilt","ask_hug","nod"},{"gentle","hopeful","gentle"},{800,1300,900},"gentle",3800);
+
+    if(hasAny(p,{"想你了","miss you","i missed you","想tony"}))
+        return sequence("miss_you",
+            {"I missed you too. Come here."},
+            {"Tony 也想你。过来抱一下。"},
+            {"blush","paw","hug"},{"shy","friendly","happy"},{800,800,1700},"warm",3600);
+
+    if(hasAny(p,{"再见","拜拜","bye","goodbye","see you"}))
+        return sequence("goodbye",
+            {"Bye. I'll keep your spot on the desktop."},
+            {"拜拜。桌面上的位置我给你留着。"},
+            {"paw","wave","nod"},{"friendly","warm","content"},{700,1100,700},"warm",3000);
+
     if(hasAny(p,{"你好","嗨","hello","hi tony","hey tony","早上好","晚上好"}))
         return fixed("greeting",
             {"Hi. Tony is here.","Hey. I was waiting for you.","Hello. Want a paw?"},
@@ -104,10 +163,10 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             {"head_tilt","nod"},"serious",2200);
 
     if(hasAny(p,{"抱抱","抱一下","hug","cuddle","抱我","求抱"}))
-        return action("hug",
+        return sequence("hug",
             {"Come here. Hug accepted.","Yes. Tony would like that very much.","Hug mode activated."},
             {"来吧，抱一下。","好。Tony 很喜欢抱抱。","抱抱模式启动。"},
-            {"hug"},"happy",3200);
+            {"ask_hug","hug","nod"},{"hopeful","happy","content"},{750,1700,750},"happy",3600);
 
     if(hasAny(p,{"冷不冷","你冷吗","好冷","cold","freezing","怕冷"}))
         return action("cold",
@@ -118,16 +177,16 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             {"shiver"},"gentle",2800);
 
     if(hasAny(p,{"paula","宝拉"}))
-        return action("paula",
+        return sequence("paula",
             {"Paula? ...I wasn't blushing. You saw nothing.","Paula is very special to Tony. That's all I'm saying."},
             {"Paula？……我才没有脸红。你什么都没看到。","Paula 对 Tony 很特别。就说到这里。"},
-            {"blush_wave","blush"},"shy",3200);
+            {"head_tilt","blush_wave","adjust_glasses"},{"curious","shy","focused"},{650,1600,900},"shy",3900);
 
     if(hasAny(p,{"摘眼镜","不戴眼镜","take off your glasses","without glasses"}))
-        return action("remove_glasses",
+        return sequence("remove_glasses",
             {"Fine. Glasses off. Try not to be too impressed.","Only for a moment. Handsome mode is dangerous."},
             {"好吧，摘眼镜。别太惊讶。","只帅一会儿。这个模式有点危险。"},
-            {"remove_glasses"},"confident",3200);
+            {"adjust_glasses","remove_glasses","hop"},{"focused","confident","happy"},{650,1600,700},"confident",3800);
 
     if(hasAny(p,{"眼镜","glasses"}))
         return action("glasses",
@@ -136,10 +195,10 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             {"adjust_glasses"},"focused",1900);
 
     if(hasAny(p,{"学习一下","开始学习","study time","study chemistry","学化学"}))
-        return action("study",
+        return sequence("study",
             {"Study time. Tony has the notebook ready.","Okay. Chemistry mode on."},
             {"学习时间。Tony 已经把笔记本打开了。","好，化学学习模式启动。"},
-            {"study","nod"},"focused",3000);
+            {"adjust_glasses","study","nod"},{"focused","focused","content"},{650,1800,700},"focused",3600);
 
     if(hasAny(p,{"睡觉","困了","sleep","good night","晚安"}))
         return action("sleep",
@@ -170,28 +229,28 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             {"nod","hug"},"gentle",2400);
 
     if(hasAny(p,{"无聊","boring","bored"}))
-        return action("bored",
+        return sequence("bored",
             {"Bored? I can fix that.","Then Tony votes for a tiny dance."},
             {"无聊？那我来想办法。","那 Tony 投票：跳个小舞。"},
-            {"dance","spin","hop"},"playful",2600);
+            {"head_tilt","spin","dance"},{"curious","playful","happy"},{650,850,1700},"playful",3600);
 
     if(hasAny(p,{"加油","鼓励我","cheer me up","wish me luck","good luck"}))
-        return action("encourage",
+        return sequence("encourage",
             {"You can do it. Tony is on your side.","Go get it. High-five first."},
             {"你可以的。Tony 站你这边。","去吧，先击个掌。"},
-            {"paw","hop","nod"},"supportive",2200);
+            {"nod","paw","hop"},{"supportive","friendly","happy"},{650,900,750},"supportive",3100);
 
     if(hasAny(p,{"你好帅","真帅","可爱","cute","handsome","good boy"}))
-        return action("compliment",
+        return sequence("compliment",
             {"I know... but hearing it still works.","Careful. Compliments may cause dancing."},
             {"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},
-            {"hop","dance","blush"},"happy",2400);
+            {"blush","hop","dance"},{"shy","happy","happy"},{650,750,1500},"happy",3500);
 
     if(hasAny(p,{"饿不饿","吃饭","零食","food","snack","hungry"}))
-        return action("food",
+        return sequence("food",
             {"Did someone say snack?","I should investigate that smell."},
             {"刚才是不是有人说零食？","我得去闻闻是什么味道。"},
-            {"sniff","head_tilt"},"curious",2100);
+            {"head_tilt","sniff","hop"},{"curious","curious","happy"},{550,1200,650},"curious",3000);
 
     if(hasAny(p,{"击掌","high five","give me a paw","爪爪"}))
         return action("high_five",{"Paw!"},{"爪爪！"},{"paw"},"friendly",1600);
