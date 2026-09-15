@@ -21,6 +21,10 @@ qt_add_executable(TonyDesktopPet WIN32
     src/TonyBehaviorEngine.h
     src/TonyResponseRouter.cpp
     src/TonyResponseRouter.h
+    src/TonyResponsePack.cpp
+    src/TonyResponsePack.h
+    src/TonyMemoryStore.cpp
+    src/TonyMemoryStore.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
     src/ChatComposer.cpp
@@ -60,5 +64,5 @@ add_custom_command(TARGET TonyDesktopPet POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
         "$<TARGET_FILE_DIR:TonyDesktopPet>/assets"
-    COMMENT "Copying Tony state artwork and animation frames"
+    COMMENT "Copying Tony state artwork, animation frames and response packs"
 )
