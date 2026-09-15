@@ -1,0 +1,444 @@
+name: Tony v1.0.3 router and action replies
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v103-router-actions
+    paths:
+      - '.github/workflows/tony-v103-router-actions.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v103-router-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify Tony 1.x baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)"
+          case "$version" in
+            1.0.2|1.0.3) ;;
+            *) echo "Expected Tony 1.0.2/1.0.3 baseline, got $version" >&2; exit 1 ;;
+          esac
+          grep -q 'HeadTilt, Nod, Paw, Hop, Spin, Sniff, Dance' bear_agent_pet/client/src/PetWindow.h
+          echo "TONY_V103_BASELINE=PASS version=$version"
+
+      - name: Add local response router
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > bear_agent_pet/client/src/TonyResponseRouter.h <<'EOF'
+          #pragma once
+
+          #include <QString>
+
+          #include "TonyBehaviorEngine.h"
+
+          class TonyResponseRouter {
+          public:
+              enum class Route { LocalFixed, LocalAction, ServerAgent };
+
+              struct Decision {
+                  Route route{Route::ServerAgent};
+                  QString intent;
+                  QString reply;
+                  QString action;
+                  QString emotion;
+                  QString forwardText;
+                  int durationMs{2200};
+
+                  bool handledLocally() const { return route != Route::ServerAgent; }
+              };
+
+              Decision resolve(const QString &prompt,
+                               const QString &language,
+                               bool agentConnected,
+                               const TonyBehaviorEngine::Snapshot &state) const;
+
+              static QString routeName(Route route);
+          };
+          EOF
+
+          cat > bear_agent_pet/client/src/TonyResponseRouter.cpp <<'EOF'
+          #include "TonyResponseRouter.h"
+
+          #include <QRandomGenerator>
+          #include <QStringList>
+
+          namespace {
+          QString pick(const QStringList &items) {
+              if(items.isEmpty()) return {};
+              return items.at(QRandomGenerator::global()->bounded(items.size()));
+          }
+
+          bool hasAny(const QString &text, const QStringList &tokens) {
+              for(const auto &token : tokens) {
+                  if(text.contains(token, Qt::CaseInsensitive)) return true;
+              }
+              return false;
+          }
+
+          bool looksTechnical(const QString &text) {
+              return hasAny(text, {
+                  "解释", "为什么", "怎么做", "分析", "计算", "代码", "编译", "报错", "论文", "公式",
+                  "what is", "why", "how do", "explain", "analyze", "calculate", "code", "compile", "error",
+                  "dft", "scf", "vasp", "python", "c++", "qt", "github", "server", "api", "mcp", "agent"
+              });
+          }
+
+          QString localize(bool zh, const QStringList &en, const QStringList &cn) {
+              return pick(zh ? cn : en);
+          }
+          }
+
+          TonyResponseRouter::Decision TonyResponseRouter::resolve(
+              const QString &prompt,
+              const QString &language,
+              bool agentConnected,
+              const TonyBehaviorEngine::Snapshot &state) const {
+
+              Decision out;
+              out.forwardText=prompt.trimmed();
+              QString p=out.forwardText.toLower();
+              const bool zh=language.trimmed().toLower().startsWith("zh");
+
+              if(p.startsWith("/agent ")) {
+                  out.forwardText=out.forwardText.mid(7).trimmed();
+                  out.intent="forced_agent";
+                  return out;
+              }
+              if(p.startsWith("agent:")) {
+                  out.forwardText=out.forwardText.mid(6).trimmed();
+                  out.intent="forced_agent";
+                  return out;
+              }
+
+              // Questions that need reasoning, tools or domain knowledge must never be
+              // swallowed by a cute fixed reply just because they contain words such as
+              // chemistry or GitHub.
+              if(looksTechnical(p)) {
+                  out.intent="agent_task";
+                  return out;
+              }
+
+              auto fixed=[&](const QString &intent,
+                             const QStringList &en, const QStringList &cn,
+                             const QStringList &actions,
+                             const QString &emotion, int duration=2200) {
+                  out.route=Route::LocalFixed;
+                  out.intent=intent;
+                  out.reply=localize(zh,en,cn);
+                  out.action=pick(actions);
+                  out.emotion=emotion;
+                  out.durationMs=duration;
+                  return out;
+              };
+
+              auto action=[&](const QString &intent,
+                              const QStringList &en, const QStringList &cn,
+                              const QStringList &actions,
+                              const QString &emotion, int duration=2600) {
+                  out.route=Route::LocalAction;
+                  out.intent=intent;
+                  out.reply=localize(zh,en,cn);
+                  out.action=pick(actions);
+                  out.emotion=emotion;
+                  out.durationMs=duration;
+                  return out;
+              };
+
+              if(hasAny(p,{"你好","嗨","hello","hi tony","hey tony","早上好","晚上好"}))
+                  return fixed("greeting",
+                      {"Hi. Tony is here.","Hey. I was waiting for you.","Hello. Want a paw?"},
+                      {"你好呀，我在。","嗨，我刚好在等你。","你好。要不要先击个掌？"},
+                      {"paw","wave","head_tilt"},"friendly",1700);
+
+              if(hasAny(p,{"你是谁","你叫什么","who are you","what are you","your name"}))
+                  return fixed("identity",
+                      {"I'm Tony, a little Teddy dog from China. I'm learning chemistry and becoming a desktop agent."},
+                      {"我是 Tony，一只来自中国的小泰迪犬。我在学化学，也在努力成为真正的桌面 Agent。"},
+                      {"nod","paw"},"proud",2600);
+
+              if(hasAny(p,{"你是熊","是不是熊","are you a bear","小熊"}))
+                  return fixed("not_a_bear",
+                      {"Nope. Tony is a Teddy dog, not a bear. Important distinction."},
+                      {"不是熊。Tony 是泰迪犬。这个区别很重要。"},
+                      {"head_tilt","nod"},"serious",2200);
+
+              if(hasAny(p,{"抱抱","抱一下","hug","cuddle","抱我","求抱"}))
+                  return action("hug",
+                      {"Come here. Hug accepted.","Yes. Tony would like that very much.","Hug mode activated."},
+                      {"来吧，抱一下。","好。Tony 很喜欢抱抱。","抱抱模式启动。"},
+                      {"hug"},"happy",3200);
+
+              if(hasAny(p,{"冷不冷","你冷吗","好冷","cold","freezing","怕冷"}))
+                  return action("cold",
+                      state.warmth<45 ? QStringList{"A little. My paws are cold. Stay close?"}
+                                      : QStringList{"I'm okay now, but I still prefer somewhere warm."},
+                      state.warmth<45 ? QStringList{"有一点，爪子都凉了。你靠近一点好不好？"}
+                                      : QStringList{"现在还好，不过 Tony 还是更喜欢暖和一点。"},
+                      {"shiver"},"gentle",2800);
+
+              if(hasAny(p,{"paula","宝拉"}))
+                  return action("paula",
+                      {"Paula? ...I wasn't blushing. You saw nothing.","Paula is very special to Tony. That's all I'm saying."},
+                      {"Paula？……我才没有脸红。你什么都没看到。","Paula 对 Tony 很特别。就说到这里。"},
+                      {"blush_wave","blush"},"shy",3200);
+
+              if(hasAny(p,{"摘眼镜","不戴眼镜","take off your glasses","without glasses"}))
+                  return action("remove_glasses",
+                      {"Fine. Glasses off. Try not to be too impressed.","Only for a moment. Handsome mode is dangerous."},
+                      {"好吧，摘眼镜。别太惊讶。","只帅一会儿。这个模式有点危险。"},
+                      {"remove_glasses"},"confident",3200);
+
+              if(hasAny(p,{"眼镜","glasses"}))
+                  return action("glasses",
+                      {"Still here. Let me fix my glasses first.","Glasses adjusted. Much better."},
+                      {"在呢，先让我扶一下眼镜。","眼镜扶好了。这样顺眼多了。"},
+                      {"adjust_glasses"},"focused",1900);
+
+              if(hasAny(p,{"学习一下","开始学习","study time","study chemistry","学化学"}))
+                  return action("study",
+                      {"Study time. Tony has the notebook ready.","Okay. Chemistry mode on."},
+                      {"学习时间。Tony 已经把笔记本打开了。","好，化学学习模式启动。"},
+                      {"study","nod"},"focused",3000);
+
+              if(hasAny(p,{"睡觉","困了","sleep","good night","晚安"}))
+                  return action("sleep",
+                      {"Good night. I'll stay here quietly.","Okay... Tony is sleepy too."},
+                      {"晚安。我会安静待在这里。","好……Tony 也有点困了。"},
+                      {"sleep","yawn"},"sleepy",3800);
+
+              if(hasAny(p,{"状态","心情","status","mood","你怎么样"})) {
+                  const QString en=QString("Energy %1, warmth %2, affection %3, loneliness %4, curiosity %5. Mood: %6.")
+                      .arg(state.energy).arg(state.warmth).arg(state.affection)
+                      .arg(state.loneliness).arg(state.curiosity).arg(state.mood);
+                  const QString cn=QString("现在的 Tony：精力 %1，温暖 %2，亲密 %3，孤独 %4，好奇 %5。心情是 %6。")
+                      .arg(state.energy).arg(state.warmth).arg(state.affection)
+                      .arg(state.loneliness).arg(state.curiosity).arg(state.mood);
+                  return fixed("status",{en},{cn},{"head_tilt","nod"},"neutral",3500);
+              }
+
+              if(hasAny(p,{"谢谢","thank you","thanks"}))
+                  return fixed("thanks",
+                      {"Anytime. Paw?","You're welcome. Tony is staying right here."},
+                      {"随时。击个掌？","不用谢，Tony 就在这里。"},
+                      {"paw","nod"},"warm",1800);
+
+              if(hasAny(p,{"对不起","抱歉","sorry"}))
+                  return fixed("sorry",
+                      {"We're okay. Come here.","No problem. Tony isn't keeping score."},
+                      {"没事。过来吧。","没关系，Tony 不记这种账。"},
+                      {"nod","hug"},"gentle",2400);
+
+              if(hasAny(p,{"无聊","boring","bored"}))
+                  return action("bored",
+                      {"Bored? I can fix that.","Then Tony votes for a tiny dance."},
+                      {"无聊？那我来想办法。","那 Tony 投票：跳个小舞。"},
+                      {"dance","spin","hop"},"playful",2600);
+
+              if(hasAny(p,{"加油","鼓励我","cheer me up","wish me luck","good luck"}))
+                  return action("encourage",
+                      {"You can do it. Tony is on your side.","Go get it. High-five first."},
+                      {"你可以的。Tony 站你这边。","去吧，先击个掌。"},
+                      {"paw","hop","nod"},"supportive",2200);
+
+              if(hasAny(p,{"你好帅","真帅","可爱","cute","handsome","good boy"}))
+                  return action("compliment",
+                      {"I know... but hearing it still works.","Careful. Compliments may cause dancing."},
+                      {"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},
+                      {"hop","dance","blush"},"happy",2400);
+
+              if(hasAny(p,{"饿不饿","吃饭","零食","food","snack","hungry"}))
+                  return action("food",
+                      {"Did someone say snack?","I should investigate that smell."},
+                      {"刚才是不是有人说零食？","我得去闻闻是什么味道。"},
+                      {"sniff","head_tilt"},"curious",2100);
+
+              if(hasAny(p,{"击掌","high five","give me a paw","爪爪"}))
+                  return action("high_five",{"Paw!"},{"爪爪！"},{"paw"},"friendly",1600);
+
+              if(hasAny(p,{"点头","nod","同意吗","agree"}))
+                  return action("nod",{"Yep."},{"嗯。"},{"nod"},"content",1300);
+
+              if(hasAny(p,{"转一圈","spin","twirl"}))
+                  return action("spin",{"Watch this."},{"看我的。"},{"spin"},"playful",1900);
+
+              if(hasAny(p,{"跳舞","dance"}))
+                  return action("dance",{"Fine. One tiny dance."},{"好吧，只跳一小段。"},{"dance"},"happy",2700);
+
+              if(hasAny(p,{"散步","走走","walk"}))
+                  return action("walk",{"Okay. Tiny walk."},{"好，走两步。"},{"walk"},"playful",3000);
+
+              if(hasAny(p,{"喜欢我吗","你喜欢我吗","do you like me"}))
+                  return fixed("affection",
+                      {"I do. I like staying close to you."},
+                      {"喜欢。我很喜欢待在你旁边。"},
+                      {"blush","nod"},"warm",2500);
+
+              if(!agentConnected && hasAny(p,{"在吗","are you there","tony"}))
+                  return fixed("offline_presence",
+                      {"I'm here. The server is offline, but local Tony still works."},
+                      {"我在。服务器现在没连上，但本地的 Tony 还在。"},
+                      {"paw","wave"},"gentle",2400);
+
+              out.intent="agent";
+              return out;
+          }
+
+          QString TonyResponseRouter::routeName(Route route) {
+              switch(route) {
+              case Route::LocalFixed: return "local_fixed";
+              case Route::LocalAction: return "local_action";
+              case Route::ServerAgent: return "server_agent";
+              }
+              return "server_agent";
+          }
+          EOF
+
+      - name: Wire router into Tony and bump version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          cmake = Path('bear_agent_pet/client/CMakeLists.txt')
+          text = cmake.read_text(encoding='utf-8')
+          anchor = '    src/TonyBehaviorEngine.h\n'
+          addition = '    src/TonyResponseRouter.cpp\n    src/TonyResponseRouter.h\n'
+          if addition not in text:
+              if anchor not in text:
+                  raise SystemExit('CMake TonyBehaviorEngine anchor not found')
+              text = text.replace(anchor, anchor + addition, 1)
+          cmake.write_text(text, encoding='utf-8')
+
+          pet = Path('bear_agent_pet/client/src/PetWindowV7.cpp')
+          text = pet.read_text(encoding='utf-8')
+          if '#include "TonyResponseRouter.h"' not in text:
+              text = text.replace('#include "PetWindow.h"\n', '#include "PetWindow.h"\n#include "AppLogger.h"\n#include "TonyResponseRouter.h"\n', 1)
+
+          old = '''void PetWindow::submitTonyPrompt(const QString &text){
+              const QString prompt=text.trimmed();
+              if(prompt.isEmpty()) return;
+              markInteraction();
+              behavior_.onConversation();
+              if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
+              answer_.clear(); emotion_="curious"; agentState_="thinking"; restoreAgentAction();
+              if(agent_.connected()) agent_.sendMessage(prompt);
+              else {
+                  agentState_="idle"; setAction(Action::Think,2800);
+                  if(pairingCode_.isEmpty()) startAutomaticPairing();
+                  else showCurrentPairingCode(false);
+              }
+          }
+          '''
+
+          new = '''void PetWindow::submitTonyPrompt(const QString &text){
+              const QString prompt=text.trimmed();
+              if(prompt.isEmpty()) return;
+              markInteraction();
+              behavior_.onConversation();
+              if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
+
+              TonyResponseRouter router;
+              const auto decision=router.resolve(prompt,uiLanguage(),agent_.connected(),behavior_.snapshot());
+              AppLogger::recordOperatorEvent(
+                  QStringLiteral("chat_route"),
+                  prompt,
+                  QJsonObject{
+                      {QStringLiteral("route"),TonyResponseRouter::routeName(decision.route)},
+                      {QStringLiteral("intent"),decision.intent},
+                      {QStringLiteral("connected"),agent_.connected()},
+                      {QStringLiteral("action"),decision.action}
+                  });
+
+              answer_.clear();
+              if(decision.handledLocally()) {
+                  agentState_="idle";
+                  if(decision.intent==QStringLiteral("hug")) behavior_.onHugged();
+                  emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;
+                  if(!decision.action.isEmpty())
+                      setAction(actionFromWire(decision.action),decision.durationMs);
+                  else
+                      restoreAgentAction();
+                  if(!decision.reply.isEmpty())
+                      showBubble(decision.reply,qMax(3000,decision.durationMs+1100));
+                  return;
+              }
+
+              emotion_="curious";
+              agentState_="thinking";
+              restoreAgentAction();
+              if(agent_.connected()) {
+                  agent_.sendMessage(decision.forwardText.isEmpty() ? prompt : decision.forwardText);
+              } else {
+                  agentState_="idle";
+                  setAction(Action::Think,2800);
+                  if(pairingCode_.isEmpty()) startAutomaticPairing();
+                  else showCurrentPairingCode(false);
+              }
+          }
+          '''
+
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif 'TonyResponseRouter router;' not in text:
+              raise SystemExit('submitTonyPrompt block did not match Tony 1.0.2 baseline')
+          pet.write_text(text, encoding='utf-8')
+
+          Path('bear_agent_pet/client/VERSION').write_text('1.0.3\n', encoding='utf-8')
+          PY
+
+          cat > bear_agent_pet/docs/ROUTING.md <<'EOF'
+          # Tony message routing (v1.0.3)
+
+          Tony now routes chat input before invoking the server model.
+
+          - `local_fixed`: short identity, greeting, status and social replies.
+          - `local_action`: short replies bound to Tony actions such as Paw, Nod, HeadTilt, Hop, Spin, Sniff and Dance.
+          - `server_agent`: technical, analytical, coding, tool or open-ended requests.
+          - `/agent <message>` or `agent: <message>`: explicitly bypasses local replies.
+
+          Local replies use the live `TonyBehaviorEngine::Snapshot`, so state-sensitive answers such as cold/status reflect the current pet state. Every route is written to the operator log as `chat_route`.
+          EOF
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = '1.0.3'
+          grep -q 'TonyResponseRouter.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'TonyResponseRouter router' bear_agent_pet/client/src/PetWindowV7.cpp
+          grep -q '"paw","wave","head_tilt"' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          grep -q '"dance","spin","hop"' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          git diff --check
+          echo 'TONY_V103_ROUTER_PATCH=PASS'
+
+      - name: Commit Tony v1.0.3 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bear_agent_pet/client bear_agent_pet/docs/ROUTING.md
+          if git diff --cached --quiet; then
+            echo 'Tony v1.0.3 routing is already applied.'
+            exit 0
+          fi
+          git commit -m 'feat: Tony 1.0.3 action-aware response routing'
+          git push origin HEAD:${GITHUB_REF_NAME}
