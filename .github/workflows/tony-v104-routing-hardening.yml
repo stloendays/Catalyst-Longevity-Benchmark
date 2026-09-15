@@ -1,0 +1,128 @@
+name: Tony v1.0.4 server routing hardening
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v104-action-sequences
+    paths:
+      - '.github/workflows/tony-v104-routing-hardening.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v104-routing-hardening-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  harden-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify v1.0.4 routing baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.4"
+          grep -q 'local-qwen:technical' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'Do not assume the current user is Paula' bear_agent_pet/server_gateway/app/main.py
+
+      - name: Harden identity safety and technical route budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('bear_agent_pet/server_gateway/app/main.py')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+              'app = FastAPI(title="Tony Desktop Companion", version="0.9.0")',
+              'app = FastAPI(title="Tony Desktop Companion", version="0.9.1")',
+              1,
+          )
+
+          old_clean_sig = 'def _clean_visible_answer(text: str, language: str = "en") -> str:'
+          new_clean_sig = 'def _clean_visible_answer(text: str, language: str = "en", *, technical: bool = False) -> str:'
+          if old_clean_sig not in text:
+              raise SystemExit('clean answer signature not found')
+          text = text.replace(old_clean_sig, new_clean_sig, 1)
+
+          old_role = '''    if any(p in low for p in bad_role):\n        return "我是你的 Tony，Paula——你的男朋友就在这里。" if normalize_language(language) == "zh" else "I'm your Tony, Paula—your cuddly boyfriend is right here."\n\n    if normalize_language(language) == "en":\n        words = cleaned.split()\n        if len(words) > 24:\n            cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"\n    elif len(cleaned) > 72:\n        cleaned = cleaned[:72].rstrip("，,；;：: ") + "…"\n'''
+          new_role = '''    if any(p in low for p in bad_role):\n        return "我是 Tony，一只来自中国的桌面泰迪犬，也是你的 AI Agent。" if normalize_language(language) == "zh" else "I'm Tony, a Teddy dog from China and your desktop AI agent."\n\n    if not technical:\n        if normalize_language(language) == "en":\n            words = cleaned.split()\n            if len(words) > 24:\n                cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"\n        elif len(cleaned) > 72:\n            cleaned = cleaned[:72].rstrip("，,；;：: ") + "…"\n'''
+          if old_role not in text:
+              raise SystemExit('legacy role correction/truncation block not found')
+          text = text.replace(old_role, new_role, 1)
+
+          old_budget = '''    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 180)\n    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)\n    language = normalize_language(language)\n\n    if technical:\n'''
+          new_budget = '''    timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 180)\n    if technical:\n        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MAX_TOKENS", "384")), 64), 768)\n        message_limit = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS", "6000")), 512), 12000)\n    else:\n        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)\n        message_limit = MAX_HISTORY_CHARS\n    language = normalize_language(language)\n\n    if technical:\n'''
+          if old_budget not in text:
+              raise SystemExit('local payload budget block not found')
+          text = text.replace(old_budget, new_budget, 1)
+
+          text = text.replace(
+              'user_content = f"用户说：{message.strip()[:MAX_HISTORY_CHARS]}\\n{mode}。\\n/no_think"',
+              'user_content = f"用户说：{message.strip()[:message_limit]}\\n{mode}。\\n/no_think"',
+              1,
+          )
+          text = text.replace(
+              'user_content = f"User says: {message.strip()[:MAX_HISTORY_CHARS]}\\n{mode}.\\n/no_think"',
+              'user_content = f"User says: {message.strip()[:message_limit]}\\n{mode}.\\n/no_think"',
+              1,
+          )
+
+          old_sampling = '''        "temperature": 0.78,\n        "top_p": 0.88,\n        "max_tokens": max_tokens,\n'''
+          new_sampling = '''        "temperature": 0.35 if technical else 0.78,\n        "top_p": 0.90 if technical else 0.88,\n        "max_tokens": max_tokens,\n'''
+          if old_sampling not in text:
+              raise SystemExit('sampling block not found')
+          text = text.replace(old_sampling, new_sampling, 1)
+
+          old_clean_call = 'answer = _clean_visible_answer("".join(chunks), language)'
+          new_clean_call = 'answer = _clean_visible_answer("".join(chunks), language, technical=technical)'
+          if old_clean_call not in text:
+              raise SystemExit('clean answer call not found')
+          text = text.replace(old_clean_call, new_clean_call, 1)
+
+          old_backend = '''    language = normalize_language(language)\n    technical = is_technical(message)\n    if not technical:\n'''
+          new_backend = '''    language = normalize_language(language)\n    backend_plan = route_backends(message)\n    technical = "local-qwen:technical" in backend_plan\n    if not technical:\n'''
+          if old_backend not in text:
+              raise SystemExit('backend routing selection block not found')
+          text = text.replace(old_backend, new_backend, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py
+          grep -q 'BEAR_LOCAL_TECHNICAL_MAX_TOKENS' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'backend_plan = route_backends(message)' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'technical=technical' bear_agent_pet/server_gateway/app/main.py
+          if grep -q 'your cuddly boyfriend is right here' bear_agent_pet/server_gateway/app/main.py; then
+            echo 'Legacy Paula/boyfriend repair text remains' >&2
+            exit 1
+          fi
+          echo 'TONY_V104_ROUTING_HARDENING=PASS'
+
+      - name: Commit routing hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Tony"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add bear_agent_pet/server_gateway/app/main.py
+          if git diff --cached --quiet; then
+            echo 'No routing hardening changes to commit.'
+            exit 0
+          fi
+          git commit -m "fix: harden Tony 1.0.4 technical routing and identity safety"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
