@@ -1,0 +1,109 @@
+name: Build Tony v1.0.4 action sequences
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v104-action-sequences
+    paths:
+      - '.github/workflows/tony-v104-build-windows.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v104-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Verify Tony v1.0.4 sequence router and server routing
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.4') { throw "Expected Tony 1.0.4, got $version" }
+
+          $header = Get-Content bear_agent_pet/client/src/TonyResponseRouter.h -Raw
+          if ($header -notmatch 'actionSequence') { throw 'Missing actionSequence in router decision' }
+          if ($header -notmatch 'emotionSequence') { throw 'Missing emotionSequence in router decision' }
+          if ($header -notmatch 'sequenceDurationsMs') { throw 'Missing sequenceDurationsMs in router decision' }
+
+          $pet = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
+          if ($pet -notmatch 'playActionSequence') { throw 'PetWindow does not execute action sequences' }
+          if ($pet -notmatch 'actionSequenceGeneration_') { throw 'PetWindow does not cancel stale sequences' }
+
+          $router = Get-Content bear_agent_pet/client/src/TonyResponseRouter.cpp -Raw
+          foreach ($token in @('morning','welcome_back','celebrate_success','comfort','miss_you','goodbye')) {
+            if ($router -notmatch $token) { throw "Missing v1.0.4 intent: $token" }
+          }
+          foreach ($token in @('head_tilt','blush_wave','adjust_glasses','hop','spin','dance','sniff')) {
+            if ($router -notmatch $token) { throw "Missing sequence action: $token" }
+          }
+
+          $server = Get-Content bear_agent_pet/server_gateway/app/main.py -Raw
+          if ($server -notmatch 'local-qwen:technical') { throw 'Server technical route missing' }
+          if ($server -notmatch 'local-qwen:companion') { throw 'Server companion route missing' }
+          if ($server -match "Paula's cute Chinese teddy-bear boyfriend") { throw 'Legacy bear/Paula persona remains' }
+          if ($server -notmatch 'Do not assume the current user is Paula') { throw 'User identity safeguard missing' }
+
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py
+          if ($LASTEXITCODE -ne 0) { throw 'Server gateway Python syntax validation failed' }
+          Write-Host 'TONY_V104_SEQUENCE_ROUTING=PASS'
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package-v104"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.4`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package-v104"
+          $env:TONY_VISUAL_ACTION = 'dance'
+          $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V104_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.4-windows-x64-action-sequences
+          path: bear_agent_pet/client/package-v104
+          if-no-files-found: error
