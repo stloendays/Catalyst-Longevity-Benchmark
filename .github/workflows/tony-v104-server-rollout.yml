@@ -1,0 +1,244 @@
+name: Roll out Tony v1.0.4 routed gateway
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v104-action-sequences
+    paths:
+      - '.github/workflows/tony-v104-server-rollout.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Align live gateway entrypoint with Tony 1.0.4 routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('bear_agent_pet/server_gateway/app/main_v08.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'app = FastAPI(title="Tony Desktop Companion", version="1.0.1")':
+                  'app = FastAPI(title="Tony Desktop Companion", version="1.0.4")',
+              '"version": "1.0.1",':
+                  '"version": "1.0.4",',
+              '"backend": "local-qwen-chat-only",':
+                  '"backend": "local-qwen-routed-chat",',
+              '"persona": "Paula-boyfriend",':
+                  '"persona": "teddy-companion+technical-agent",\n        "technical_routing": True,\n        "routing_modes": ["persona-core", "companion", "technical"],',
+              'session_key = f"tony-paula-{connection_id}"':
+                  'session_key = f"tony-{connection_id}"',
+              '"server_version": "1.0.1",':
+                  '"server_version": "1.0.4",',
+              '"owner_device_management_v1",\n                    ],':
+                  '"owner_device_management_v1",\n                        "routed_chat_v1",\n                    ],',
+              '"state": "working", "agent": "tony-chat"':
+                  '"state": "working", "agent": "tony-router"',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'main_v08 baseline token missing: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+          deploy = Path('.github/workflows/bear-agent-deploy-gateway.yml')
+          text = deploy.read_text(encoding='utf-8')
+          text = text.replace(
+              "      - 'feature/bear-agent-pet'\n",
+              "      - 'feature/bear-agent-pet'\n      - 'feature/tony-v104-action-sequences'\n",
+              1,
+          )
+          text = text.replace(
+              'set_env BEAR_LOCAL_MAX_TOKENS 20\n',
+              'set_env BEAR_LOCAL_MAX_TOKENS 20\n          set_env BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384\n          set_env BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS 6000\n',
+              1,
+          )
+          text = text.replace(
+              'Description=Tony Boyfriend Desktop Companion Gateway',
+              'Description=Tony Routed Desktop Companion Gateway',
+              1,
+          )
+          text = text.replace(
+              "assert d['backend'] == 'local-qwen-chat-only', d",
+              "assert d['backend'] == 'local-qwen-routed-chat', d",
+              1,
+          )
+          text = text.replace(
+              "assert d['persona'] == 'Paula-boyfriend', d",
+              "assert d['persona'] == 'teddy-companion+technical-agent', d\n          assert d['technical_routing'] is True, d\n          assert set(d['routing_modes']) == {'persona-core', 'companion', 'technical'}, d",
+              1,
+          )
+          deploy.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Validate routed gateway source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'session_key = f"tony-{connection_id}"' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'teddy-companion+technical-agent' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'technical_routing' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'routed_chat_v1' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384' .github/workflows/bear-agent-deploy-gateway.yml
+          grep -q 'Tony Routed Desktop Companion Gateway' .github/workflows/bear-agent-deploy-gateway.yml
+          if grep -q 'tony-paula-' bear_agent_pet/server_gateway/app/main_v08.py; then
+            echo 'Legacy Paula session namespace remains' >&2
+            exit 1
+          fi
+          echo 'TONY_V104_LIVE_ENTRYPOINT=PASS'
+
+      - name: Commit live gateway alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Tony"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add bear_agent_pet/server_gateway/app/main_v08.py .github/workflows/bear-agent-deploy-gateway.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: align live Tony gateway with 1.0.4 routed agent"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy routed gateway source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'mkdir -p /home/ubuntu/.local/share/bear-agent/app'
+          rsync -az --delete -e "ssh -i $HOME/.ssh/server_key" \
+            bear_agent_pet/server_gateway/ \
+            ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
+
+      - name: Restart and verify Tony v1.0.4 routed gateway
+        shell: bash
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+          ENVFILE="$ROOT/bear-agent.env"
+
+          if [ ! -x "$VENV/bin/python" ]; then
+            python3 -m venv "$VENV"
+          fi
+          "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
+
+          set_env() {
+            key="$1"; value="$2"
+            touch "$ENVFILE"
+            chmod 600 "$ENVFILE"
+            if grep -q "^${key}=" "$ENVFILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENVFILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENVFILE"
+            fi
+          }
+          set_env BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384
+          set_env BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS 6000
+
+          sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Tony Routed Desktop Companion Gateway
+          After=network-online.target rhocodec-llm.service
+          Wants=network-online.target rhocodec-llm.service
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/.local/share/bear-agent/app
+          EnvironmentFile=/home/ubuntu/.local/share/bear-agent/bear-agent.env
+          ExecStart=/home/ubuntu/.local/share/bear-agent/venv/bin/uvicorn app.main_v08:app --host 127.0.0.1 --port 18790
+          Restart=on-failure
+          RestartSec=3
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now bear-agent-gateway.service
+          sudo systemctl restart bear-agent-gateway.service
+
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/tony-v104-health.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          cat /tmp/tony-v104-health.json
+
+          "$VENV/bin/python" - <<'PY'
+          import json
+          from app.main import is_technical, route_backends
+          d=json.load(open('/tmp/tony-v104-health.json'))
+          assert d['ok'] is True, d
+          assert d['version'] == '1.0.4', d
+          assert d['backend'] == 'local-qwen-routed-chat', d
+          assert d['persona'] == 'teddy-companion+technical-agent', d
+          assert d['technical_routing'] is True, d
+          assert set(d['routing_modes']) == {'persona-core','companion','technical'}, d
+          assert is_technical('帮我解释一下 SCF 为什么不收敛') is True
+          assert is_technical('Tony 抱抱') is False
+          assert route_backends('解释一下 CMake 报错') == ['local-qwen:technical']
+          assert route_backends('Tony 你好可爱') == ['tony-persona-core','local-qwen:companion']
+          print('TONY_V104_LIVE_ROUTING=PASS')
+          PY
+
+          systemctl --no-pager --full status bear-agent-gateway.service | head -n 18
+          REMOTE
+
+      - name: Probe public HTTPS edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 https://150.158.27.206/health > /tmp/public-health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/public-health.json'))
+          assert d['ok'] is True, d
+          assert d['version'] == '1.0.4', d
+          assert d['backend'] == 'local-qwen-routed-chat', d
+          assert d['technical_routing'] is True, d
+          print('TONY_V104_PUBLIC_EDGE=PASS')
+          PY
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/server_key"
