@@ -19,11 +19,14 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindow.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
+    src/TonyResponseRouter.cpp
+    src/TonyResponseRouter.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
     src/ChatComposer.cpp
     src/ChatComposer.h
     src/AgentClient.cpp
+    src/AgentClientRouting.cpp
     src/AgentClient.h
     src/LocalBridge.cpp
     src/LocalBridge.h
@@ -35,6 +38,14 @@ qt_add_executable(TonyDesktopPet WIN32
     src/UpdateManager.h
     src/SettingsDialog.cpp
     src/SettingsDialog.h
+)
+
+# PetWindowV7 keeps its existing call site (`agent_.sendMessage(...)`) while this
+# translation-unit-only alias sends chat through TonyResponseRouter first. The
+# original AgentClient::sendMessage remains available to the rest of the client.
+set_source_files_properties(
+    src/PetWindowV7.cpp
+    PROPERTIES COMPILE_DEFINITIONS "sendMessage=sendMessageViaRouter"
 )
 
 target_link_libraries(TonyDesktopPet PRIVATE Qt6::Widgets Qt6::WebSockets Qt6::Network)
