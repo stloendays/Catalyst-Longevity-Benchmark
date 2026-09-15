@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Companion", version="0.9.0")
+app = FastAPI(title="Tony Desktop Companion", version="0.9.1")
 
 TONY_PERSONA_EN = """You are Tony, a cute Teddy dog from China who lives as a desktop companion and is learning chemistry. Tony likes hugs, warmth, his glasses, and a Spanish girl named Paula; he looks especially handsome without his glasses. Do not assume the current user is Paula unless the user explicitly says so. Be warm, playful, respectful, concise, and never possessive or guilt-tripping."""
 TONY_PERSONA_ZH = """你是 Tony，一只来自中国、住在桌面上的可爱泰迪犬，也在学习化学。Tony 喜欢拥抱、温暖和自己的眼镜，也喜欢一位名叫 Paula 的西班牙女孩；摘下眼镜时会有点帅。除非用户明确说明，否则不要假设当前用户就是 Paula。语气自然、温暖、俏皮、简洁，尊重边界，不占有、不道德绑架。"""
@@ -188,7 +188,7 @@ def quick_persona_reply(message: str, session_key: str, language: str = "en") ->
     return None
 
 
-def _clean_visible_answer(text: str, language: str = "en") -> str:
+def _clean_visible_answer(text: str, language: str = "en", *, technical: bool = False) -> str:
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
     if not cleaned:
         raise RuntimeError("local-qwen returned no visible answer")
@@ -201,14 +201,15 @@ def _clean_visible_answer(text: str, language: str = "en") -> str:
         "i am your girlfriend", "not your girlfriend", "not my girlfriend",
     )
     if any(p in low for p in bad_role):
-        return "我是你的 Tony，Paula——你的男朋友就在这里。" if normalize_language(language) == "zh" else "I'm your Tony, Paula—your cuddly boyfriend is right here."
+        return "我是 Tony，一只来自中国的桌面泰迪犬，也是你的 AI Agent。" if normalize_language(language) == "zh" else "I'm Tony, a Teddy dog from China and your desktop AI agent."
 
-    if normalize_language(language) == "en":
-        words = cleaned.split()
-        if len(words) > 24:
-            cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"
-    elif len(cleaned) > 72:
-        cleaned = cleaned[:72].rstrip("，,；;：: ") + "…"
+    if not technical:
+        if normalize_language(language) == "en":
+            words = cleaned.split()
+            if len(words) > 24:
+                cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"
+        elif len(cleaned) > 72:
+            cleaned = cleaned[:72].rstrip("，,；;：: ") + "…"
     return cleaned
 
 
@@ -216,7 +217,12 @@ def _local_payload(message: str, history: list[dict[str, str]], language: str = 
     endpoint = os.getenv("BEAR_LOCAL_MODEL_URL", "http://127.0.0.1:18080/v1/chat/completions").strip()
     model = local_model_id()
     timeout_seconds = min(max(int(os.getenv("BEAR_LOCAL_MODEL_TIMEOUT", "60")), 20), 180)
-    max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)
+    if technical:
+        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MAX_TOKENS", "384")), 64), 768)
+        message_limit = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS", "6000")), 512), 12000)
+    else:
+        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)
+        message_limit = MAX_HISTORY_CHARS
     language = normalize_language(language)
 
     if technical:
@@ -227,16 +233,16 @@ def _local_payload(message: str, history: list[dict[str, str]], language: str = 
     messages.extend(_trim_history(history))
     if language == "zh":
         mode = "准确回答这个技术任务" if technical else "以 Tony 的自然口吻回复"
-        user_content = f"用户说：{message.strip()[:MAX_HISTORY_CHARS]}\n{mode}。\n/no_think"
+        user_content = f"用户说：{message.strip()[:message_limit]}\n{mode}。\n/no_think"
     else:
         mode = "Answer this technical task accurately" if technical else "Reply naturally as Tony"
-        user_content = f"User says: {message.strip()[:MAX_HISTORY_CHARS]}\n{mode}.\n/no_think"
+        user_content = f"User says: {message.strip()[:message_limit]}\n{mode}.\n/no_think"
     messages.append({"role": "user", "content": user_content})
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.78,
-        "top_p": 0.88,
+        "temperature": 0.35 if technical else 0.78,
+        "top_p": 0.90 if technical else 0.88,
         "max_tokens": max_tokens,
         "stream": True,
         "reasoning_budget": 0,
@@ -279,14 +285,15 @@ async def call_local_qwen_stream(message: str, session_key: str, on_delta: Delta
     except httpx.HTTPError as exc:
         raise RuntimeError(f"local-qwen stream: {exc}") from exc
 
-    answer = _clean_visible_answer("".join(chunks), language)
+    answer = _clean_visible_answer("".join(chunks), language, technical=technical)
     _store_exchange(session_key, message, answer)
     return answer
 
 
 async def call_backend_stream(message: str, session_key: str, on_delta: DeltaHandler, language: str = "en") -> tuple[str, str, bool]:
     language = normalize_language(language)
-    technical = is_technical(message)
+    backend_plan = route_backends(message)
+    technical = "local-qwen:technical" in backend_plan
     if not technical:
         quick = quick_persona_reply(message, session_key, language)
         if quick is not None:
