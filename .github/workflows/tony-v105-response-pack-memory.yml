@@ -1,0 +1,285 @@
+name: Build Tony v1.0.5 response packs and local memory
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v105-response-pack-memory
+    paths:
+      - '.github/workflows/tony-v105-response-pack-memory.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v105-response-memory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-v105:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Validate response pack and v1.0.4 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.4"
+          python - <<'PY'
+          import json
+          p='bear_agent_pet/client/assets/config/tony_responses.json'
+          d=json.load(open(p,encoding='utf-8'))
+          assert d['schema'] == 1
+          assert set(d['locales']) == {'en','zh'}
+          for locale in ('en','zh'):
+              rows=d['locales'][locale]
+              assert len(rows) >= 25, (locale,len(rows))
+              for key in ('greeting','hug','paula','study','memory_ack','memory_empty','memory_forget','memory_clear'):
+                  assert key in rows and len(rows[key]) >= 2, (locale,key)
+          print('TONY_V105_RESPONSE_PACK=PASS')
+          PY
+          test -f bear_agent_pet/client/src/TonyResponsePack.cpp
+          test -f bear_agent_pet/client/src/TonyMemoryStore.cpp
+
+      - name: Wire response pack and local memory into Tony router
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          cmake=Path('bear_agent_pet/client/CMakeLists.txt')
+          text=cmake.read_text(encoding='utf-8')
+          old='''    src/TonyResponseRouter.cpp\n    src/TonyResponseRouter.h\n'''
+          new='''    src/TonyResponseRouter.cpp\n    src/TonyResponseRouter.h\n    src/TonyResponsePack.cpp\n    src/TonyResponsePack.h\n    src/TonyMemoryStore.cpp\n    src/TonyMemoryStore.h\n'''
+          if old not in text:
+              raise SystemExit('CMake router source block not found')
+          cmake.write_text(text.replace(old,new,1),encoding='utf-8')
+
+          router=Path('bear_agent_pet/client/src/TonyResponseRouter.cpp')
+          text=router.read_text(encoding='utf-8')
+          text=text.replace(
+              '#include "TonyResponseRouter.h"\n',
+              '#include "TonyResponseRouter.h"\n#include "TonyMemoryStore.h"\n#include "TonyResponsePack.h"\n',
+              1,
+          )
+
+          old_localize='''QString localize(bool zh, const QStringList &en, const QStringList &cn) {\n    return pick(zh ? cn : en);\n}\n'''
+          if old_localize not in text:
+              raise SystemExit('localize helper not found')
+          text=text.replace(old_localize,'',1)
+          text=text.replace('    const bool zh=language.trimmed().toLower().startsWith("zh");\n','',1)
+
+          memory_marker='''    // Questions that need reasoning, tools or domain knowledge must never be\n'''
+          memory_block=r'''    auto memoryDecision=[&](const QString &intent,
+                              const QStringList &en,const QStringList &cn,
+                              const QString &action,const QString &emotion,int duration) {
+        out.route=Route::LocalFixed;
+        out.intent=intent;
+        out.reply=TonyResponsePack::pick(intent,language,en,cn);
+        out.action=action;
+        out.emotion=emotion;
+        out.durationMs=duration;
+        return out;
+    };
+
+    const QString rawPrompt=out.forwardText;
+    auto extractAfter=[&](const QStringList &prefixes,bool &matched) {
+        matched=false;
+        for(const auto &prefix:prefixes) {
+            if(rawPrompt.startsWith(prefix,Qt::CaseInsensitive)) {
+                matched=true;
+                QString value=rawPrompt.mid(prefix.size()).trimmed();
+                if(value.startsWith(QLatin1Char(':')) || value.startsWith(QChar(0xFF1A)))
+                    value=value.mid(1).trimmed();
+                return value;
+            }
+        }
+        return QString();
+    };
+
+    bool memoryMatched=false;
+    const QString rememberFact=extractAfter({"please remember ","remember ",QString::fromUtf8("请记住"),QString::fromUtf8("记住")},memoryMatched);
+    if(memoryMatched) {
+        if(rememberFact.isEmpty())
+            return memoryDecision("memory_prompt",
+                {"Tell me what you want me to remember locally."},
+                {QString::fromUtf8("告诉我你想让我在本机记住什么。")},
+                "head_tilt","curious",3000);
+        TonyMemoryStore::instance().remember(rememberFact);
+        return memoryDecision("memory_ack",
+            {"Got it. I'll keep that as a local memory."},
+            {QString::fromUtf8("记住了。这条只放在本机的 Tony 记忆里。")},
+            "nod","content",3000);
+    }
+
+    if(p=="/memory clear" || p=="clear memory" || p=="forget all" ||
+       p==QString::fromUtf8("清空记忆") || p==QString::fromUtf8("忘掉全部") || p==QString::fromUtf8("忘记全部")) {
+        TonyMemoryStore::instance().clear();
+        return memoryDecision("memory_clear",
+            {"Okay. I cleared Tony's explicit local memories."},
+            {QString::fromUtf8("好，Tony 的显式本地记忆已经清空。")},
+            "nod","calm",3000);
+    }
+
+    bool forgetMatched=false;
+    const QString forgetQuery=extractAfter({"forget ",QString::fromUtf8("请忘记"),QString::fromUtf8("忘掉"),QString::fromUtf8("忘记")},forgetMatched);
+    if(forgetMatched) {
+        if(forgetQuery.isEmpty())
+            return memoryDecision("memory_forget_missing",
+                {"Tell me which local memory to forget."},
+                {QString::fromUtf8("告诉我你想删掉哪一条本地记忆。")},
+                "head_tilt","curious",3000);
+        const bool removed=TonyMemoryStore::instance().forgetMatching(forgetQuery);
+        return memoryDecision(removed ? "memory_forget" : "memory_forget_missing",
+            removed ? QStringList{"Okay. I removed that from local memory."}
+                    : QStringList{"I couldn't find a matching local memory."},
+            removed ? QStringList{QString::fromUtf8("好，我已经把那条从本地记忆里删掉了。")}
+                    : QStringList{QString::fromUtf8("我没有找到匹配的本地记忆。")},
+            removed ? "nod" : "head_tilt",removed ? "calm" : "curious",3000);
+    }
+
+    if(p=="/memory" || hasAny(p,{"what do you remember","show memory","memory list",QString::fromUtf8("你记得什么"),QString::fromUtf8("你还记得什么"),QString::fromUtf8("记忆列表")})) {
+        const auto facts=TonyMemoryStore::instance().facts();
+        if(facts.isEmpty())
+            return memoryDecision("memory_empty",
+                {"I don't have any explicit local memories yet."},
+                {QString::fromUtf8("我现在还没有你明确让我保存的本地记忆。")},
+                "head_tilt","curious",3200);
+
+        const int first=qMax(0,facts.size()-6);
+        const QStringList recent=facts.mid(first);
+        out.route=Route::LocalFixed;
+        out.intent="memory_recall";
+        out.action="head_tilt";
+        out.emotion="thoughtful";
+        out.durationMs=5200;
+        if(language.trimmed().toLower().startsWith("zh")) {
+            out.reply=QString::fromUtf8("我记得这些（只在本机）：\n• ")+recent.join(QString::fromUtf8("\n• "));
+            if(facts.size()>recent.size())
+                out.reply+=QString::fromUtf8("\n……另外还有 %1 条。 ").arg(facts.size()-recent.size()).trimmed();
+        } else {
+            out.reply=QStringLiteral("I remember these local notes:\n• ")+recent.join(QStringLiteral("\n• "));
+            if(facts.size()>recent.size())
+                out.reply+=QStringLiteral("\n...and %1 more.").arg(facts.size()-recent.size());
+        }
+        return out;
+    }
+
+'''
+          if memory_marker not in text:
+              raise SystemExit('technical routing marker not found')
+          text=text.replace(memory_marker,memory_block+memory_marker,1)
+
+          old_reply='out.reply=localize(zh,en,cn);'
+          count=text.count(old_reply)
+          if count != 3:
+              raise SystemExit(f'expected 3 router reply lambdas, got {count}')
+          text=text.replace(old_reply,'out.reply=TonyResponsePack::pick(intent,language,en,cn);')
+          router.write_text(text,encoding='utf-8')
+
+          Path('bear_agent_pet/client/VERSION').write_text('1.0.5\n',encoding='utf-8')
+          PY
+
+      - name: Validate Tony v1.0.5 source wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.5"
+          grep -q 'src/TonyResponsePack.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'src/TonyMemoryStore.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'TonyResponsePack::pick' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          grep -q 'TonyMemoryStore::instance().remember' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          grep -q 'memory_recall' bear_agent_pet/client/src/TonyResponseRouter.cpp
+          grep -q 'assets/config/tony_responses.json' bear_agent_pet/client/src/TonyResponsePack.cpp
+          echo 'TONY_V105_SOURCE=PASS'
+
+      - name: Commit Tony v1.0.5 wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Tony"
+          git config user.email "157110190+stloendays@users.noreply.github.com"
+          git add bear_agent_pet/client
+          if ! git diff --cached --quiet; then
+            git commit -m "feat: Tony 1.0.5 response packs and local explicit memory"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+  build-windows:
+    needs: apply-v105
+    runs-on: windows-2022
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Verify Tony v1.0.5 response pack and memory
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.5') { throw "Expected 1.0.5, got $version" }
+          $router=Get-Content bear_agent_pet/client/src/TonyResponseRouter.cpp -Raw
+          foreach ($token in @('TonyResponsePack::pick','TonyMemoryStore::instance().remember','memory_recall','memory_forget','memory_clear')) {
+            if ($router -notmatch [regex]::Escape($token)) { throw "Missing router token: $token" }
+          }
+          python -c "import json; d=json.load(open(r'bear_agent_pet/client/assets/config/tony_responses.json',encoding='utf-8')); assert len(d['locales']['en'])>=25; assert len(d['locales']['zh'])>=25; print('TONY_V105_PACK_JSON=PASS')"
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v105"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.5`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+          if (-not (Test-Path "$package/assets/config/tony_responses.json")) { throw 'Packaged response pack missing' }
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v105"
+          $env:TONY_VISUAL_ACTION='head_tilt'
+          $process=Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V105_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.5-windows-x64-response-memory
+          path: bear_agent_pet/client/package-v105
+          if-no-files-found: error
