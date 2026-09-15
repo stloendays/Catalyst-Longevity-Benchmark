@@ -53,39 +53,11 @@ jobs:
                   '"state": "working", "agent": "tony-router"',
           }
           for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'main_v08 baseline token missing: {old}')
-              text = text.replace(old, new, 1)
+              if old in text:
+                  text = text.replace(old, new, 1)
+              elif new not in text:
+                  raise SystemExit(f'main_v08 token missing: {old}')
           path.write_text(text, encoding='utf-8')
-
-          deploy = Path('.github/workflows/bear-agent-deploy-gateway.yml')
-          text = deploy.read_text(encoding='utf-8')
-          text = text.replace(
-              "      - 'feature/bear-agent-pet'\n",
-              "      - 'feature/bear-agent-pet'\n      - 'feature/tony-v104-action-sequences'\n",
-              1,
-          )
-          text = text.replace(
-              'set_env BEAR_LOCAL_MAX_TOKENS 20\n',
-              'set_env BEAR_LOCAL_MAX_TOKENS 20\n          set_env BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384\n          set_env BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS 6000\n',
-              1,
-          )
-          text = text.replace(
-              'Description=Tony Boyfriend Desktop Companion Gateway',
-              'Description=Tony Routed Desktop Companion Gateway',
-              1,
-          )
-          text = text.replace(
-              "assert d['backend'] == 'local-qwen-chat-only', d",
-              "assert d['backend'] == 'local-qwen-routed-chat', d",
-              1,
-          )
-          text = text.replace(
-              "assert d['persona'] == 'Paula-boyfriend', d",
-              "assert d['persona'] == 'teddy-companion+technical-agent', d\n          assert d['technical_routing'] is True, d\n          assert set(d['routing_modes']) == {'persona-core', 'companion', 'technical'}, d",
-              1,
-          )
-          deploy.write_text(text, encoding='utf-8')
           PY
 
       - name: Validate routed gateway source
@@ -97,21 +69,21 @@ jobs:
           grep -q 'teddy-companion+technical-agent' bear_agent_pet/server_gateway/app/main_v08.py
           grep -q 'technical_routing' bear_agent_pet/server_gateway/app/main_v08.py
           grep -q 'routed_chat_v1' bear_agent_pet/server_gateway/app/main_v08.py
-          grep -q 'BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384' .github/workflows/bear-agent-deploy-gateway.yml
-          grep -q 'Tony Routed Desktop Companion Gateway' .github/workflows/bear-agent-deploy-gateway.yml
+          grep -q 'local-qwen:technical' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'BEAR_LOCAL_TECHNICAL_MAX_TOKENS' bear_agent_pet/server_gateway/app/main.py
           if grep -q 'tony-paula-' bear_agent_pet/server_gateway/app/main_v08.py; then
             echo 'Legacy Paula session namespace remains' >&2
             exit 1
           fi
           echo 'TONY_V104_LIVE_ENTRYPOINT=PASS'
 
-      - name: Commit live gateway alignment
+      - name: Commit live gateway source only
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Tony"
           git config user.email "157110190+stloendays@users.noreply.github.com"
-          git add bear_agent_pet/server_gateway/app/main_v08.py .github/workflows/bear-agent-deploy-gateway.yml
+          git add bear_agent_pet/server_gateway/app/main_v08.py
           if ! git diff --cached --quiet; then
             git commit -m "feat: align live Tony gateway with 1.0.4 routed agent"
             git push origin "HEAD:${GITHUB_REF_NAME}"
