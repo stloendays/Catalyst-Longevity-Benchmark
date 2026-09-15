@@ -1,0 +1,189 @@
+name: Roll out Tony v1.0.4 routed gateway v2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v104-action-sequences
+    paths:
+      - '.github/workflows/tony-v104-server-rollout-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
+jobs:
+  rollout-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Validate Tony v1.0.4 routed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.4"
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'local-qwen:technical' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'local-qwen:companion' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'BEAR_LOCAL_TECHNICAL_MAX_TOKENS' bear_agent_pet/server_gateway/app/main.py
+          grep -q 'session_key = f"tony-{connection_id}"' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'teddy-companion+technical-agent' bear_agent_pet/server_gateway/app/main_v08.py
+          grep -q 'routed_chat_v1' bear_agent_pet/server_gateway/app/main_v08.py
+          if grep -q 'tony-paula-' bear_agent_pet/server_gateway/app/main_v08.py; then
+            echo 'Legacy Paula session namespace remains' >&2
+            exit 1
+          fi
+          echo 'TONY_V104_SOURCE=PASS'
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy Tony gateway source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'mkdir -p /home/ubuntu/.local/share/bear-agent/app'
+          rsync -az --delete -e "ssh -i $HOME/.ssh/server_key" \
+            bear_agent_pet/server_gateway/ \
+            ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
+
+      - name: Restart and verify routed gateway
+        shell: bash
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+          ENVFILE="$ROOT/bear-agent.env"
+
+          if [ ! -x "$VENV/bin/python" ]; then
+            python3 -m venv "$VENV"
+          fi
+          "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
+
+          set_env() {
+            key="$1"; value="$2"
+            touch "$ENVFILE"
+            chmod 600 "$ENVFILE"
+            if grep -q "^${key}=" "$ENVFILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENVFILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENVFILE"
+            fi
+          }
+          set_env BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384
+          set_env BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS 6000
+
+          sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Tony Routed Desktop Companion Gateway
+          After=network-online.target rhocodec-llm.service
+          Wants=network-online.target rhocodec-llm.service
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          WorkingDirectory=/home/ubuntu/.local/share/bear-agent/app
+          EnvironmentFile=/home/ubuntu/.local/share/bear-agent/bear-agent.env
+          ExecStart=/home/ubuntu/.local/share/bear-agent/venv/bin/uvicorn app.main_v08:app --host 127.0.0.1 --port 18790
+          Restart=on-failure
+          RestartSec=3
+          NoNewPrivileges=true
+          PrivateTmp=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now bear-agent-gateway.service
+          sudo systemctl restart bear-agent-gateway.service
+
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18790/health >/tmp/tony-v104-health.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          cat /tmp/tony-v104-health.json
+
+          PYTHONPATH="$APP" "$VENV/bin/python" - <<'PY'
+          import json
+          from app.main import is_technical, route_backends
+          d=json.load(open('/tmp/tony-v104-health.json'))
+          assert d['ok'] is True, d
+          assert d['version'] == '1.0.4', d
+          assert d['backend'] == 'local-qwen-routed-chat', d
+          assert d['persona'] == 'teddy-companion+technical-agent', d
+          assert d['technical_routing'] is True, d
+          assert set(d['routing_modes']) == {'persona-core','companion','technical'}, d
+          assert is_technical('帮我解释一下 SCF 为什么不收敛') is True
+          assert is_technical('Tony 抱抱') is False
+          assert route_backends('解释一下 CMake 报错') == ['local-qwen:technical']
+          assert route_backends('Tony 你好可爱') == ['tony-persona-core','local-qwen:companion']
+          print('TONY_V104_LIVE_ROUTING=PASS')
+          PY
+
+          PYTHONPATH="$APP" "$VENV/bin/python" - <<'PY'
+          import asyncio
+          from app.main import call_backend
+
+          async def main():
+              answer, used_agent, fallback = await call_backend(
+                  'What is SCF convergence? Answer in one concise sentence.',
+                  'v104-route-smoke',
+                  'en',
+              )
+              assert answer.strip(), answer
+              assert 'technical' in used_agent, used_agent
+              assert fallback is False, fallback
+              print('TONY_V104_TECHNICAL_GENERATION=PASS')
+              print('agent=' + used_agent)
+              print('answer_chars=' + str(len(answer)))
+
+          asyncio.run(main())
+          PY
+
+          systemctl --no-pager --full status bear-agent-gateway.service | head -n 18
+          REMOTE
+
+      - name: Probe public HTTPS edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 https://150.158.27.206/health > /tmp/public-health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/public-health.json'))
+          assert d['ok'] is True, d
+          assert d['version'] == '1.0.4', d
+          assert d['backend'] == 'local-qwen-routed-chat', d
+          assert d['technical_routing'] is True, d
+          print('TONY_V104_PUBLIC_EDGE=PASS')
+          PY
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/server_key"
