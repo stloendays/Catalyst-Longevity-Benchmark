@@ -24,16 +24,16 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
-      - name: Verify Tony v1.0.4 sequence router and server routing
+      - name: Verify final Tony v1.0.4 sequence and hardened routing
         shell: pwsh
         run: |
           $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
           if ($version -ne '1.0.4') { throw "Expected Tony 1.0.4, got $version" }
 
           $header = Get-Content bear_agent_pet/client/src/TonyResponseRouter.h -Raw
-          if ($header -notmatch 'actionSequence') { throw 'Missing actionSequence in router decision' }
-          if ($header -notmatch 'emotionSequence') { throw 'Missing emotionSequence in router decision' }
-          if ($header -notmatch 'sequenceDurationsMs') { throw 'Missing sequenceDurationsMs in router decision' }
+          foreach ($token in @('actionSequence','emotionSequence','sequenceDurationsMs')) {
+            if ($header -notmatch $token) { throw "Missing router sequence field: $token" }
+          }
 
           $pet = Get-Content bear_agent_pet/client/src/PetWindowV7.cpp -Raw
           if ($pet -notmatch 'playActionSequence') { throw 'PetWindow does not execute action sequences' }
@@ -48,14 +48,16 @@ jobs:
           }
 
           $server = Get-Content bear_agent_pet/server_gateway/app/main.py -Raw
-          if ($server -notmatch 'local-qwen:technical') { throw 'Server technical route missing' }
-          if ($server -notmatch 'local-qwen:companion') { throw 'Server companion route missing' }
+          foreach ($token in @('local-qwen:technical','local-qwen:companion','backend_plan = route_backends(message)','BEAR_LOCAL_TECHNICAL_MAX_TOKENS','BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS','technical=technical')) {
+            if ($server -notmatch [regex]::Escape($token)) { throw "Missing hardened server routing token: $token" }
+          }
           if ($server -match "Paula's cute Chinese teddy-bear boyfriend") { throw 'Legacy bear/Paula persona remains' }
+          if ($server -match 'your cuddly boyfriend is right here') { throw 'Legacy Paula identity repair remains' }
           if ($server -notmatch 'Do not assume the current user is Paula') { throw 'User identity safeguard missing' }
 
           python -m py_compile bear_agent_pet/server_gateway/app/main.py
           if ($LASTEXITCODE -ne 0) { throw 'Server gateway Python syntax validation failed' }
-          Write-Host 'TONY_V104_SEQUENCE_ROUTING=PASS'
+          Write-Host 'TONY_V104_FINAL_ROUTING=PASS'
 
       - uses: jurplel/install-qt-action@v4
         with:
