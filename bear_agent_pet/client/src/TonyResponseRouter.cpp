@@ -29,8 +29,24 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
 
     Decision out;
     out.forwardText = prompt.trimmed();
-    const QString p = out.forwardText.toLower();
     const bool zh = language.trimmed().toLower().startsWith("zh");
+
+    // Explicit escape hatch: advanced users can bypass all local persona rules.
+    if(out.forwardText.startsWith(QStringLiteral("/agent "), Qt::CaseInsensitive)) {
+        out.forwardText=out.forwardText.mid(7).trimmed();
+        out.route=Route::ServerAgent;
+        out.intent=QStringLiteral("forced_agent");
+        return out;
+    }
+    if(out.forwardText.startsWith(QStringLiteral("agent:"), Qt::CaseInsensitive) ||
+       out.forwardText.startsWith(QStringLiteral("Agent："), Qt::CaseInsensitive)) {
+        out.forwardText=out.forwardText.mid(6).trimmed();
+        out.route=Route::ServerAgent;
+        out.intent=QStringLiteral("forced_agent");
+        return out;
+    }
+
+    const QString p = out.forwardText.toLower();
 
     auto fixed = [&](const QString &intent, const QStringList &en, const QStringList &cn,
                      const QString &action, const QString &emotion, int duration = 2200) {
@@ -121,6 +137,48 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             .arg(state.loneliness).arg(state.curiosity).arg(state.mood);
         return fixed("status",{en},{cn},"curious","neutral",3500);
     }
+
+    if(hasAny(p,{"谢谢","谢啦","thank you","thanks"}))
+        return fixed("thanks",
+            {"You're welcome. Tiny paws, useful work.","Any time. That's what desktop companions are for."},
+            {"不用谢。小爪子也能办正事。","随时叫我。桌宠也是可以干活的。"},
+            "wave","happy",2000);
+
+    if(hasAny(p,{"对不起","抱歉","sorry","my bad"}))
+        return fixed("reassure",
+            {"We're okay. Come sit with me for a second.","No problem. Tony has already moved on."},
+            {"没事。陪我坐一会儿就好。","没关系，Tony 已经翻篇了。"},
+            "blush","gentle",2400);
+
+    if(hasAny(p,{"无聊","好无聊","bored","boring"}))
+        return action("bored",
+            {"Then we need a tiny walk or a difficult chemistry question.","I vote for a short walk. Very scientific."},
+            {"那就散个小步，或者来一道难一点的化学题。","我投票散步。非常科学。"},
+            "walk","playful",3000);
+
+    if(hasAny(p,{"加油","鼓励我","encourage me","wish me luck","考试"}))
+        return fixed("encouragement",
+            {"You do the hard part. I'll stay right here.","One problem at a time. Tony is on desk duty."},
+            {"难的部分你来做，我就在这里陪着。","一道一道来。Tony 今天负责守桌面。"},
+            "wave","supportive",2600);
+
+    if(hasAny(p,{"你帅吗","好帅","帅不帅","handsome","you look good"}))
+        return action("handsome",
+            {"The glasses help. Taking them off helps differently.","I was going to be modest, but yes."},
+            {"眼镜有眼镜的帅，摘掉又是另一种。","本来想谦虚一下，但确实。"},
+            "remove_glasses","confident",3000);
+
+    if(hasAny(p,{"想我吗","miss me","did you miss me"}))
+        return fixed("miss_you",
+            {"A little. Maybe more than a little.","I noticed the desk was quieter without you."},
+            {"有一点。可能不止一点。","你不在的时候，桌面确实安静了很多。"},
+            "blush","warm",2600);
+
+    if(hasAny(p,{"饿不饿","饿了吗","hungry","snack"}))
+        return fixed("snack",
+            {"A tiny snack would improve research productivity.","I can be bribed with a very small snack."},
+            {"一点小零食可以显著提高科研效率。","Tony 可以被一小口零食收买。"},
+            "curious","playful",2400);
 
     if(hasAny(p,{"挥手","wave","打招呼"}))
         return action("wave",{"Hello again."},{"再打个招呼。"},"wave","friendly",1800);
