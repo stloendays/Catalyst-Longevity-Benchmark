@@ -1,0 +1,91 @@
+name: Build Tony v1.0.3 router branch
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v103-router-actions
+    paths:
+      - '.github/workflows/tony-v103-build-windows.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v103-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Verify Tony v1.0.3 and action-aware router
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.3') { throw "Expected Tony 1.0.3, got $version" }
+          $pet = Get-Content bear_agent_pet/client/src/PetWindow.h -Raw
+          foreach ($action in @('HeadTilt','Nod','Paw','Hop','Spin','Sniff','Dance')) {
+            if ($pet -notmatch $action) { throw "Missing Tony action: $action" }
+          }
+          $router = Get-Content bear_agent_pet/client/src/TonyResponseRouter.cpp -Raw
+          foreach ($routeAction in @('head_tilt','nod','paw','hop','spin','sniff','dance')) {
+            if ($router -notmatch $routeAction) { throw "Router does not use action: $routeAction" }
+          }
+          Write-Host 'TONY_V103_ACTION_ROUTER=PASS'
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package-v103"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.3`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package-v103"
+          $env:TONY_VISUAL_ACTION = 'paw'
+          $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V103_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.3-windows-x64-router
+          path: bear_agent_pet/client/package-v103
+          if-no-files-found: error
