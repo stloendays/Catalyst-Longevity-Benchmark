@@ -14,7 +14,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, send_json
+from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, normalize_model_profile, quality_model_id, send_json
 from .pairing import (
     approve_device_pairing_request,
     approve_device_pairing_request_by_id,
@@ -29,7 +29,7 @@ from .pairing import (
     revoke_device_as_owner,
 )
 
-app = FastAPI(title="Tony Desktop Companion", version="1.0.4")
+app = FastAPI(title="Tony Desktop Companion", version="1.0.8")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
 _PAIR_REQUESTS: dict[str, list[float]] = {}
@@ -221,22 +221,25 @@ async def finish_answer(ws: WebSocket, answer: str, used_agent: str, fallback_us
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    model = local_model_id()
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "1.0.4",
+        "version": "1.0.8",
         "backend": "local-qwen-routed-chat",
-        "local_model": model,
-        "model_profile": "quality" if "2b" in model.casefold() and "0.8b" not in model.casefold() else "fast",
+        "local_model": local_model_id(),
+        "quality_model": quality_model_id(),
+        "model_profile": "auto",
+        "available_model_profiles": ["auto", "fast", "quality"],
+        "model_router": "per-request",
         "language": "English",
         "languages": ["English", "Simplified Chinese"],
         "default_language": "English",
         "persona": "teddy-companion+technical-agent",
         "technical_routing": True,
-        "routing_modes": ["persona-core", "companion", "technical"],
+        "routing_modes": ["persona-core", "companion", "technical", "fast-0.8b", "quality-2b"],
         "chat_only": True,
         "streaming": True,
+        "thinking_visible": False,
         "persona_core": True,
         "pairing_supported": True,
         "pairing_mode": "device-code+owner-approval+recovery",
@@ -377,16 +380,20 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "1.0.4",
+                    "server_version": "1.0.8",
                     "accepted_capabilities": [
                         "operator_log_sync_v1",
                         "device_code_pairing_v1",
                         "owner_device_management_v1",
                         "routed_chat_v1",
+                        "model_profile_routing_v1",
                     ],
                     "chat_only": True,
                     "streaming": True,
+                    "thinking_visible": False,
                     "local_model": local_model_id(),
+                    "quality_model": quality_model_id(),
+                    "model_profiles": ["auto", "fast", "quality"],
                     "language": preferred_language,
                 })
                 continue
@@ -406,16 +413,23 @@ async def agent_ws(ws: WebSocket) -> None:
             if not content:
                 continue
             request_language = normalize_language(str(payload.get("language", preferred_language)))
+            request_model_profile = normalize_model_profile(str(payload.get("model_profile", "auto")))
             action, emotion, duration = action_for_text(content)
             await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
-            await send_json(ws, {"type": "agent_state", "state": "working", "agent": "tony-router"})
+            await send_json(ws, {"type": "agent_state", "state": "working", "agent": f"tony-router-{request_model_profile}"})
 
             try:
                 async def emit_delta(piece: str) -> None:
                     await send_json(ws, {"type": "text_delta", "content": piece})
 
-                answer, used_agent, fallback_used = await call_backend_stream(content, session_key, emit_delta, request_language)
+                answer, used_agent, fallback_used = await call_backend_stream(
+                    content,
+                    session_key,
+                    emit_delta,
+                    request_language,
+                    request_model_profile,
+                )
                 await finish_answer(ws, answer, used_agent, fallback_used)
             except Exception as exc:
                 await send_json(ws, {"type": "error", "message": f"Tony could not reply: {exc}"})
