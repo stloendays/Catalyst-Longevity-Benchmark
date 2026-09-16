@@ -62,5 +62,6 @@ private:
     bool pairingPollInFlight_{false};
     QString bearerToken_;
     QString language_{"en"};
+    QString currentStreamText_;
     bool outageReported_{false};
 };
