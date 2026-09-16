@@ -124,6 +124,21 @@ jobs:
           test "$(tr -d '\r\n ' < verify-package/VERSION)" = "$VERSION"
           echo 'TONY_V107_UPDATE_STRUCTURE=PASS'
 
+      - name: Ensure version tag points to verified binary commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --tags --force
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_COMMIT"
+          else
+            git tag "$RELEASE_TAG" "$RELEASE_COMMIT"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+          echo "TONY_V107_TAG=PASS tag=$RELEASE_TAG commit=$RELEASE_COMMIT"
+
       - name: Publish versioned Tony v1.0.7 release
         shell: bash
         env:
@@ -157,7 +172,7 @@ jobs:
               "TonyDesktopPet-${VERSION}-windows-x64.zip" \
               "TonyDesktopPet-${VERSION}-windows-x64.zip.sha256" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$RELEASE_COMMIT" \
+              --verify-tag \
               --title "Tony Desktop Pet v${VERSION}" \
               --notes-file "$NOTES_FILE"
           fi
