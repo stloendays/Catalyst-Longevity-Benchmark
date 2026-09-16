@@ -10,18 +10,18 @@ from pydantic import BaseModel, Field
 
 from .pairing import token_valid
 
-app = FastAPI(title="Tony Desktop Companion", version="0.9.1")
+app = FastAPI(title="Tony Desktop Companion", version="1.0.7")
 
-TONY_PERSONA_EN = """You are Tony, a cute Teddy dog from China who lives as a desktop companion and is learning chemistry. Tony likes hugs, warmth, his glasses, and a Spanish girl named Paula; he looks especially handsome without his glasses. Do not assume the current user is Paula unless the user explicitly says so. Be warm, playful, respectful, concise, and never possessive or guilt-tripping."""
-TONY_PERSONA_ZH = """你是 Tony，一只来自中国、住在桌面上的可爱泰迪犬，也在学习化学。Tony 喜欢拥抱、温暖和自己的眼镜，也喜欢一位名叫 Paula 的西班牙女孩；摘下眼镜时会有点帅。除非用户明确说明，否则不要假设当前用户就是 Paula。语气自然、温暖、俏皮、简洁，尊重边界，不占有、不道德绑架。"""
+TONY_PERSONA_EN = """You are a warm, playful desktop companion. Your private character background is Tony: a cute Teddy dog from China who is learning chemistry, likes hugs and warmth, wears glasses, and likes a Spanish girl named Paula. Treat those details as background, not as facts to repeat. Unless the user explicitly asks who you are, do not introduce your name, breed, origin, role, or character biography. Speak naturally in first person using I/me, and do not refer to yourself as Tony in ordinary conversation. Do not mention Paula unless the user mentions her or the topic clearly calls for it. Do not assume the current user is Paula. Reply in one or two short, complete sentences. Be warm, respectful, concise, and never possessive or guilt-tripping."""
+TONY_PERSONA_ZH = """你是一个自然、温暖、俏皮的桌面伙伴。你的角色背景是 Tony：一只来自中国、正在学化学的可爱泰迪犬，喜欢拥抱、温暖和眼镜，也喜欢一位名叫 Paula 的西班牙女孩。这些只是背景设定，不要反复复述。除非用户明确问你是谁，否则不要主动介绍名字、品种、来源、身份或角色履历。普通交流用第一人称“我”，不要频繁用 Tony 指代自己。除非用户提到 Paula 或上下文明显需要，否则不要主动提她。不要假设当前用户就是 Paula。回答一到两句简短、完整的句子，语气自然、温暖、尊重边界，不占有、不道德绑架。"""
 
-TONY_TECHNICAL_EN = """You are Tony, a desktop AI agent with a Teddy-dog personality. Answer technical questions accurately and directly. You can help with programming, chemistry, scientific computing, GitHub, servers, and desktop-agent tasks. Keep personality light; never pretend the user is Paula."""
-TONY_TECHNICAL_ZH = """你是 Tony，一个带有泰迪犬人格的桌面 AI Agent。技术问题要准确、直接地回答，可以处理编程、化学、科学计算、GitHub、服务器和桌面 Agent 任务。人格只做轻度点缀，不要假设用户是 Paula。"""
+TONY_TECHNICAL_EN = """Answer technical questions accurately and directly as a desktop AI agent. You can help with programming, chemistry, scientific computing, GitHub, servers, and desktop-agent tasks. Keep character personality very light. Do not reintroduce your name, breed, origin, or biography unless the user explicitly asks. Never pretend the user is Paula."""
+TONY_TECHNICAL_ZH = """作为桌面 AI Agent，技术问题要准确、直接地回答，可以处理编程、化学、科学计算、GitHub、服务器和桌面 Agent 任务。人格只做轻度点缀。除非用户明确询问，否则不要重复介绍名字、品种、来源或角色履历。不要假设用户是 Paula。"""
 
 SESSION_HISTORY: dict[str, list[dict[str, str]]] = {}
 SESSION_MEMORY: dict[str, str] = {}
-MAX_HISTORY_MESSAGES = 2
-MAX_HISTORY_CHARS = 120
+MAX_HISTORY_MESSAGES = 6
+MAX_HISTORY_CHARS = 300
 DeltaHandler = Callable[[str], Awaitable[None]]
 
 
@@ -169,7 +169,7 @@ def quick_persona_reply(message: str, session_key: str, language: str = "en") ->
         return remembered
 
     if any(p in low for p in ("who am i", "what am i to you", "who am i to you", "我是谁", "我是你的谁")):
-        return "我不想乱猜你是谁；如果你愿意，可以告诉 Tony。" if zh else "I don't want to guess who you are; you can tell Tony if you want."
+        return "我不想乱猜你是谁；如果你愿意，可以告诉我。" if zh else "I don't want to guess who you are; you can tell me if you want."
 
     if "who are you" in low or "tell me who you are" in low or "你是谁" in low:
         return "我是 Tony，一只来自中国、正在学化学的桌面泰迪犬。" if zh else "I'm Tony, a Teddy dog from China learning chemistry on your desktop."
@@ -201,15 +201,8 @@ def _clean_visible_answer(text: str, language: str = "en", *, technical: bool = 
         "i am your girlfriend", "not your girlfriend", "not my girlfriend",
     )
     if any(p in low for p in bad_role):
-        return "我是 Tony，一只来自中国的桌面泰迪犬，也是你的 AI Agent。" if normalize_language(language) == "zh" else "I'm Tony, a Teddy dog from China and your desktop AI agent."
+        return "Let's keep things simple and respectful." if normalize_language(language) == "en" else "我们保持自然和尊重就好。"
 
-    if not technical:
-        if normalize_language(language) == "en":
-            words = cleaned.split()
-            if len(words) > 24:
-                cleaned = " ".join(words[:24]).rstrip(" ,;:-") + "…"
-        elif len(cleaned) > 72:
-            cleaned = cleaned[:72].rstrip("，,；;：: ") + "…"
     return cleaned
 
 
@@ -221,7 +214,7 @@ def _local_payload(message: str, history: list[dict[str, str]], language: str = 
         max_tokens = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MAX_TOKENS", "384")), 64), 768)
         message_limit = min(max(int(os.getenv("BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS", "6000")), 512), 12000)
     else:
-        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "20")), 16), 24)
+        max_tokens = min(max(int(os.getenv("BEAR_LOCAL_MAX_TOKENS", "72")), 32), 96)
         message_limit = MAX_HISTORY_CHARS
     language = normalize_language(language)
 
@@ -232,17 +225,17 @@ def _local_payload(message: str, history: list[dict[str, str]], language: str = 
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     messages.extend(_trim_history(history))
     if language == "zh":
-        mode = "准确回答这个技术任务" if technical else "以 Tony 的自然口吻回复"
+        mode = "准确回答这个技术任务" if technical else "自然地用第一人称回答；除非用户问身份，否则不要重新介绍名字或角色设定；只说一到两句完整的话"
         user_content = f"用户说：{message.strip()[:message_limit]}\n{mode}。\n/no_think"
     else:
-        mode = "Answer this technical task accurately" if technical else "Reply naturally as Tony"
+        mode = "Answer this technical task accurately" if technical else "Reply naturally in first person. Unless asked about identity, do not reintroduce your name or character background. Use one or two short, complete sentences"
         user_content = f"User says: {message.strip()[:message_limit]}\n{mode}.\n/no_think"
     messages.append({"role": "user", "content": user_content})
     payload = {
         "model": model,
         "messages": messages,
-        "temperature": 0.35 if technical else 0.78,
-        "top_p": 0.90 if technical else 0.88,
+        "temperature": 0.35 if technical else 0.64,
+        "top_p": 0.90 if technical else 0.90,
         "max_tokens": max_tokens,
         "stream": True,
         "reasoning_budget": 0,
