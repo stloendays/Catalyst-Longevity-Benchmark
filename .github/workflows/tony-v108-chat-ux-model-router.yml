@@ -1,0 +1,182 @@
+name: Build Tony v1.0.8 chat UX and model router
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v108-chat-ux-model-router
+    paths:
+      - 'bear_agent_pet/client/**'
+      - 'bear_agent_pet/server_gateway/app/main.py'
+      - 'bear_agent_pet/server_gateway/app/main_v08.py'
+      - '.github/workflows/tony-v108-chat-ux-model-router.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v108-chat-ux-model-router-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony v1.0.8 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.8"
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py bear_agent_pet/server_gateway/app/main_v08.py
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, 'bear_agent_pet/server_gateway')
+          from app.main import (
+              _clean_visible_answer,
+              _local_payload,
+              normalize_model_profile,
+          )
+
+          bubble=Path('bear_agent_pet/client/src/SpeechBubble.cpp').read_text(encoding='utf-8')
+          composer=Path('bear_agent_pet/client/src/ChatComposer.cpp').read_text(encoding='utf-8')
+          agent=Path('bear_agent_pet/client/src/AgentClient.cpp').read_text(encoding='utf-8')
+          gateway=Path('bear_agent_pet/server_gateway/app/main_v08.py').read_text(encoding='utf-8')
+
+          assert 'const int maxTextWidth=500;' in bubble
+          assert 'r.height()+42,390' in bubble
+          assert 'text.left(1800)' in bubble
+
+          for text in ('Auto', 'Fast 0.8B', 'Quality 2B', 'agent/model_profile'):
+              assert text in composer, text
+          assert 'model_profile' in agent
+          assert 'model_profile_routing_v1' in agent
+          assert 'model_profile_routing_v1' in gateway
+          assert 'thinking_visible' in gateway
+
+          assert normalize_model_profile('2b') == 'quality'
+          assert normalize_model_profile('0.8b') == 'fast'
+          assert normalize_model_profile('anything') == 'auto'
+
+          fast_endpoint, fast_model, _, fast_payload = _local_payload(
+              'Hello', [], 'en', technical=False, model_profile='auto')
+          quality_endpoint, quality_model, _, quality_payload = _local_payload(
+              'Explain SCF convergence', [], 'en', technical=True, model_profile='auto')
+          forced_fast_endpoint, forced_fast_model, _, _ = _local_payload(
+              'Explain SCF convergence', [], 'en', technical=True, model_profile='fast')
+          forced_quality_endpoint, forced_quality_model, _, _ = _local_payload(
+              'Hello', [], 'en', technical=False, model_profile='quality')
+
+          assert fast_endpoint.endswith(':18080/v1/chat/completions'), fast_endpoint
+          assert '0.8b' in fast_model, fast_model
+          assert quality_endpoint.endswith(':18081/v1/chat/completions'), quality_endpoint
+          assert '2b' in quality_model and '0.8b' not in quality_model, quality_model
+          assert forced_fast_endpoint.endswith(':18080/v1/chat/completions') and '0.8b' in forced_fast_model
+          assert forced_quality_endpoint.endswith(':18081/v1/chat/completions') and '2b' in forced_quality_model
+          assert fast_payload['reasoning_budget'] == 0
+          assert quality_payload['reasoning_budget'] == 0
+          assert fast_payload['chat_template_kwargs']['enable_thinking'] is False
+          assert quality_payload['chat_template_kwargs']['enable_thinking'] is False
+
+          assert _clean_visible_answer('<think>private reasoning</think>Final answer.', 'en') == 'Final answer.'
+          guarded=_clean_visible_answer(
+              "The reason for the user's query is that they are asking for an explanation of why.",
+              'en', technical=True)
+          assert guarded == 'Tell me which part you want me to explain.', guarded
+          print('TONY_V108_SOURCE=PASS')
+          PY
+
+  build-windows:
+    needs: validate-source
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Tony v1.0.8 source
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.8') { throw "Expected 1.0.8, got $version" }
+          foreach ($path in @(
+            'bear_agent_pet/client/src/SpeechBubble.cpp',
+            'bear_agent_pet/client/src/ChatComposer.cpp',
+            'bear_agent_pet/client/src/ChatComposer.h',
+            'bear_agent_pet/client/src/AgentClient.cpp',
+            'bear_agent_pet/client/assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path $path)) { throw "Missing 1.0.8 source: $path" }
+          }
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v108"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.8`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+
+          $root=(Resolve-Path $package).Path
+          $managed=Get-ChildItem $package -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+
+          foreach ($required in @(
+            'TonyDesktopPet.exe',
+            'VERSION',
+            'VERSION.txt',
+            'tony-install-root.marker',
+            'tony-file-list.txt',
+            'assets/config/tony_responses.json',
+            'assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+          if ((Get-Content "$package/VERSION" -Raw).Trim() -ne '1.0.8') { throw 'Packaged VERSION mismatch' }
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v108"
+          $process=Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 7
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V108_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.8-windows-x64-chat-model-router
+          path: bear_agent_pet/client/package-v108
+          if-no-files-found: error
