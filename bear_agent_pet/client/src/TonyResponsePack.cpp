@@ -19,33 +19,45 @@ struct PackCache {
     bool loaded{false};
 };
 
-PackCache &cache() {
+PackCache &primaryCache() {
     static PackCache value;
     return value;
 }
 
-QString defaultPath() {
+PackCache &autonomousCache() {
+    static PackCache value;
+    return value;
+}
+
+QString defaultPrimaryPath() {
     return QDir(QCoreApplication::applicationDirPath())
         .filePath(QStringLiteral("assets/config/tony_responses.json"));
 }
 
-QString configuredPath() {
-    const QString custom=QSettings().value(QStringLiteral("tony/response_pack_path")).toString().trimmed();
-    return custom.isEmpty() ? defaultPath() : custom;
+QString defaultAutonomousPath() {
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("assets/config/tony_autonomous_responses.json"));
 }
 
-void ensureLoaded() {
-    auto &c=cache();
-    const QString path=configuredPath();
+QString configuredPrimaryPath() {
+    const QString custom=QSettings().value(QStringLiteral("tony/response_pack_path")).toString().trimmed();
+    return custom.isEmpty() ? defaultPrimaryPath() : custom;
+}
+
+QString configuredAutonomousPath() {
+    const QString custom=QSettings().value(QStringLiteral("tony/autonomous_response_pack_path")).toString().trimmed();
+    return custom.isEmpty() ? defaultAutonomousPath() : custom;
+}
+
+void ensureLoaded(PackCache &cache,const QString &path) {
     const QFileInfo info(path);
     const QDateTime modified=info.exists() ? info.lastModified() : QDateTime();
+    if(cache.path==path && cache.modified==modified) return;
 
-    if(c.path==path && c.modified==modified) return;
-
-    c.path=path;
-    c.modified=modified;
-    c.root={};
-    c.loaded=false;
+    cache.path=path;
+    cache.modified=modified;
+    cache.root={};
+    cache.loaded=false;
 
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly)) return;
@@ -58,18 +70,16 @@ void ensureLoaded() {
     if(root.value(QStringLiteral("schema")).toInt()!=1) return;
     if(!root.value(QStringLiteral("locales")).isObject()) return;
 
-    c.root=root;
-    c.loaded=true;
+    cache.root=root;
+    cache.loaded=true;
 }
 
-QStringList replies(const QString &intent,const QString &language) {
-    ensureLoaded();
-    const auto &c=cache();
-    if(!c.loaded) return {};
+QStringList repliesFrom(const PackCache &cache,const QString &intent,const QString &language) {
+    if(!cache.loaded) return {};
 
     const QString locale=language.trimmed().toLower().startsWith(QStringLiteral("zh"))
         ? QStringLiteral("zh") : QStringLiteral("en");
-    const auto locales=c.root.value(QStringLiteral("locales")).toObject();
+    const auto locales=cache.root.value(QStringLiteral("locales")).toObject();
     const auto localeObject=locales.value(locale).toObject();
     const auto value=localeObject.value(intent);
     if(!value.isArray()) return {};
@@ -80,6 +90,17 @@ QStringList replies(const QString &intent,const QString &language) {
         if(!text.isEmpty()) out.push_back(text);
     }
     return out;
+}
+
+QStringList replies(const QString &intent,const QString &language) {
+    auto &primary=primaryCache();
+    auto &autonomous=autonomousCache();
+    ensureLoaded(primary,configuredPrimaryPath());
+    ensureLoaded(autonomous,configuredAutonomousPath());
+
+    const auto packedPrimary=repliesFrom(primary,intent,language);
+    if(!packedPrimary.isEmpty()) return packedPrimary;
+    return repliesFrom(autonomous,intent,language);
 }
 
 QString choose(const QStringList &items) {
@@ -100,11 +121,13 @@ QString TonyResponsePack::pick(const QString &intent,
 }
 
 QString TonyResponsePack::sourcePath() {
-    ensureLoaded();
-    return cache().path;
+    auto &primary=primaryCache();
+    ensureLoaded(primary,configuredPrimaryPath());
+    return primary.path;
 }
 
 bool TonyResponsePack::loaded() {
-    ensureLoaded();
-    return cache().loaded;
+    auto &primary=primaryCache();
+    ensureLoaded(primary,configuredPrimaryPath());
+    return primary.loaded;
 }
