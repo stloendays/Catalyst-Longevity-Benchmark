@@ -6,20 +6,23 @@
 #include <QSettings>
 
 void PetWindow::applyUiLanguage(const QString &language) {
-    const QString normalized = language.trimmed().toLower();
-    const QString code = (normalized.startsWith(QStringLiteral("zh")) || normalized == QStringLiteral("cn"))
-        ? QStringLiteral("zh") : QStringLiteral("en");
+    const QString requested = language.trimmed().toLower();
+
+    // Tony's character voice is intentionally English-only. Some settings UI
+    // still emits language changes, but they must never switch local replies,
+    // autonomous speech, direct bubbles or Agent responses away from English.
+    const QString code = QStringLiteral("en");
     QSettings().setValue(QStringLiteral("ui/language"), code);
     agent_.setLanguage(code);
     composer_.setLanguage(code);
     AppLogger::recordOperatorEvent(
         QStringLiteral("language_change"),
         {},
-        QJsonObject{{QStringLiteral("language"), code}});
-    showBubble(code == QStringLiteral("zh")
-                   ? QStringLiteral("语言已切换为简体中文。")
-                   : QStringLiteral("Language changed to English."),
-               3200);
+        QJsonObject{
+            {QStringLiteral("requested"), requested},
+            {QStringLiteral("effective"), code}
+        });
+    showBubble(QStringLiteral("Tony always speaks English."), 3200);
 }
 
 void PetWindow::syncOperatorLogsForUpdate(const QString &targetVersion) {
