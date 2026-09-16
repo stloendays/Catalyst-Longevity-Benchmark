@@ -1,25 +1,25 @@
 {
   "schema": 1,
-  "description": "Autonomous local speech pack for Tony 1.0.6. These lines are used only for spontaneous desktop-companion moments and never require the server agent.",
+  "description": "Autonomous local speech pack for Tony. English replies use natural first-person phrasing and avoid repetitive self-identification.",
   "locales": {
     "en": {
       "autonomous_cold": [
         "Brrr... my paws are getting cold.",
         "The air-conditioning is winning again.",
-        "It feels a little cold here. Tony is requesting one warm corner.",
+        "It feels a little cold here. I would like one warm corner.",
         "Cold detected. Curling up would be scientifically reasonable.",
         "My curls are warm. My paws disagree."
       ],
       "autonomous_lonely": [
         "When you are free, can I borrow one small hug?",
-        "I am still here, in case you forgot one small Tony on the desktop.",
+        "I am still here, in case you forgot about me on the desktop.",
         "You look busy. I can wait... but I would not refuse a head pat.",
-        "No rush. I just wanted to remind you that Tony is nearby.",
+        "No rush. I just wanted to remind you that I am nearby.",
         "A tiny amount of attention would be acceptable."
       ],
       "autonomous_sleepy": [
         "That was not a yawn. It was a very long breath.",
-        "Tony may need a tiny rest soon.",
+        "I may need a tiny rest soon.",
         "My eyes are doing that suspicious sleepy thing.",
         "I can still study chemistry. Probably. After one yawn."
       ],
@@ -28,13 +28,13 @@
         "Quiet chemistry study break. You do your thing; I will do mine.",
         "Glasses adjusted. Time for one small chemistry thought.",
         "I should probably learn one more chemistry thing today.",
-        "Tony is opening the imaginary chemistry notebook again."
+        "I am opening the imaginary chemistry notebook again."
       ],
       "autonomous_morning": [
-        "Morning. One stretch, then Tony is officially operational.",
+        "Morning. One stretch, then I am officially operational.",
         "Good morning. Glasses, curls, chemistry. Reasonable plan.",
         "Morning. The curls are awake; the brain is catching up.",
-        "Good morning. Tony votes for warmth first, productivity second."
+        "Good morning. I vote for warmth first, productivity second."
       ],
       "autonomous_paula": [
         "...I randomly thought about Paula. Never mind.",
@@ -44,17 +44,17 @@
       ],
       "autonomous_observe": [
         "You look busy. I will keep watch from here.",
-        "Tony is conducting highly scientific desktop observation.",
+        "I am conducting highly scientific desktop observation.",
         "I am not staring. I am monitoring the workspace.",
         "Everything looks under control. I will remain on tiny-dog standby.",
         "I have reviewed the desktop. No immediate snack emergency detected."
       ],
       "autonomous_content": [
         "This is nice. Just sitting here is fine too.",
-        "No emergency. Tony is simply content.",
+        "No emergency. I am simply content.",
         "Quiet desktop, warm curls. Acceptable conditions.",
         "I do not need anything right now. I just wanted to say hi.",
-        "Tony status: comfortable and mostly well-behaved."
+        "Status: comfortable and mostly well-behaved."
       ],
       "autonomous_walk": [
         "I have been sitting too long. Tiny patrol.",
@@ -64,15 +64,15 @@
       ],
       "autonomous_sniff": [
         "Hmm. Did someone nearby open a snack?",
-        "Tony detected something suspiciously snack-like.",
+        "I detected something suspiciously snack-like.",
         "I may have imagined a snack. Further investigation is required.",
         "That smell deserves scientific attention."
       ],
       "autonomous_night": [
-        "It is pretty late. Tony is going to be quieter now.",
+        "It is pretty late. I am going to be quieter now.",
         "Late-night mode. I will keep the desktop calm.",
         "It is late. I can sit quietly while you finish.",
-        "Night shift Tony is mostly a sleepy Tony."
+        "On the night shift, I am mostly sleepy."
       ]
     },
     "zh": {
