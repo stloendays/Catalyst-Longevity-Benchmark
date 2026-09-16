@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSettings>
 #include <QSysInfo>
 #include <QUuid>
 
@@ -26,6 +27,12 @@ QUrl pairingApiUrlFor(const QUrl &wsUrl, const QString &path) {
     url.setQuery({});
     url.setFragment({});
     return url;
+}
+
+QString normalizedModelProfile(const QString &value) {
+    const QString profile=value.trimmed().toLower();
+    if(profile==QStringLiteral("fast") || profile==QStringLiteral("quality")) return profile;
+    return QStringLiteral("auto");
 }
 
 QString friendlyTransportMessage(const QString &raw, const QUrl &url, bool zh) {
@@ -368,7 +375,7 @@ void AgentClient::sendClientHello() {
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},
-        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1"),QStringLiteral("device_code_pairing_v1")}}
+        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1"),QStringLiteral("device_code_pairing_v1"),QStringLiteral("model_profile_routing_v1")}}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
@@ -382,11 +389,14 @@ void AgentClient::sendMessage(const QString &text) {
         return;
     }
     currentStreamText_.clear();
+    const QString modelProfile=normalizedModelProfile(
+        QSettings().value(QStringLiteral("agent/model_profile"),QStringLiteral("auto")).toString());
     QJsonObject o{
         {"type","message"},
         {"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},
         {"content",text},
-        {"language",language_}
+        {"language",language_},
+        {"model_profile",modelProfile}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
