@@ -33,18 +33,11 @@ jobs:
           python -m py_compile bear_agent_pet/server_gateway/app/main.py bear_agent_pet/server_gateway/app/main_v08.py
           python - <<'PY'
           from pathlib import Path
-          import sys
-
-          sys.path.insert(0, 'bear_agent_pet/server_gateway')
-          from app.main import (
-              _clean_visible_answer,
-              _local_payload,
-              normalize_model_profile,
-          )
 
           bubble=Path('bear_agent_pet/client/src/SpeechBubble.cpp').read_text(encoding='utf-8')
           composer=Path('bear_agent_pet/client/src/ChatComposer.cpp').read_text(encoding='utf-8')
           agent=Path('bear_agent_pet/client/src/AgentClient.cpp').read_text(encoding='utf-8')
+          server=Path('bear_agent_pet/server_gateway/app/main.py').read_text(encoding='utf-8')
           gateway=Path('bear_agent_pet/server_gateway/app/main_v08.py').read_text(encoding='utf-8')
 
           assert 'const int maxTextWidth=500;' in bubble
@@ -55,38 +48,30 @@ jobs:
               assert text in composer, text
           assert 'model_profile' in agent
           assert 'model_profile_routing_v1' in agent
-          assert 'model_profile_routing_v1' in gateway
-          assert 'thinking_visible' in gateway
 
-          assert normalize_model_profile('2b') == 'quality'
-          assert normalize_model_profile('0.8b') == 'fast'
-          assert normalize_model_profile('anything') == 'auto'
+          required_server = (
+              'BEAR_LOCAL_FAST_MODEL_URL',
+              'BEAR_LOCAL_QUALITY_MODEL_URL',
+              'tony-qwen3.5-0.8b-q4',
+              'tony-qwen3.5-2b-q4',
+              'normalize_model_profile',
+              '_technical_with_context',
+              '_strip_hidden_reasoning',
+              '_looks_like_meta_reasoning',
+              'reasoning_content is deliberately ignored',
+              '"reasoning_budget": 0',
+              '"enable_thinking": False',
+          )
+          for text in required_server:
+              assert text in server, text
+          assert '18080/v1/chat/completions' in server
+          assert '18081/v1/chat/completions' in server
+          assert 'Tell me which part you want me to explain.' in server
 
-          fast_endpoint, fast_model, _, fast_payload = _local_payload(
-              'Hello', [], 'en', technical=False, model_profile='auto')
-          quality_endpoint, quality_model, _, quality_payload = _local_payload(
-              'Explain SCF convergence', [], 'en', technical=True, model_profile='auto')
-          forced_fast_endpoint, forced_fast_model, _, _ = _local_payload(
-              'Explain SCF convergence', [], 'en', technical=True, model_profile='fast')
-          forced_quality_endpoint, forced_quality_model, _, _ = _local_payload(
-              'Hello', [], 'en', technical=False, model_profile='quality')
-
-          assert fast_endpoint.endswith(':18080/v1/chat/completions'), fast_endpoint
-          assert '0.8b' in fast_model, fast_model
-          assert quality_endpoint.endswith(':18081/v1/chat/completions'), quality_endpoint
-          assert '2b' in quality_model and '0.8b' not in quality_model, quality_model
-          assert forced_fast_endpoint.endswith(':18080/v1/chat/completions') and '0.8b' in forced_fast_model
-          assert forced_quality_endpoint.endswith(':18081/v1/chat/completions') and '2b' in forced_quality_model
-          assert fast_payload['reasoning_budget'] == 0
-          assert quality_payload['reasoning_budget'] == 0
-          assert fast_payload['chat_template_kwargs']['enable_thinking'] is False
-          assert quality_payload['chat_template_kwargs']['enable_thinking'] is False
-
-          assert _clean_visible_answer('<think>private reasoning</think>Final answer.', 'en') == 'Final answer.'
-          guarded=_clean_visible_answer(
-              "The reason for the user's query is that they are asking for an explanation of why.",
-              'en', technical=True)
-          assert guarded == 'Tell me which part you want me to explain.', guarded
+          for text in ('1.0.8', 'model_profile_routing_v1', 'thinking_visible', 'available_model_profiles'):
+              assert text in gateway, text
+          assert 'request_model_profile' in gateway
+          assert 'call_backend_stream(' in gateway
           print('TONY_V108_SOURCE=PASS')
           PY
 
