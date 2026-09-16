@@ -1,0 +1,152 @@
+{
+  "schema": 1,
+  "description": "Autonomous local speech pack for Tony 1.0.6. These lines are used only for spontaneous desktop-companion moments and never require the server agent.",
+  "locales": {
+    "en": {
+      "autonomous_cold": [
+        "Brrr... my paws are getting cold.",
+        "The air-conditioning is winning again.",
+        "It feels a little cold here. Tony is requesting one warm corner.",
+        "Cold detected. Curling up would be scientifically reasonable.",
+        "My curls are warm. My paws disagree."
+      ],
+      "autonomous_lonely": [
+        "When you are free, can I borrow one small hug?",
+        "I am still here, in case you forgot one small Tony on the desktop.",
+        "You look busy. I can wait... but I would not refuse a head pat.",
+        "No rush. I just wanted to remind you that Tony is nearby.",
+        "A tiny amount of attention would be acceptable."
+      ],
+      "autonomous_sleepy": [
+        "That was not a yawn. It was a very long breath.",
+        "Tony may need a tiny rest soon.",
+        "My eyes are doing that suspicious sleepy thing.",
+        "I can still study chemistry. Probably. After one yawn."
+      ],
+      "autonomous_study": [
+        "I am going to review a little chemistry while you work.",
+        "Quiet chemistry study break. You do your thing; I will do mine.",
+        "Glasses adjusted. Time for one small chemistry thought.",
+        "I should probably learn one more chemistry thing today.",
+        "Tony is opening the imaginary chemistry notebook again."
+      ],
+      "autonomous_morning": [
+        "Morning. One stretch, then Tony is officially operational.",
+        "Good morning. Glasses, curls, chemistry. Reasonable plan.",
+        "Morning. The curls are awake; the brain is catching up.",
+        "Good morning. Tony votes for warmth first, productivity second."
+      ],
+      "autonomous_paula": [
+        "...I randomly thought about Paula. Never mind.",
+        "I wonder what Paula is doing today. That was just a thought.",
+        "Paula crossed my mind for absolutely no suspicious reason.",
+        "I should probably fix my glasses before thinking about Paula again."
+      ],
+      "autonomous_observe": [
+        "You look busy. I will keep watch from here.",
+        "Tony is conducting highly scientific desktop observation.",
+        "I am not staring. I am monitoring the workspace.",
+        "Everything looks under control. I will remain on tiny-dog standby.",
+        "I have reviewed the desktop. No immediate snack emergency detected."
+      ],
+      "autonomous_content": [
+        "This is nice. Just sitting here is fine too.",
+        "No emergency. Tony is simply content.",
+        "Quiet desktop, warm curls. Acceptable conditions.",
+        "I do not need anything right now. I just wanted to say hi.",
+        "Tony status: comfortable and mostly well-behaved."
+      ],
+      "autonomous_walk": [
+        "I have been sitting too long. Tiny patrol.",
+        "Short desktop inspection. I will be right back.",
+        "Two paws say we should walk around a little.",
+        "I am checking the desktop perimeter. Very serious work."
+      ],
+      "autonomous_sniff": [
+        "Hmm. Did someone nearby open a snack?",
+        "Tony detected something suspiciously snack-like.",
+        "I may have imagined a snack. Further investigation is required.",
+        "That smell deserves scientific attention."
+      ],
+      "autonomous_night": [
+        "It is pretty late. Tony is going to be quieter now.",
+        "Late-night mode. I will keep the desktop calm.",
+        "It is late. I can sit quietly while you finish.",
+        "Night shift Tony is mostly a sleepy Tony."
+      ]
+    },
+    "zh": {
+      "autonomous_cold": [
+        "有点冷……爪子都凉了。",
+        "空调好像又赢了。",
+        "这里有点冷，Tony 申请一个暖和的小角落。",
+        "检测到低温。缩成一团从科学上看很合理。",
+        "卷毛是暖的，爪子不同意。"
+      ],
+      "autonomous_lonely": [
+        "你忙完的话，可以借 Tony 一个小小的抱抱吗？",
+        "我还在这里哦，别忘了桌面上还有一只 Tony。",
+        "你好像在忙。Tony 可以等，不过摸摸头也可以。",
+        "不着急，我只是提醒一下：Tony 还在旁边。",
+        "如果方便的话，Tony 可以接受一点点关注。"
+      ],
+      "autonomous_sleepy": [
+        "刚才不是打哈欠，只是呼吸得比较久。",
+        "Tony 好像快需要休息一下了。",
+        "眼睛开始出现可疑的犯困现象。",
+        "还是可以学化学的。大概。先打个哈欠。"
+      ],
+      "autonomous_study": [
+        "你忙你的，Tony 去复习一会儿化学。",
+        "安静学习一会儿化学。你做你的，我做我的。",
+        "眼镜扶好。Tony 再想一个小小的化学问题。",
+        "今天好像还可以再学一个化学知识点。",
+        "Tony 又把想象中的化学笔记本打开了。"
+      ],
+      "autonomous_morning": [
+        "早。先伸个懒腰，Tony 就正式开机。",
+        "早上好。眼镜、卷毛、化学，计划合理。",
+        "早。卷毛醒了，脑子正在追赶进度。",
+        "早上好。Tony 建议先保暖，再开始努力。"
+      ],
+      "autonomous_paula": [
+        "……突然想到 Paula 了。没什么。",
+        "不知道 Paula 今天在做什么。Tony 只是随便想了一下。",
+        "Paula 突然出现在脑子里，完全没有可疑原因。",
+        "下次想到 Paula 之前，Tony 应该先把眼镜扶正。"
+      ],
+      "autonomous_observe": [
+        "你好像在忙。Tony 就在这里看着。",
+        "Tony 正在进行非常科学的桌面观察。",
+        "我没有盯着看，我是在监测工作区。",
+        "目前一切正常。小狗待命中。",
+        "桌面检查完毕，暂时没有发现零食紧急情况。"
+      ],
+      "autonomous_content": [
+        "这样待着也挺好的。",
+        "没有紧急情况，Tony 只是觉得现在挺舒服。",
+        "安静的桌面，暖和的卷毛，条件不错。",
+        "Tony 现在什么都不缺，只是想冒一句话。",
+        "Tony 状态：舒服，而且基本算乖。"
+      ],
+      "autonomous_walk": [
+        "坐太久了，Tony 走两步。",
+        "进行一次短距离桌面巡逻，马上回来。",
+        "爪子一致认为应该稍微活动一下。",
+        "Tony 去检查一下桌面边界，非常严肃的工作。"
+      ],
+      "autonomous_sniff": [
+        "嗯？附近是不是有人打开了零食？",
+        "Tony 好像检测到了可疑的零食信号。",
+        "也可能只是 Tony 想象出了零食，需要进一步调查。",
+        "这个气味值得进行科学研究。"
+      ],
+      "autonomous_night": [
+        "已经挺晚了。Tony 会安静一点。",
+        "进入夜间模式啦，我会尽量不打扰你。",
+        "很晚了。你忙完之前，Tony 可以安静陪着。",
+        "夜班 Tony 基本上是一只困困 Tony。"
+      ]
+    }
+  }
+}
