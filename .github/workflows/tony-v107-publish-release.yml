@@ -30,17 +30,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: feature/tony-v107-response-quality
           fetch-depth: 0
 
       - name: Verify release provenance
         shell: bash
         run: |
           set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "$VERSION"
           git cat-file -e "$RELEASE_COMMIT^{commit}"
+          git diff --quiet "$RELEASE_COMMIT" HEAD -- bear_agent_pet/client
           VERSION_AT_BUILD="$(git show "$RELEASE_COMMIT:bear_agent_pet/client/VERSION" | tr -d '\r\n ')"
           test "$VERSION_AT_BUILD" = "$VERSION"
-          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "$VERSION"
-          echo "TONY_V107_RELEASE_PROVENANCE=PASS commit=$RELEASE_COMMIT"
+          echo "TONY_V107_RELEASE_PROVENANCE=PASS binary_commit=$RELEASE_COMMIT workflow_head=$(git rev-parse HEAD)"
 
       - name: Download verified Windows artifact
         shell: bash
@@ -77,7 +79,6 @@ jobs:
           )
           cp TonyDesktopPet-windows-x64.zip "TonyDesktopPet-${VERSION}-windows-x64.zip"
           sha256sum "TonyDesktopPet-${VERSION}-windows-x64.zip" > "TonyDesktopPet-${VERSION}-windows-x64.zip.sha256"
-
           SHA256="$(sha256sum TonyDesktopPet-windows-x64.zip | awk '{print $1}')"
           SIZE="$(stat -c '%s' TonyDesktopPet-windows-x64.zip)"
           export SHA256 SIZE
@@ -110,15 +111,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unzip -t TonyDesktopPet-windows-x64.zip >/dev/null
-          unzip -Z1 TonyDesktopPet-windows-x64.zip > archive-files.txt
-          grep -Fxq 'TonyDesktopPet.exe' archive-files.txt
-          grep -Fxq 'VERSION' archive-files.txt
-          grep -Fxq 'VERSION.txt' archive-files.txt
-          grep -Fxq 'tony-install-root.marker' archive-files.txt
-          grep -Fxq 'tony-file-list.txt' archive-files.txt
-          grep -Fxq 'assets/config/tony_responses.json' archive-files.txt
-          grep -Fxq 'assets/config/tony_autonomous_responses.json' archive-files.txt
+          rm -rf verify-package
+          mkdir verify-package
+          unzip -q TonyDesktopPet-windows-x64.zip -d verify-package
+          test -f verify-package/TonyDesktopPet.exe
+          test -f verify-package/VERSION
+          test -f verify-package/VERSION.txt
+          test -f verify-package/tony-install-root.marker
+          test -f verify-package/tony-file-list.txt
+          test -f verify-package/assets/config/tony_responses.json
+          test -f verify-package/assets/config/tony_autonomous_responses.json
+          test "$(tr -d '\r\n ' < verify-package/VERSION)" = "$VERSION"
           echo 'TONY_V107_UPDATE_STRUCTURE=PASS'
 
       - name: Publish versioned Tony v1.0.7 release
@@ -140,7 +143,6 @@ jobs:
           - The live gateway was tested against the real local Qwen companion path and public HTTPS edge before publication.
           - Windows package was compiled, packaged and smoke-tested by GitHub Actions from commit 49af0985c967b5d90823ca491c3a00c3bf2c6cbd.
           EOF
-
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
               "TonyDesktopPet-${VERSION}-windows-x64.zip" \
