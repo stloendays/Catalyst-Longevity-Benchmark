@@ -1,0 +1,356 @@
+name: Roll out Tony v1.0.8 dual-model gateway
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v108-chat-ux-model-router
+    paths:
+      - 'bear_agent_pet/server_gateway/**'
+      - '.github/workflows/tony-v108-server-rollout.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-server-runtime
+  cancel-in-progress: false
+
+jobs:
+  rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony v1.0.8 gateway source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py bear_agent_pet/server_gateway/app/main_v08.py
+          python - <<'PY'
+          from pathlib import Path
+          main=Path('bear_agent_pet/server_gateway/app/main.py').read_text(encoding='utf-8')
+          gateway=Path('bear_agent_pet/server_gateway/app/main_v08.py').read_text(encoding='utf-8')
+          for marker in (
+              'BEAR_LOCAL_FAST_MODEL_URL',
+              'BEAR_LOCAL_QUALITY_MODEL_URL',
+              '18080/v1/chat/completions',
+              '18081/v1/chat/completions',
+              '_strip_hidden_reasoning',
+              '_looks_like_meta_reasoning',
+              'reasoning_content is deliberately ignored',
+          ):
+              assert marker in main, marker
+          for marker in ('version="1.0.8"', 'request_model_profile', 'model_profile_routing_v1'):
+              assert marker in gateway, marker
+          print('TONY_V108_GATEWAY_SOURCE=PASS')
+          PY
+
+      - name: Prepare SSH key
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SERVER_SSH_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$HOME/.ssh/server_key"
+          chmod 600 "$HOME/.ssh/server_key"
+          ssh-keyscan -T 10 -H 150.158.27.206 >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy Tony v1.0.8 gateway source
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'mkdir -p /home/ubuntu/.local/share/bear-agent/app'
+          rsync -az --delete -e "ssh -i $HOME/.ssh/server_key" \
+            bear_agent_pet/server_gateway/ \
+            ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
+
+      - name: Configure parallel 0.8B and 2B inference services
+        shell: bash
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/opt/rhocodec-llm'
+          SERVER="$ROOT/bin/llama-server"
+          FAST_MODEL="$ROOT/models/Qwen3.5-0.8B-Q4_0.gguf"
+          QUALITY_MODEL="$ROOT/models/Qwen3.5-2B-Q4_K_M.gguf"
+          ACTIVE_ENV="$ROOT/active-model.env"
+
+          test -x "$SERVER"
+          test -s "$FAST_MODEL"
+          test -s "$QUALITY_MODEL"
+
+          sudo rm -f /etc/systemd/system/rhocodec-llm.service.d/openclaw.conf
+          sudo tee "$ACTIVE_ENV" >/dev/null <<EOF
+          TONY_MODEL_PATH=$FAST_MODEL
+          TONY_MODEL_ALIAS=tony-qwen3.5-0.8b-q4
+          TONY_CONTEXT=1024
+          TONY_BATCH=128
+          TONY_UBATCH=128
+          EOF
+          sudo chown ubuntu:ubuntu "$ACTIVE_ENV"
+
+          sudo tee /etc/systemd/system/rhocodec-llm.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Tony fast local Qwen model
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/opt/rhocodec-llm/bin
+          Environment=HOME=/home/ubuntu
+          Environment=LD_LIBRARY_PATH=/opt/rhocodec-llm/bin
+          EnvironmentFile=/opt/rhocodec-llm/active-model.env
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m ${TONY_MODEL_PATH} -a ${TONY_MODEL_ALIAS} --host 127.0.0.1 --port 18080 -c ${TONY_CONTEXT} -t 4 -b ${TONY_BATCH} -ub ${TONY_UBATCH} --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          Restart=on-failure
+          RestartSec=3
+          TimeoutStartSec=180
+          LimitNOFILE=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo tee /etc/systemd/system/tony-quality-llm.service >/dev/null <<'UNIT'
+          [Unit]
+          Description=Tony quality 2B local Qwen model
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/opt/rhocodec-llm/bin
+          Environment=HOME=/home/ubuntu
+          Environment=LD_LIBRARY_PATH=/opt/rhocodec-llm/bin
+          ExecStart=/opt/rhocodec-llm/bin/llama-server -m /opt/rhocodec-llm/models/Qwen3.5-2B-Q4_K_M.gguf -a tony-qwen3.5-2b-q4 --host 127.0.0.1 --port 18081 -c 1536 -t 4 -b 64 -ub 64 --parallel 1 --jinja --reasoning-budget 0 --no-webui
+          Restart=on-failure
+          RestartSec=3
+          TimeoutStartSec=240
+          LimitNOFILE=65535
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable rhocodec-llm.service tony-quality-llm.service >/dev/null
+          sudo systemctl restart rhocodec-llm.service
+          sudo systemctl restart tony-quality-llm.service
+
+          wait_model() {
+            port="$1"; expected="$2"; output="$3"
+            ready=0
+            for i in $(seq 1 120); do
+              if curl -fsS --max-time 4 "http://127.0.0.1:${port}/v1/models" >"$output" 2>/dev/null; then
+                if python3 - "$output" "$expected" <<'PY'
+          import json,sys
+          path,expected=sys.argv[1:3]
+          d=json.load(open(path))
+          row=(d.get('data') or [{}])[0]
+          raise SystemExit(0 if row.get('id')==expected else 1)
+          PY
+                then ready=1; break; fi
+              fi
+              sleep 2
+            done
+            test "$ready" -eq 1
+          }
+
+          wait_model 18080 tony-qwen3.5-0.8b-q4 /tmp/tony-fast-model.json
+          wait_model 18081 tony-qwen3.5-2b-q4 /tmp/tony-quality-model.json
+          echo 'TONY_V108_FAST_MODEL=PASS'
+          echo 'TONY_V108_QUALITY_2B_MODEL=PASS'
+          REMOTE
+
+      - name: Configure and restart routed Tony gateway
+        shell: bash
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          ROOT='/home/ubuntu/.local/share/bear-agent'
+          APP="$ROOT/app"
+          VENV="$ROOT/venv"
+          ENVFILE="$ROOT/bear-agent.env"
+
+          if [ ! -x "$VENV/bin/python" ]; then
+            python3 -m venv "$VENV"
+          fi
+          "$VENV/bin/pip" install --disable-pip-version-check -q -r "$APP/requirements.txt"
+
+          set_env() {
+            key="$1"; value="$2"
+            touch "$ENVFILE"
+            chmod 600 "$ENVFILE"
+            if grep -q "^${key}=" "$ENVFILE"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$ENVFILE"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$ENVFILE"
+            fi
+          }
+
+          set_env BEAR_LOCAL_MODEL tony-qwen3.5-0.8b-q4
+          set_env BEAR_LOCAL_FAST_MODEL tony-qwen3.5-0.8b-q4
+          set_env BEAR_LOCAL_FAST_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
+          set_env BEAR_LOCAL_MODEL_URL http://127.0.0.1:18080/v1/chat/completions
+          set_env BEAR_LOCAL_MODEL_TIMEOUT 75
+          set_env BEAR_LOCAL_MAX_TOKENS 72
+          set_env BEAR_LOCAL_QUALITY_MODEL tony-qwen3.5-2b-q4
+          set_env BEAR_LOCAL_QUALITY_MODEL_URL http://127.0.0.1:18081/v1/chat/completions
+          set_env BEAR_LOCAL_QUALITY_MODEL_TIMEOUT 180
+          set_env BEAR_LOCAL_QUALITY_MAX_TOKENS 128
+          set_env BEAR_LOCAL_TECHNICAL_MAX_TOKENS 384
+          set_env BEAR_LOCAL_TECHNICAL_MESSAGE_CHARS 6000
+
+          sudo systemctl restart bear-agent-gateway.service
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 4 http://127.0.0.1:18790/health >/tmp/tony-v108-health.json 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          cat /tmp/tony-v108-health.json
+
+          PYTHONPATH="$APP" "$VENV/bin/python" - <<'PY'
+          from app.main import (
+              SESSION_HISTORY,
+              _clean_visible_answer,
+              _local_payload,
+              _technical_with_context,
+              normalize_model_profile,
+          )
+
+          assert normalize_model_profile('auto') == 'auto'
+          assert normalize_model_profile('0.8b') == 'fast'
+          assert normalize_model_profile('2b') == 'quality'
+
+          fast_url, fast_model, _, fast_payload = _local_payload(
+              'Hello there', [], 'en', technical=False, model_profile='auto')
+          auto_tech_url, auto_tech_model, _, auto_tech_payload = _local_payload(
+              'Explain SCF convergence', [], 'en', technical=True, model_profile='auto')
+          forced_fast_url, forced_fast_model, _, _ = _local_payload(
+              'Explain SCF convergence', [], 'en', technical=True, model_profile='fast')
+          forced_quality_url, forced_quality_model, _, _ = _local_payload(
+              'Hello there', [], 'en', technical=False, model_profile='quality')
+
+          assert fast_url.endswith(':18080/v1/chat/completions') and '0.8b' in fast_model
+          assert auto_tech_url.endswith(':18081/v1/chat/completions') and '2b' in auto_tech_model
+          assert forced_fast_url.endswith(':18080/v1/chat/completions') and '0.8b' in forced_fast_model
+          assert forced_quality_url.endswith(':18081/v1/chat/completions') and '2b' in forced_quality_model
+          assert fast_payload['reasoning_budget'] == 0
+          assert auto_tech_payload['chat_template_kwargs']['enable_thinking'] is False
+
+          history=[
+              {'role':'user','content':'Explain why SCF convergence can oscillate.'},
+              {'role':'assistant','content':'It can oscillate when density updates overshoot.'},
+          ]
+          assert _technical_with_context('Why?', history) is True
+          assert _clean_visible_answer('<think>hidden work</think>Visible.', 'en') == 'Visible.'
+          meta=_clean_visible_answer(
+              "The reason for the user's query is that they are asking for an explanation.",
+              'en', technical=True)
+          assert meta == 'Tell me which part you want me to explain.'
+          print('TONY_V108_LIVE_ROUTER_CONFIG=PASS')
+          PY
+          REMOTE
+
+      - name: Run real fast and 2B generation smoke tests
+        shell: bash
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=60 \
+            -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          APP='/home/ubuntu/.local/share/bear-agent/app'
+          PY='/home/ubuntu/.local/share/bear-agent/venv/bin/python'
+          PYTHONPATH="$APP" "$PY" - <<'PY'
+          import asyncio
+          from app.main import call_backend
+
+          async def main():
+              fast_answer, fast_agent, fast_fallback = await call_backend(
+                  'Reply with one short sentence about rain.',
+                  'v108-fast-smoke',
+                  'en',
+                  'fast',
+              )
+              assert fast_answer.strip(), fast_answer
+              assert fast_fallback is False
+              assert 'fast' in fast_agent and '0.8b' in fast_agent, fast_agent
+              assert '<think' not in fast_answer.casefold(), fast_answer
+
+              quality_answer, quality_agent, quality_fallback = await call_backend(
+                  'Explain in one concise sentence why SCF convergence can oscillate.',
+                  'v108-quality-smoke',
+                  'en',
+                  'quality',
+              )
+              assert quality_answer.strip(), quality_answer
+              assert quality_fallback is False
+              assert 'quality' in quality_agent and '2b' in quality_agent, quality_agent
+              low=quality_answer.casefold()
+              assert '<think' not in low, quality_answer
+              assert "the reason for the user's query" not in low, quality_answer
+              assert 'since the user has not specified' not in low, quality_answer
+
+              auto_answer, auto_agent, _ = await call_backend(
+                  'Explain in one concise sentence what Bader charge analysis measures.',
+                  'v108-auto-tech-smoke',
+                  'en',
+                  'auto',
+              )
+              assert auto_answer.strip(), auto_answer
+              assert 'quality' in auto_agent and '2b' in auto_agent, auto_agent
+
+              print('TONY_V108_FAST_GENERATION=PASS')
+              print('fast_agent=' + fast_agent)
+              print('fast_answer=' + fast_answer.replace('\n',' ')[:300])
+              print('TONY_V108_QUALITY_2B_GENERATION=PASS')
+              print('quality_agent=' + quality_agent)
+              print('quality_answer=' + quality_answer.replace('\n',' ')[:500])
+              print('TONY_V108_AUTO_TECH_2B=PASS')
+              print('auto_agent=' + auto_agent)
+
+          asyncio.run(main())
+          PY
+
+          systemctl is-active --quiet rhocodec-llm.service
+          systemctl is-active --quiet tony-quality-llm.service
+          systemctl is-active --quiet bear-agent-gateway.service
+          echo 'TONY_V108_SERVICES_ACTIVE=PASS'
+          REMOTE
+
+      - name: Probe public HTTPS edge
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 15 https://150.158.27.206/health > /tmp/public-health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/public-health.json'))
+          assert d['ok'] is True, d
+          assert d['version'] == '1.0.8', d
+          assert d['backend'] == 'local-qwen-routed-chat', d
+          assert d['model_router'] == 'per-request', d
+          assert d['available_model_profiles'] == ['auto','fast','quality'], d
+          assert d['thinking_visible'] is False, d
+          assert '0.8b' in d['local_model'], d
+          assert '2b' in d['quality_model'], d
+          print('TONY_V108_PUBLIC_EDGE=PASS')
+          PY
+
+      - name: Remove SSH key
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/server_key"
