@@ -77,6 +77,11 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("TonyAgent");
     QCoreApplication::setApplicationName("Tony Desktop Pet");
     QCoreApplication::setApplicationVersion(QStringLiteral(TONY_APP_VERSION));
+
+    // Tony's character voice is English-only. Pin the shared runtime language
+    // before PetWindow, the local router, autonomous speech and Agent initialize.
+    QSettings().setValue(QStringLiteral("ui/language"), QStringLiteral("en"));
+
     const QIcon appIcon(QCoreApplication::applicationDirPath()+QStringLiteral("/assets/tony-app.ico"));
     if(!appIcon.isNull()) app.setWindowIcon(appIcon);
     app.setQuitOnLastWindowClosed(false);
