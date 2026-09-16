@@ -1,0 +1,160 @@
+name: Build Tony v1.0.9 full-canvas render
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v109-full-canvas-render
+    paths:
+      - 'bear_agent_pet/client/**'
+      - '.github/workflows/tony-v109-full-canvas-render.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v109-full-canvas-render-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony v1.0.9 full-canvas source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.9"
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          python - <<'PY'
+          from pathlib import Path
+
+          root=Path('bear_agent_pet/client')
+          cmake=(root/'CMakeLists.txt').read_text(encoding='utf-8')
+          header=(root/'src/PetWindow.h').read_text(encoding='utf-8')
+          wrapper=(root/'src/PetWindowLegacy.cpp').read_text(encoding='utf-8')
+          renderer=(root/'src/PetWindowFullCanvas.cpp').read_text(encoding='utf-8')
+          legacy=(root/'src/PetWindowV7.cpp').read_text(encoding='utf-8')
+
+          assert 'src/PetWindowLegacy.cpp' in cmake
+          assert 'src/PetWindowFullCanvas.cpp' in cmake
+          assert not any(line.strip() == 'src/PetWindowV7.cpp' for line in cmake.splitlines())
+          assert 'void legacyPaintEvent(QPaintEvent*);' in header
+          assert '#define paintEvent legacyPaintEvent' in wrapper
+          assert '#include "PetWindowV7.cpp"' in wrapper
+
+          assert 'constexpr int kTonyCanvasWidth = 320;' in renderer
+          assert 'constexpr int kTonyCanvasHeight = 250;' in renderer
+          assert 'kTonyGroundY = 205.0' in renderer
+          assert 'kTonyShadowY = 196.0' in renderer
+          assert 'nativeFit' in renderer
+          assert 'boundaryFit' in renderer
+          assert 'QRectF(0,0,sprite->width(),sprite->height())' in renderer
+          assert 'maxVisibleW' not in renderer
+          assert 'maxVisibleH' not in renderer
+          assert 'maxMotionScale' not in renderer
+          assert 'bottomSafety=34.0' not in renderer.replace(' ', '')
+          assert 'drawRoundedRect(namePlate' not in renderer
+
+          # Guard against silently reintroducing the v1.0.8 artistic fit box.
+          assert 'const qreal maxVisibleW=252.0;' in legacy
+          assert 'const qreal maxVisibleH=192.0;' in legacy
+          print('TONY_V109_FULL_CANVAS_SOURCE=PASS')
+          PY
+
+  build-windows:
+    needs: validate-source
+    runs-on: windows-2022
+    timeout-minutes: 32
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Tony v1.0.9 source
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.9') { throw "Expected 1.0.9, got $version" }
+          foreach ($path in @(
+            'bear_agent_pet/client/src/PetWindowLegacy.cpp',
+            'bear_agent_pet/client/src/PetWindowFullCanvas.cpp',
+            'bear_agent_pet/client/src/PetWindow.h',
+            'bear_agent_pet/client/src/PetWindowV7.cpp'
+          )) {
+            if (-not (Test-Path $path)) { throw "Missing 1.0.9 full-canvas source: $path" }
+          }
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v109"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.9`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+
+          $root=(Resolve-Path $package).Path
+          $managed=Get-ChildItem $package -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+
+          foreach ($required in @(
+            'TonyDesktopPet.exe',
+            'VERSION',
+            'VERSION.txt',
+            'tony-install-root.marker',
+            'tony-file-list.txt',
+            'assets/config/tony_responses.json',
+            'assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+          if ((Get-Content "$package/VERSION" -Raw).Trim() -ne '1.0.9') { throw 'Packaged VERSION mismatch' }
+
+      - name: Smoke full-canvas poses
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v109"
+          foreach ($pose in @('idle','hug','study','spin','remove_glasses')) {
+            $env:TONY_VISUAL_ACTION=$pose
+            $process=Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+            try {
+              Start-Sleep -Seconds 3
+              if ($process.HasExited) { throw "Tony exited in full-canvas pose '$pose': $($process.ExitCode)" }
+              Write-Host "TONY_V109_POSE_${pose}=PASS"
+            } finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            }
+          }
+          Remove-Item Env:TONY_VISUAL_ACTION -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.9-windows-x64-full-canvas
+          path: bear_agent_pet/client/package-v109
+          if-no-files-found: error
