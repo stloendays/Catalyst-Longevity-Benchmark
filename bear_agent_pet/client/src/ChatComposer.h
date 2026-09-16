@@ -3,6 +3,7 @@
 #include <QPoint>
 #include <QWidget>
 
+class QComboBox;
 class QKeyEvent;
 class QLabel;
 class QLineEdit;
@@ -27,9 +28,11 @@ protected:
 private:
     void submitCurrent();
     void placeNear(const QPoint &anchorGlobal);
+    void refreshModelLabels();
 
     QLabel *title_{nullptr};
     QLabel *hint_{nullptr};
+    QComboBox *modelBox_{nullptr};
     QLineEdit *edit_{nullptr};
     QPushButton *send_{nullptr};
     QPoint anchorGlobal_;
