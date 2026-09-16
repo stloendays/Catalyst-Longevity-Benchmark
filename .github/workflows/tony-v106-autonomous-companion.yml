@@ -1,0 +1,136 @@
+name: Build Tony v1.0.6 autonomous companion
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v106-autonomous-companion
+    paths:
+      - 'bear_agent_pet/client/**'
+      - '.github/workflows/tony-v106-autonomous-companion.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v106-autonomous-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony v1.0.6 autonomous source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.6"
+          python -m json.tool bear_agent_pet/client/assets/config/tony_responses.json >/dev/null
+          python -m json.tool bear_agent_pet/client/assets/config/tony_autonomous_responses.json >/dev/null
+          python - <<'PY'
+          import json
+          p='bear_agent_pet/client/assets/config/tony_autonomous_responses.json'
+          with open(p,encoding='utf-8') as f:
+              d=json.load(f)
+          assert d['schema'] == 1
+          assert set(d['locales']) == {'en','zh'}
+          required={
+              'autonomous_cold','autonomous_lonely','autonomous_sleepy','autonomous_study',
+              'autonomous_morning','autonomous_paula','autonomous_observe','autonomous_content',
+              'autonomous_walk','autonomous_sniff','autonomous_night'
+          }
+          for locale in ('en','zh'):
+              rows=d['locales'][locale]
+              assert required <= set(rows), (locale, required-set(rows))
+              for key in required:
+                  assert len(rows[key]) >= 2, (locale,key)
+          print('TONY_V106_AUTONOMOUS_PACK=PASS')
+          PY
+          grep -q 'src/TonyAutonomousCompanion.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'src/PetWindowAutonomy.cpp' bear_agent_pet/client/CMakeLists.txt
+          grep -q 'TonyAutonomousCompanion autonomy' bear_agent_pet/client/src/main.cpp
+          grep -q 'pet/autonomy_mode' bear_agent_pet/client/src/TonyAutonomousCompanion.cpp
+          grep -q 'autonomousSurfaceAvailable' bear_agent_pet/client/src/PetWindowAutonomy.cpp
+          grep -q 'autonomous_response_pack_path' bear_agent_pet/client/src/TonyResponsePack.cpp
+          grep -q 'QStringLiteral("quiet")' bear_agent_pet/client/src/main.cpp
+          grep -q 'QStringLiteral("normal")' bear_agent_pet/client/src/main.cpp
+          grep -q 'QStringLiteral("lively")' bear_agent_pet/client/src/main.cpp
+          echo 'TONY_V106_SOURCE=PASS'
+
+  build-windows:
+    needs: validate-source
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Tony v1.0.6 source
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.6') { throw "Expected 1.0.6, got $version" }
+          foreach ($path in @(
+            'bear_agent_pet/client/src/TonyAutonomousCompanion.cpp',
+            'bear_agent_pet/client/src/TonyAutonomousCompanion.h',
+            'bear_agent_pet/client/src/PetWindowAutonomy.cpp',
+            'bear_agent_pet/client/assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path $path)) { throw "Missing 1.0.6 source: $path" }
+          }
+          python -c "import json; d=json.load(open(r'bear_agent_pet/client/assets/config/tony_autonomous_responses.json',encoding='utf-8')); assert 'autonomous_lonely' in d['locales']['en']; assert 'autonomous_night' in d['locales']['zh']; print('TONY_V106_PACK_JSON=PASS')"
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v106"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.6`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+          if (-not (Test-Path "$package/assets/config/tony_responses.json")) { throw 'Primary response pack missing' }
+          if (-not (Test-Path "$package/assets/config/tony_autonomous_responses.json")) { throw 'Autonomous response pack missing' }
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v106"
+          $env:TONY_VISUAL_ACTION='head_tilt'
+          $process=Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 6
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V106_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.6-windows-x64-autonomous-companion
+          path: bear_agent_pet/client/package-v106
+          if-no-files-found: error
