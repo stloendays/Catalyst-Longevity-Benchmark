@@ -38,8 +38,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "$VERSION"
-          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
-          echo 'TONY_V106_RELEASE_SOURCE=PASS'
+          git cat-file -e "$RELEASE_COMMIT^{commit}"
+          git diff --quiet "$RELEASE_COMMIT" HEAD -- bear_agent_pet/client
+          echo "TONY_V106_RELEASE_SOURCE=PASS binary_commit=$RELEASE_COMMIT workflow_head=$(git rev-parse HEAD)"
 
       - name: Download verified Windows artifact
         shell: bash
@@ -56,10 +57,20 @@ jobs:
           test -f package/TonyDesktopPet.exe
           test -f package/VERSION
           test -f package/tony-install-root.marker
-          test -f package/tony-file-list.txt
           test -f package/assets/config/tony_responses.json
           test -f package/assets/config/tony_autonomous_responses.json
           test "$(tr -d '\r\n ' < package/VERSION)" = "$VERSION"
+
+          # v1.0.6's validated build artifact predates the updater's managed-file
+          # list generation. Add only this deterministic metadata before release;
+          # the smoke-tested executable and runtime bytes remain untouched.
+          (
+            cd package
+            find . -type f -printf '%P\n' | sort -u > tony-file-list.txt
+            grep -qx 'TonyDesktopPet.exe' tony-file-list.txt
+            grep -qx 'tony-install-root.marker' tony-file-list.txt
+            grep -qx 'assets/config/tony_autonomous_responses.json' tony-file-list.txt
+          )
           echo 'TONY_V106_RELEASE_ARTIFACT=PASS'
 
       - name: Build versioned and updater packages
@@ -103,6 +114,21 @@ jobs:
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
           echo "size=$SIZE" >> "$GITHUB_OUTPUT"
 
+      - name: Validate updater package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf verify-package
+          mkdir verify-package
+          unzip -q TonyDesktopPet-windows-x64.zip -d verify-package
+          test -f verify-package/TonyDesktopPet.exe
+          test -f verify-package/VERSION
+          test -f verify-package/tony-install-root.marker
+          test -f verify-package/tony-file-list.txt
+          test -f verify-package/assets/config/tony_autonomous_responses.json
+          test "$(tr -d '\r\n ' < verify-package/VERSION)" = "$VERSION"
+          echo 'TONY_V106_UPDATER_STRUCTURE=PASS'
+
       - name: Publish versioned Tony v1.0.6 release
         shell: bash
         env:
@@ -119,7 +145,7 @@ jobs:
           - Adds autonomous reactions for warmth, loneliness, energy, curiosity, chemistry study, desktop observation, and rare Paula moments.
           - Tony's actual replies are English-only, including local replies, autonomous speech, and Agent/server responses.
           - Preserves the v1.0.5 local response-pack and explicit-memory pipeline.
-          - Windows package was built and smoke-tested by GitHub Actions from commit e34f4caa97d6c321dd88dd61162f972bccb8f310.
+          - Windows executable was built and smoke-tested by GitHub Actions from commit e34f4caa97d6c321dd88dd61162f972bccb8f310.
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
