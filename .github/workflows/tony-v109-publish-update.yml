@@ -1,0 +1,161 @@
+name: Publish Tony v1.0.9 update channel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v109-full-canvas-render
+    paths:
+      - '.github/workflows/tony-v109-publish-update.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: tony-v109-publish-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: '35095164483'
+      SOURCE_ARTIFACT: TonyDesktopPet-1.0.9-windows-x64-full-canvas
+      VERSION: '1.0.9'
+      UPDATE_TAG: tony-desktop-latest
+      BUILD_COMMIT: 8fa702abedc9ab0165d9a9017edcf228aacb24de
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tony-v109-full-canvas-render
+          fetch-depth: 0
+
+      - name: Verify release provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "$VERSION"
+          git cat-file -e "$BUILD_COMMIT^{commit}"
+          git diff --quiet "$BUILD_COMMIT" HEAD -- bear_agent_pet/client
+          test "$(git show "$BUILD_COMMIT:bear_agent_pet/client/VERSION" | tr -d '\r\n ')" = "$VERSION"
+          echo "TONY_V109_RELEASE_PROVENANCE=PASS binary_commit=$BUILD_COMMIT"
+
+      - name: Download verified Windows artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf package
+          mkdir -p package
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$SOURCE_ARTIFACT" \
+            --dir package
+          for required in \
+            TonyDesktopPet.exe VERSION VERSION.txt tony-install-root.marker tony-file-list.txt \
+            assets/config/tony_responses.json assets/config/tony_autonomous_responses.json; do
+            test -f "package/$required"
+          done
+          test "$(tr -d '\r\n ' < package/VERSION)" = "$VERSION"
+          grep -q "commit=$BUILD_COMMIT" package/VERSION.txt
+          echo 'TONY_V109_RELEASE_ARTIFACT=PASS'
+
+      - name: Build updater archives and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f TonyDesktopPet-windows-x64.zip "TonyDesktopPet-${VERSION}-windows-x64.zip" "TonyDesktopPet-${VERSION}-windows-x64.zip.sha256" latest.json
+          (
+            cd package
+            zip -q -r ../TonyDesktopPet-windows-x64.zip .
+          )
+          cp TonyDesktopPet-windows-x64.zip "TonyDesktopPet-${VERSION}-windows-x64.zip"
+          sha256sum "TonyDesktopPet-${VERSION}-windows-x64.zip" > "TonyDesktopPet-${VERSION}-windows-x64.zip.sha256"
+          SHA256="$(sha256sum TonyDesktopPet-windows-x64.zip | awk '{print $1}')"
+          SIZE="$(stat -c '%s' TonyDesktopPet-windows-x64.zip)"
+          export SHA256 SIZE
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          repo=os.environ['GITHUB_REPOSITORY']
+          version=os.environ['VERSION']
+          manifest={
+              'schema': 1,
+              'product': 'Tony Desktop Pet',
+              'platform': 'windows-x64',
+              'version': version,
+              'url': f'https://github.com/{repo}/releases/download/tony-desktop-latest/TonyDesktopPet-windows-x64.zip?version={version}',
+              'sha256': os.environ['SHA256'],
+              'size': int(os.environ['SIZE']),
+              'published_at': datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+              'commit': os.environ['BUILD_COMMIT'],
+              'minimum_updater_version': '0.9.0',
+          }
+          with open('latest.json','w',encoding='utf-8',newline='\n') as f:
+              json.dump(manifest,f,indent=2)
+              f.write('\n')
+          print('TONY_V109_MANIFEST=PASS',manifest['version'],manifest['sha256'],manifest['size'])
+          PY
+
+      - name: Validate updater package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf verify-package
+          mkdir verify-package
+          unzip -q TonyDesktopPet-windows-x64.zip -d verify-package
+          for required in \
+            TonyDesktopPet.exe VERSION VERSION.txt tony-install-root.marker tony-file-list.txt \
+            assets/config/tony_responses.json assets/config/tony_autonomous_responses.json; do
+            test -f "verify-package/$required"
+          done
+          test "$(tr -d '\r\n ' < verify-package/VERSION)" = "$VERSION"
+          echo 'TONY_V109_UPDATE_STRUCTURE=PASS'
+
+      - name: Publish to existing Tony automatic update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$UPDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$UPDATE_TAG" \
+            TonyDesktopPet-windows-x64.zip \
+            latest.json \
+            "TonyDesktopPet-${VERSION}-windows-x64.zip" \
+            "TonyDesktopPet-${VERSION}-windows-x64.zip.sha256" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          echo 'TONY_V109_UPDATE_CHANNEL_PUBLISH=PASS'
+
+      - name: Verify public updater bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$UPDATE_TAG"
+          curl -fL --retry 5 --retry-delay 2 "$BASE/latest.json?verify=$GITHUB_RUN_ID" -o published-latest.json
+          curl -fL --retry 5 --retry-delay 2 "$BASE/TonyDesktopPet-windows-x64.zip?verify=$GITHUB_RUN_ID" -o published-package.zip
+          curl -fL --retry 5 --retry-delay 2 "$BASE/TonyDesktopPet-${VERSION}-windows-x64.zip?verify=$GITHUB_RUN_ID" -o published-versioned.zip
+          python - <<'PY'
+          import hashlib, json, os
+          with open('published-latest.json',encoding='utf-8-sig') as f:
+              m=json.load(f)
+          assert m['schema']==1, m
+          assert m['version']==os.environ['VERSION'], m
+          assert m['platform']=='windows-x64', m
+          assert m['commit']==os.environ['BUILD_COMMIT'], m
+          def digest(path):
+              h=hashlib.sha256()
+              with open(path,'rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024),b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          updater=digest('published-package.zip')
+          versioned=digest('published-versioned.zip')
+          assert updater==m['sha256'], (updater,m['sha256'])
+          assert versioned==updater, (versioned,updater)
+          assert os.path.getsize('published-package.zip')==m['size']
+          print('TONY_V109_PUBLIC_UPDATE_VERIFY=PASS',m['version'],updater,m['size'])
+          PY
