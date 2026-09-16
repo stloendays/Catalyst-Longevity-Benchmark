@@ -40,7 +40,8 @@ jobs:
           assert 'MAX_HISTORY_CHARS = 300' in server
           assert 'BEAR_LOCAL_MAX_TOKENS", "72"' in server
           assert '32), 96)' in server
-          assert 'do not reintroduce your name or character background' in server
+          assert "Unless the user's message directly asks about identity" in server
+          assert "Answer only the user's current question in first person" in server
           assert 'Speak naturally in first person' in server
           assert '"stream": True' in server
 
