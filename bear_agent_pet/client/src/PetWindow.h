@@ -25,6 +25,17 @@ public:
     explicit PetWindow(QWidget *parent=nullptr);
     ~PetWindow() override;
 
+    TonyBehaviorEngine::Snapshot autonomySnapshot() const;
+    qint64 autonomyInactivityMs() const;
+    bool autonomousSurfaceAvailable() const;
+    void performAutonomousMoment(const QString &action,
+                                 const QString &emotion,
+                                 int durationMs,
+                                 const QString &text,
+                                 int bubbleMs=4600);
+    void showAutonomyNotice(const QString &text);
+    QSystemTrayIcon *trayIcon();
+
 public slots:
     void configureConnection();
     void applyUiLanguage(const QString &language);
