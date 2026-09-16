@@ -40,7 +40,7 @@ SpeechBubble::SpeechBubble(QWidget *parent): QWidget(parent) {
 }
 
 void SpeechBubble::showMessage(const QString &text, const QPoint &anchorGlobal, const QString &tone, int timeoutMs) {
-    text_=text.left(900);
+    text_=text.left(1800);
     tone_=tone;
     anchorGlobal_=anchorGlobal;
     updateGeometryForText();
@@ -66,11 +66,11 @@ void SpeechBubble::updateGeometryForText() {
     font.setFamily("Microsoft YaHei UI");
     font.setPointSize(10);
     QFontMetrics fm(font);
-    const int maxTextWidth=340;
-    QRect r=fm.boundingRect(QRect(0,0,maxTextWidth,1000),Qt::TextWordWrap|Qt::AlignLeft|Qt::AlignTop,text_);
-    const int w=qBound(150,r.width()+34,374);
-    const int h=qBound(54,r.height()+34,230);
-    resize(w,h+12);
+    const int maxTextWidth=500;
+    QRect r=fm.boundingRect(QRect(0,0,maxTextWidth,1600),Qt::TextWordWrap|Qt::AlignLeft|Qt::AlignTop,text_);
+    const int w=qBound(220,r.width()+44,548);
+    const int h=qBound(70,r.height()+42,390);
+    resize(w,h+14);
 }
 
 void SpeechBubble::placeNear(const QPoint &anchorGlobal) {
@@ -103,16 +103,16 @@ void SpeechBubble::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing,true);
 
-    const QRectF body(2,2,width()-4,height()-16);
+    const QRectF body(2,2,width()-4,height()-18);
     p.setPen(QPen(bubbleStroke(tone_),1.4));
     p.setBrush(bubbleFill(tone_));
-    p.drawRoundedRect(body,14,14);
+    p.drawRoundedRect(body,16,16);
 
     const qreal cx=width()/2.0;
     QPainterPath tail;
-    tail.moveTo(cx-9,height()-15);
+    tail.moveTo(cx-10,height()-17);
     tail.lineTo(cx,height()-3);
-    tail.lineTo(cx+9,height()-15);
+    tail.lineTo(cx+10,height()-17);
     tail.closeSubpath();
     p.setPen(Qt::NoPen);
     p.setBrush(bubbleFill(tone_));
@@ -123,5 +123,5 @@ void SpeechBubble::paintEvent(QPaintEvent*) {
     font.setFamily("Microsoft YaHei UI");
     font.setPointSize(10);
     p.setFont(font);
-    p.drawText(QRect(18,14,width()-36,height()-34),Qt::TextWordWrap|Qt::AlignLeft|Qt::AlignTop,text_);
+    p.drawText(QRect(22,16,width()-44,height()-40),Qt::TextWordWrap|Qt::AlignLeft|Qt::AlignTop,text_);
 }
