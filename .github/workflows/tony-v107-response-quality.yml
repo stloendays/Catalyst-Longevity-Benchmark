@@ -1,0 +1,150 @@
+name: Build Tony v1.0.7 response quality
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v107-response-quality
+    paths:
+      - 'bear_agent_pet/client/**'
+      - 'bear_agent_pet/server_gateway/app/main.py'
+      - '.github/workflows/tony-v107-response-quality.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tony-v107-response-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony v1.0.7 response-quality source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < bear_agent_pet/client/VERSION)" = "1.0.7"
+          python -m py_compile bear_agent_pet/server_gateway/app/main.py
+          python -m json.tool bear_agent_pet/client/assets/config/tony_autonomous_responses.json >/dev/null
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          server=Path('bear_agent_pet/server_gateway/app/main.py').read_text(encoding='utf-8')
+          assert 'MAX_HISTORY_MESSAGES = 6' in server
+          assert 'MAX_HISTORY_CHARS = 300' in server
+          assert 'BEAR_LOCAL_MAX_TOKENS", "72"' in server
+          assert '32), 96)' in server
+          assert 'do not reintroduce your name or character background' in server
+          assert 'Speak naturally in first person' in server
+          assert '"stream": True' in server
+
+          pack=json.loads(Path('bear_agent_pet/client/assets/config/tony_autonomous_responses.json').read_text(encoding='utf-8'))
+          english=pack['locales']['en']
+          for intent, lines in english.items():
+              assert lines, intent
+              for line in lines:
+                  assert 'Tony' not in line, (intent, line)
+
+          header=Path('bear_agent_pet/client/src/AgentClient.h').read_text(encoding='utf-8')
+          source=Path('bear_agent_pet/client/src/AgentClient.cpp').read_text(encoding='utf-8')
+          assert 'QString currentStreamText_;' in header
+          assert 'currentStreamText_ += piece;' in source
+          assert 'finalContent.startsWith(currentStreamText_)' in source
+          assert 'missingTail' in source
+          print('TONY_V107_RESPONSE_SOURCE=PASS')
+          PY
+
+  build-windows:
+    needs: validate-source
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Tony v1.0.7 source
+        shell: pwsh
+        run: |
+          $version=(Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.0.7') { throw "Expected 1.0.7, got $version" }
+          foreach ($path in @(
+            'bear_agent_pet/client/src/AgentClient.cpp',
+            'bear_agent_pet/client/src/AgentClient.h',
+            'bear_agent_pet/client/assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path $path)) { throw "Missing 1.0.7 source: $path" }
+          }
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate Tony artwork
+        shell: pwsh
+        run: python bear_agent_pet/client/tools/validate_state_assets.py
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Package Qt runtime
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v107"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw 'CMake install failed' }
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet 1.0.7`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+
+          $root=(Resolve-Path $package).Path
+          $managed=Get-ChildItem $package -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+
+          foreach ($required in @(
+            'TonyDesktopPet.exe',
+            'VERSION',
+            'VERSION.txt',
+            'tony-install-root.marker',
+            'tony-file-list.txt',
+            'assets/config/tony_responses.json',
+            'assets/config/tony_autonomous_responses.json'
+          )) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+          if ((Get-Content "$package/VERSION" -Raw).Trim() -ne '1.0.7') { throw 'Packaged VERSION mismatch' }
+
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          $package="$PWD/bear_agent_pet/client/package-v107"
+          $process=Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+          try {
+            Start-Sleep -Seconds 7
+            if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+            Write-Host 'TONY_V107_WINDOWS_SMOKE=PASS'
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.0.7-windows-x64-response-quality
+          path: bear_agent_pet/client/package-v107
+          if-no-files-found: error
