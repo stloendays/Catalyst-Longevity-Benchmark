@@ -42,6 +42,9 @@ public slots:
     void syncOperatorLogsForUpdate(const QString &targetVersion);
 protected:
     void paintEvent(QPaintEvent*) override;
+    // Tony 1.0.9 keeps the pre-1.0.9 painter callable for regression diagnosis,
+    // while the live QWidget override is implemented by the full-canvas renderer.
+    void legacyPaintEvent(QPaintEvent*);
     void mousePressEvent(QMouseEvent*) override;
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
