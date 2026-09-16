@@ -1,15 +1,19 @@
+#include <QActionGroup>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QEvent>
 #include <QIcon>
 #include <QKeySequence>
+#include <QMenu>
 #include <QMouseEvent>
+#include <QSettings>
 #include <QShortcut>
 #include <QTimer>
 
 #include "AppLogger.h"
 #include "PetWindow.h"
 #include "SettingsDialog.h"
+#include "TonyAutonomousCompanion.h"
 #include "UpdateManager.h"
 
 #ifndef TONY_APP_VERSION
@@ -85,6 +89,8 @@ int main(int argc, char *argv[]) {
     pet.installEventFilter(&activityFilter);
     pet.show();
 
+    TonyAutonomousCompanion autonomy(&pet,&app);
+
     UpdateManager updater(&app);
     SettingsDialog settingsDialog(&updater, &pet);
     settingsDialog.setModal(false);
@@ -111,6 +117,38 @@ int main(int argc, char *argv[]) {
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
+
+    const bool zhUi=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString()
+                        .startsWith(QStringLiteral("zh"),Qt::CaseInsensitive);
+    auto *trayMenu=new QMenu(&pet);
+    auto *openSettings=trayMenu->addAction(zhUi ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
+    QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
+
+    auto *autonomyMenu=trayMenu->addMenu(zhUi ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
+    auto *autonomyGroup=new QActionGroup(autonomyMenu);
+    autonomyGroup->setExclusive(true);
+    const QString activeMode=autonomy.mode();
+    const auto addAutonomyAction=[&](const QString &mode,const QString &en,const QString &zh){
+        auto *action=autonomyMenu->addAction(zhUi ? zh : en);
+        action->setCheckable(true);
+        action->setData(mode);
+        action->setChecked(activeMode==mode);
+        autonomyGroup->addAction(action);
+        QObject::connect(action,&QAction::triggered,&app,[&autonomy,mode](bool checked){
+            if(!checked) return;
+            autonomy.setMode(mode);
+            autonomy.announceMode();
+        });
+    };
+    addAutonomyAction(QStringLiteral("off"),QStringLiteral("Off"),QStringLiteral("关闭"));
+    addAutonomyAction(QStringLiteral("quiet"),QStringLiteral("Quiet"),QStringLiteral("安静"));
+    addAutonomyAction(QStringLiteral("normal"),QStringLiteral("Normal"),QStringLiteral("正常"));
+    addAutonomyAction(QStringLiteral("lively"),QStringLiteral("Lively"),QStringLiteral("活泼"));
+
+    trayMenu->addSeparator();
+    auto *quitAction=trayMenu->addAction(zhUi ? QStringLiteral("退出 Tony") : QStringLiteral("Quit Tony"));
+    QObject::connect(quitAction,&QAction::triggered,&app,&QApplication::quit);
+    pet.trayIcon()->setContextMenu(trayMenu);
 
     updater.scheduleStartupCheck();
 
