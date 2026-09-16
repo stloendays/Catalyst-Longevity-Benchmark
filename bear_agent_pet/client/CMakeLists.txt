@@ -14,7 +14,10 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets WebSockets Network)
 
 qt_add_executable(TonyDesktopPet WIN32
     src/main.cpp
-    src/PetWindowV7.cpp
+    # PetWindowLegacy.cpp text-includes PetWindowV7.cpp after renaming only its
+    # historical paintEvent. Do not compile PetWindowV7.cpp separately.
+    src/PetWindowLegacy.cpp
+    src/PetWindowFullCanvas.cpp
     src/PetWindowSettings.cpp
     src/PetWindowAutonomy.cpp
     src/PetWindow.h
