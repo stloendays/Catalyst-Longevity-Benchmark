@@ -202,8 +202,6 @@ void AgentClient::requestDevicePairing(const QUrl &wsUrl, const QString &deviceN
         emit pairingCodeReady(code,pairingExpiresAt_);
         reply->deleteLater();
 
-        // Check once almost immediately, then each completed pending response
-        // re-arms the single-shot timer below.
         QTimer::singleShot(250, this, [this]{
             if(!pairingRequestId_.isEmpty() && !pairingPollInFlight_)
                 pollDevicePairing();
@@ -257,7 +255,6 @@ void AgentClient::pollDevicePairing() {
             return;
         }
         if(reply->error()!=QNetworkReply::NoError || httpStatus<200 || httpStatus>=300) {
-            // Retry only after the previous HTTPS request has completed.
             reply->deleteLater();
             if(!pairingRequestId_.isEmpty()) pairingPollTimer_.start();
             return;
@@ -384,6 +381,7 @@ void AgentClient::sendMessage(const QString &text) {
         }
         return;
     }
+    currentStreamText_.clear();
     QJsonObject o{
         {"type","message"},
         {"id",QUuid::createUuid().toString(QUuid::WithoutBraces)},
@@ -444,7 +442,11 @@ void AgentClient::onText(const QString &message) {
             o.value("emotion").toString("neutral"),
             o.value("duration_ms").toInt(0));
     } else if(type=="text_delta") {
-        emit textDelta(o.value("content").toString());
+        const QString piece=o.value("content").toString();
+        if(!piece.isEmpty()) {
+            currentStreamText_ += piece;
+            emit textDelta(piece);
+        }
     } else if(type=="tool_request") {
         const QString requestId=o.value("request_id").toString();
         const QString tool=o.value("tool").toString();
@@ -463,9 +465,23 @@ void AgentClient::onText(const QString &message) {
         qWarning().noquote() << "Operator log batch rejected by server:"
                              << o.value("message").toString();
     } else if(type=="final" || type=="answer_done") {
+        const QString finalContent=o.value("content").toString();
+        if(!finalContent.isEmpty()) {
+            if(currentStreamText_.isEmpty()) {
+                currentStreamText_=finalContent;
+                emit textDelta(finalContent);
+            } else if(finalContent.startsWith(currentStreamText_)) {
+                const QString missingTail=finalContent.mid(currentStreamText_.size());
+                if(!missingTail.isEmpty()) emit textDelta(missingTail);
+                currentStreamText_=finalContent;
+            } else if(finalContent!=currentStreamText_) {
+                qWarning().noquote() << "Tony streamed/final answer mismatch"
+                                     << "stream_chars=" << currentStreamText_.size()
+                                     << "final_chars=" << finalContent.size();
+            }
+        }
         emit answerFinished();
     } else if(type=="error") {
         emit errorMessage(o.value("message").toString());
     }
 }
-
