@@ -2,6 +2,7 @@
 
 #include "AppLogger.h"
 
+#include <QComboBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonObject>
@@ -10,7 +11,16 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScreen>
+#include <QSettings>
 #include <QVBoxLayout>
+
+namespace {
+QString normalizedModelProfile(const QString &value) {
+    const QString profile=value.trimmed().toLower();
+    if(profile==QStringLiteral("fast") || profile==QStringLiteral("quality")) return profile;
+    return QStringLiteral("auto");
+}
+}
 
 ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
     setWindowTitle("Tony");
@@ -18,12 +28,25 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
     setWindowFlags(Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_StyledBackground,true);
-    setFixedWidth(360);
+    setFixedWidth(440);
 
     title_=new QLabel("Tony",this);
     title_->setObjectName("title");
     hint_=new QLabel("What do you want to tell me?",this);
     hint_->setObjectName("hint");
+
+    modelBox_=new QComboBox(this);
+    modelBox_->setObjectName("modelProfile");
+    modelBox_->setCursor(Qt::PointingHandCursor);
+    modelBox_->setToolTip("Choose which local model Tony should use for this conversation.");
+    modelBox_->addItem(QStringLiteral("Auto"),QStringLiteral("auto"));
+    modelBox_->addItem(QStringLiteral("Fast 0.8B"),QStringLiteral("fast"));
+    modelBox_->addItem(QStringLiteral("Quality 2B"),QStringLiteral("quality"));
+    const QString savedProfile=normalizedModelProfile(
+        QSettings().value(QStringLiteral("agent/model_profile"),QStringLiteral("auto")).toString());
+    const int savedIndex=modelBox_->findData(savedProfile);
+    modelBox_->setCurrentIndex(savedIndex>=0 ? savedIndex : 0);
+
     edit_=new QLineEdit(this);
     edit_->setObjectName("message");
     edit_->setPlaceholderText("Type a message…");
@@ -34,8 +57,10 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     auto *top=new QHBoxLayout;
     top->setContentsMargins(0,0,0,0);
+    top->setSpacing(8);
     top->addWidget(title_);
     top->addStretch(1);
+    top->addWidget(modelBox_);
     top->addWidget(hint_);
 
     auto *row=new QHBoxLayout;
@@ -66,6 +91,19 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
             color: rgba(70, 61, 55, 170);
             font-family: "Microsoft YaHei UI";
             font-size: 11px;
+        }
+        QComboBox#modelProfile {
+            min-height: 28px;
+            padding: 0 8px;
+            color: #493d34;
+            background: rgba(255, 255, 255, 220);
+            border: 1px solid rgba(119, 102, 88, 72);
+            border-radius: 9px;
+            font-family: "Microsoft YaHei UI";
+            font-size: 10px;
+        }
+        QComboBox#modelProfile:hover {
+            border: 1px solid rgba(126, 91, 65, 150);
         }
         QLineEdit#message {
             min-height: 36px;
@@ -99,6 +137,27 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     connect(send_,&QPushButton::clicked,this,&ChatComposer::submitCurrent);
     connect(edit_,&QLineEdit::returnPressed,this,&ChatComposer::submitCurrent);
+    connect(modelBox_,&QComboBox::currentIndexChanged,this,[this](int index){
+        const QString profile=normalizedModelProfile(modelBox_->itemData(index).toString());
+        QSettings().setValue(QStringLiteral("agent/model_profile"),profile);
+        AppLogger::recordOperatorEvent(
+            QStringLiteral("model_profile_changed"),{},
+            QJsonObject{{QStringLiteral("profile"),profile}});
+    });
+    refreshModelLabels();
+}
+
+void ChatComposer::refreshModelLabels() {
+    if(!modelBox_) return;
+    const QString current=normalizedModelProfile(modelBox_->currentData().toString());
+    modelBox_->setItemText(0,language_=="zh" ? QStringLiteral("自动") : QStringLiteral("Auto"));
+    modelBox_->setItemText(1,language_=="zh" ? QStringLiteral("快速 0.8B") : QStringLiteral("Fast 0.8B"));
+    modelBox_->setItemText(2,language_=="zh" ? QStringLiteral("质量 2B") : QStringLiteral("Quality 2B"));
+    const int index=modelBox_->findData(current);
+    if(index>=0) modelBox_->setCurrentIndex(index);
+    modelBox_->setToolTip(language_=="zh"
+        ? QStringLiteral("自动：普通聊天用 0.8B，技术问题用 2B；也可以强制指定模型。")
+        : QStringLiteral("Auto uses 0.8B for casual chat and 2B for technical questions; you can also force either model."));
 }
 
 void ChatComposer::setLanguage(const QString &language) {
@@ -113,6 +172,7 @@ void ChatComposer::setLanguage(const QString &language) {
         edit_->setPlaceholderText("Type a message…");
         send_->setText("Send");
     }
+    refreshModelLabels();
 }
 
 void ChatComposer::openAt(const QPoint &anchorGlobal, const QString &prefill) {
@@ -148,10 +208,12 @@ void ChatComposer::keyPressEvent(QKeyEvent *event) {
 void ChatComposer::submitCurrent() {
     const QString text=edit_->text().trimmed();
     if(text.isEmpty()) return;
+    const QString profile=normalizedModelProfile(modelBox_->currentData().toString());
     AppLogger::recordOperatorEvent(
         QStringLiteral("chat_submit"),
         text,
-        QJsonObject{{QStringLiteral("language"), language_}});
+        QJsonObject{{QStringLiteral("language"), language_},
+                    {QStringLiteral("model_profile"),profile}});
     edit_->clear();
     hide();
     emit submitted(text);
