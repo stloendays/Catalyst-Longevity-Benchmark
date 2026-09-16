@@ -36,7 +36,8 @@ jobs:
           assert 'BEAR_LOCAL_MAX_TOKENS", "72"' in s
           assert '32), 96)' in s
           assert 'Speak naturally in first person' in s
-          assert 'do not reintroduce your name or character background' in s
+          assert "Unless the user's message directly asks about identity" in s
+          assert "Answer only the user's current question in first person" in s
           assert '"stream": True' in s
           print('TONY_V107_GATEWAY_SOURCE=PASS')
           PY
@@ -110,12 +111,13 @@ jobs:
           assert MAX_HISTORY_MESSAGES == 6
           assert MAX_HISTORY_CHARS == 300
           assert 'Speak naturally in first person' in TONY_PERSONA_EN
+          assert "Unless the user's message directly asks about identity" in TONY_PERSONA_EN
           _, _, _, payload = _local_payload('How old are you?', [], 'en', technical=False)
           assert payload['stream'] is True
           assert payload['max_tokens'] == 72, payload['max_tokens']
           assert payload['temperature'] == 0.64, payload['temperature']
           prompt = payload['messages'][-1]['content']
-          assert 'do not reintroduce your name or character background' in prompt
+          assert "Answer only the user's current question in first person" in prompt
           print('TONY_V107_LIVE_CONFIG=PASS')
           PY
 
@@ -132,8 +134,10 @@ jobs:
               assert answer.strip(), answer
               assert fallback is False, fallback
               assert 'companion' in used_agent, used_agent
-              assert not answer.strip().lower().startswith("i'm tony"), answer
-              assert not answer.strip().lower().startswith('tony '), answer
+              low=answer.casefold()
+              forbidden=('tony','paula','china','chinese','chemistry','fluffy dog','teddy dog','desktop ai agent')
+              assert not any(term in low for term in forbidden), answer
+              assert len(answer) >= 20, answer
               print('TONY_V107_COMPANION_GENERATION=PASS')
               print('agent=' + used_agent)
               print('answer=' + answer.replace('\n',' ')[:500])
