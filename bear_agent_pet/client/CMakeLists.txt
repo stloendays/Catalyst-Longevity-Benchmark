@@ -23,6 +23,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindowPetPackages.cpp
     src/PetWindowReminders.cpp
     src/PetWindow.h
+    src/PetCreatorDialog.cpp
+    src/PetCreatorDialog.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
     src/TonyResponseRouter.cpp
