@@ -4,6 +4,8 @@
 
 #include <QDateTime>
 #include <QInputDialog>
+#include <QJsonObject>
+#include <QLineEdit>
 #include <QSettings>
 
 namespace {
