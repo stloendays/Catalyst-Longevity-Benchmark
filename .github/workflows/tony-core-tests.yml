@@ -5,16 +5,18 @@ on:
   push:
     paths:
       - 'bear_agent_pet/client/CMakeLists.txt'
-      - 'bear_agent_pet/client/src/TonyBehaviorEngine.*'
-      - 'bear_agent_pet/client/src/TonyMemoryStore.*'
+      - 'bear_agent_pet/client/src/**'
       - 'bear_agent_pet/client/tests/**'
+      - 'bear_agent_pet/server_gateway/app/**'
+      - 'bear_agent_pet/server_gateway/tests/**'
       - '.github/workflows/tony-core-tests.yml'
   pull_request:
     paths:
       - 'bear_agent_pet/client/CMakeLists.txt'
-      - 'bear_agent_pet/client/src/TonyBehaviorEngine.*'
-      - 'bear_agent_pet/client/src/TonyMemoryStore.*'
+      - 'bear_agent_pet/client/src/**'
       - 'bear_agent_pet/client/tests/**'
+      - 'bear_agent_pet/server_gateway/app/**'
+      - 'bear_agent_pet/server_gateway/tests/**'
       - '.github/workflows/tony-core-tests.yml'
 
 permissions:
@@ -23,7 +25,7 @@ permissions:
 jobs:
   core-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
@@ -35,8 +37,19 @@ jobs:
       - name: Configure Tony with tests
         run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build-tests -DBUILD_TESTING=ON
 
-      - name: Build Tony core tests
-        run: cmake --build bear_agent_pet/client/build-tests --target TonyCoreTests --parallel 2
+      - name: Build Tony desktop client and core tests
+        run: cmake --build bear_agent_pet/client/build-tests --target TonyDesktopPet TonyCoreTests --parallel 2
 
-      - name: Run Tony core tests
+      - name: Run Tony C++ core tests
         run: ctest --test-dir bear_agent_pet/client/build-tests --output-on-failure
+
+      - name: Check gateway Python syntax
+        run: |
+          python -m py_compile \
+            bear_agent_pet/server_gateway/app/main.py \
+            bear_agent_pet/server_gateway/app/main_v08.py \
+            bear_agent_pet/server_gateway/app/local_tools.py
+
+      - name: Run local-tool routing tests
+        working-directory: bear_agent_pet/server_gateway
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
