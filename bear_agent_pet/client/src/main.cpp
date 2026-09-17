@@ -75,6 +75,7 @@ private:
 
 void applyPetCommandLine(const QStringList &arguments) {
     QSettings settings;
+    const QString prefix = QStringLiteral("--pet-root=");
     for(const auto &argument : arguments) {
         if(argument == QStringLiteral("--pet-reset")) {
             settings.remove(QStringLiteral("pet/asset_root"));
@@ -83,9 +84,8 @@ void applyPetCommandLine(const QStringList &arguments) {
             settings.remove(QStringLiteral("pet/active_version"));
             continue;
         }
-        constexpr auto prefix = "--pet-root=";
-        if(!argument.startsWith(QStringLiteral(prefix), Qt::CaseInsensitive)) continue;
-        const QString raw = argument.mid(static_cast<int>(sizeof(prefix) - 1)).trimmed();
+        if(!argument.startsWith(prefix, Qt::CaseInsensitive)) continue;
+        const QString raw = argument.mid(prefix.size()).trimmed();
         if(raw.isEmpty()) continue;
         const QString root = QDir(raw).absolutePath();
         settings.setValue(QStringLiteral("pet/asset_root"), root);
