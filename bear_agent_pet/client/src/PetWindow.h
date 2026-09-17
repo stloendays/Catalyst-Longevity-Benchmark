@@ -25,6 +25,7 @@ public:
     explicit PetWindow(QWidget *parent=nullptr);
     ~PetWindow() override;
 
+    bool applyActivePetPackage(QString *error=nullptr);
     TonyBehaviorEngine::Snapshot autonomySnapshot() const;
     qint64 autonomyInactivityMs() const;
     bool autonomousSurfaceAvailable() const;
