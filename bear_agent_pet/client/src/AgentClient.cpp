@@ -24,8 +24,8 @@ QUrl pairingApiUrlFor(const QUrl &wsUrl, const QString &path) {
     else if(url.scheme().compare("ws", Qt::CaseInsensitive)==0) url.setScheme("http");
     else return {};
     url.setPath(path);
-    url.setQuery({});
-    url.setFragment({});
+    url.setQuery(QString{});
+    url.setFragment(QString{});
     return url;
 }
 
