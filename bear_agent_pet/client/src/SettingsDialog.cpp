@@ -73,8 +73,8 @@ QUrl ownerApiUrl(const QString &path) {
     if(scheme == QStringLiteral("wss")) endpoint.setScheme(QStringLiteral("https"));
     else if(scheme == QStringLiteral("ws")) endpoint.setScheme(QStringLiteral("http"));
     endpoint.setPath(path);
-    endpoint.setQuery({});
-    endpoint.setFragment({});
+    endpoint.setQuery(QString{});
+    endpoint.setFragment(QString{});
     return endpoint;
 }
 
