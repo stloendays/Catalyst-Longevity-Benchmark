@@ -1,7 +1,11 @@
+#include "LocalReminderManager.h"
 #include "TonyBehaviorEngine.h"
 #include "TonyMemoryStore.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -91,7 +95,7 @@ bool testMemoryStore() {
     ok &= expect(facts.value(0) == QStringLiteral("Likes chemistry"), "memory normalizes trailing punctuation");
 
     memory.clear();
-    for(int i = 0; i < 30; ++i)
+    for(int i=0;i<30;++i)
         memory.remember(QStringLiteral("fact %1").arg(i));
     facts = memory.facts();
     ok &= expect(facts.size() == 24, "memory retains at most 24 explicit facts");
@@ -104,6 +108,44 @@ bool testMemoryStore() {
 
     memory.clear();
     ok &= expect(memory.facts().isEmpty(), "clear removes all explicit facts");
+    return ok;
+}
+
+bool testLocalReminderManager() {
+    QSettings().remove(QStringLiteral("tony/reminders/v1"));
+    bool ok = true;
+    const QDateTime due = QDateTime::currentDateTimeUtc().addSecs(3600);
+
+    QString createdId;
+    {
+        LocalReminderManager manager;
+        createdId = manager.createReminder(
+            QStringLiteral("  Chemistry break  "),
+            QStringLiteral("  Stretch and drink water.  "),
+            due);
+        ok &= expect(!createdId.isEmpty(), "reminder gets a stable id");
+        ok &= expect(manager.count() == 1, "reminder is retained in memory");
+        const QJsonArray items = manager.reminders();
+        ok &= expect(items.size() == 1, "reminder is exposed through JSON");
+        const QJsonObject item = items.first().toObject();
+        ok &= expect(item.value(QStringLiteral("title")).toString() == QStringLiteral("Chemistry break"),
+                     "reminder title is normalized");
+        ok &= expect(item.value(QStringLiteral("text")).toString() == QStringLiteral("Stretch and drink water."),
+                     "reminder text is normalized");
+    }
+
+    {
+        LocalReminderManager restored;
+        ok &= expect(restored.count() == 1, "reminder survives manager recreation");
+        const QJsonArray items = restored.reminders();
+        ok &= expect(items.first().toObject().value(QStringLiteral("id")).toString() == createdId,
+                     "persisted reminder keeps its id");
+        ok &= expect(restored.cancelReminder(createdId), "reminder can be cancelled");
+        ok &= expect(restored.count() == 0, "cancelled reminder is removed");
+        ok &= expect(!restored.cancelReminder(createdId), "cancelling twice reports no match");
+    }
+
+    QSettings().remove(QStringLiteral("tony/reminders/v1"));
     return ok;
 }
 
@@ -126,6 +168,7 @@ int main(int argc, char **argv) {
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
     ok &= testMemoryStore();
+    ok &= testLocalReminderManager();
 
     if(!ok) return 1;
     std::cout << "TonyCoreTests: PASS\n";
