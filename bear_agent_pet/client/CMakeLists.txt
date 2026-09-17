@@ -21,6 +21,7 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindowSettings.cpp
     src/PetWindowAutonomy.cpp
     src/PetWindowPetPackages.cpp
+    src/PetWindowReminders.cpp
     src/PetWindow.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
@@ -39,6 +40,7 @@ qt_add_executable(TonyDesktopPet WIN32
     src/AgentClient.cpp
     src/AgentClient.h
     src/LocalBridge.cpp
+    src/LocalBridgeReminders.cpp
     src/LocalBridge.h
     src/LocalReminderManager.cpp
     src/LocalReminderManager.h
