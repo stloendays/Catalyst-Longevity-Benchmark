@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'feature/bear-agent-pet'
+      - 'feature/tony-v109-full-canvas-render'
     paths:
       - 'bear_agent_pet/server_gateway/**'
       - '.github/workflows/bear-agent-deploy-gateway.yml'
@@ -45,7 +45,7 @@ jobs:
             bear_agent_pet/server_gateway/ \
             ubuntu@150.158.27.206:/home/ubuntu/.local/share/bear-agent/app/
 
-      - name: Install restart and verify Tony chat service
+      - name: Install restart and verify Tony agent service
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 \
             -i "$HOME/.ssh/server_key" ubuntu@150.158.27.206 'bash -s' <<'REMOTE'
@@ -118,7 +118,7 @@ jobs:
 
           sudo tee /etc/systemd/system/bear-agent-gateway.service >/dev/null <<'UNIT'
           [Unit]
-          Description=Tony Boyfriend Desktop Companion Gateway
+          Description=Tony Desktop Companion Gateway
           After=network-online.target rhocodec-llm.service
           Wants=network-online.target rhocodec-llm.service
 
@@ -158,16 +158,18 @@ jobs:
           d=json.load(open('/tmp/tony-health.json'))
           assert d['ok'] is True, d
           assert d['service'] == 'Tony Desktop Companion', d
-          assert d['backend'] == 'local-qwen-chat-only', d
+          assert d['backend'] == 'local-qwen-routed-agent', d
           assert d['local_model'] == expected, (d, expected)
           assert d['default_language'] == 'English', d
           assert 'Simplified Chinese' in d['languages'], d
-          assert d['persona'] == 'Paula-boyfriend', d
-          assert d['chat_only'] is True, d
-          assert d['pairing_mode'] in {'reusable-friend-code', 'device-code+recovery'}, d
-          assert d['local_tools_enabled'] is False, d
+          assert d['persona'] == 'teddy-companion+technical-agent', d
+          assert d['chat_only'] is False, d
+          assert d['pairing_mode'] == 'device-code+owner-approval+recovery', d
+          assert d['local_tools_enabled'] is True, d
+          tools=set(d.get('local_tool_allowlist') or [])
+          assert {'create_reminder','list_reminders','cancel_reminder'} <= tools, d
           assert d['openclaw_enabled'] is False, d
-          print('TONY_CHAT_GATEWAY_HEALTH=PASS')
+          print('TONY_AGENT_GATEWAY_HEALTH=PASS')
           PY
 
           echo 'TONY_CHAT_GENERATION_GATE=DELEGATED_TO_E2E'

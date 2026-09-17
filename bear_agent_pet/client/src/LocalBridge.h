@@ -1,8 +1,12 @@
 #pragma once
 
+#include <QDateTime>
+#include <QJsonArray>
 #include <QObject>
 #include <QJsonObject>
 #include <QStringList>
+
+#include "LocalReminderManager.h"
 
 class QWidget;
 class QSystemTrayIcon;
@@ -16,6 +20,10 @@ public:
     bool enabled() const;
     void setEnabled(bool enabled);
     void setTrayIcon(QSystemTrayIcon *tray);
+
+    QString createLocalReminder(const QString &title, const QString &text, const QDateTime &dueUtc);
+    QJsonArray localReminders() const;
+    bool cancelLocalReminder(const QString &id);
 
 public slots:
     void execute(const QString &requestId, const QString &tool, const QJsonObject &args);
@@ -34,4 +42,5 @@ private:
 
     QWidget *promptParent_{nullptr};
     QSystemTrayIcon *tray_{nullptr};
+    LocalReminderManager reminders_;
 };

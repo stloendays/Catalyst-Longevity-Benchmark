@@ -1,0 +1,64 @@
+name: Tony core tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'bear_agent_pet/client/CMakeLists.txt'
+      - 'bear_agent_pet/client/src/**'
+      - 'bear_agent_pet/client/tests/**'
+      - 'bear_agent_pet/server_gateway/app/**'
+      - 'bear_agent_pet/server_gateway/tests/**'
+      - '.github/workflows/tony-core-tests.yml'
+  pull_request:
+    paths:
+      - 'bear_agent_pet/client/CMakeLists.txt'
+      - 'bear_agent_pet/client/src/**'
+      - 'bear_agent_pet/client/tests/**'
+      - 'bear_agent_pet/server_gateway/app/**'
+      - 'bear_agent_pet/server_gateway/tests/**'
+      - '.github/workflows/tony-core-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  desktop-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'linux_gcc_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Configure Tony with tests
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build-tests -DBUILD_TESTING=ON
+
+      - name: Build Tony desktop client and core tests
+        run: cmake --build bear_agent_pet/client/build-tests --target TonyDesktopPet TonyCoreTests --parallel 2
+
+      - name: Run Tony C++ core tests
+        run: ctest --test-dir bear_agent_pet/client/build-tests --output-on-failure
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check gateway Python syntax
+        run: |
+          python -m py_compile \
+            bear_agent_pet/server_gateway/app/main.py \
+            bear_agent_pet/server_gateway/app/main_v08.py \
+            bear_agent_pet/server_gateway/app/local_tools.py
+
+      - name: Run local-tool routing tests
+        working-directory: bear_agent_pet/server_gateway
+        run: python -m unittest discover -s tests -p 'test_*.py' -v

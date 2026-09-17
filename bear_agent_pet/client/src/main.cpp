@@ -1,7 +1,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QIcon>
 #include <QKeySequence>
 #include <QMenu>
@@ -11,6 +13,7 @@
 #include <QTimer>
 
 #include "AppLogger.h"
+#include "PetCreatorDialog.h"
 #include "PetWindow.h"
 #include "SettingsDialog.h"
 #include "TonyAutonomousCompanion.h"
@@ -70,6 +73,24 @@ private:
     bool leftDown_{false};
     bool dragged_{false};
 };
+
+void applyPetCommandLine(const QStringList &arguments) {
+    QSettings settings;
+    const QString prefix = QStringLiteral("--pet-root=");
+    for(const auto &argument : arguments) {
+        if(argument == QStringLiteral("--pet-reset")) {
+            settings.remove(QStringLiteral("pet/asset_root"));
+            settings.remove(QStringLiteral("pet/active_id"));
+            settings.remove(QStringLiteral("pet/active_name"));
+            settings.remove(QStringLiteral("pet/active_version"));
+            continue;
+        }
+        if(!argument.startsWith(prefix, Qt::CaseInsensitive)) continue;
+        const QString raw = argument.mid(prefix.size()).trimmed();
+        if(raw.isEmpty()) continue;
+        settings.setValue(QStringLiteral("pet/asset_root"), QDir(raw).absolutePath());
+    }
+}
 }
 
 int main(int argc, char *argv[]) {
@@ -77,6 +98,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("TonyAgent");
     QCoreApplication::setApplicationName("Tony Desktop Pet");
     QCoreApplication::setApplicationVersion(QStringLiteral(TONY_APP_VERSION));
+
+    applyPetCommandLine(app.arguments());
 
     // Tony's character voice is English-only. Pin the shared runtime language
     // before PetWindow, the local router, autonomous speech and Agent initialize.
@@ -90,6 +113,10 @@ int main(int argc, char *argv[]) {
     qInfo().noquote() << "Tony Desktop Pet starting" << QCoreApplication::applicationVersion();
 
     PetWindow pet;
+    QString petPackageError;
+    if(!pet.applyActivePetPackage(&petPackageError) && !petPackageError.isEmpty())
+        qWarning().noquote() << "Custom pet package was not activated:" << petPackageError;
+
     PetActivityFilter activityFilter;
     pet.installEventFilter(&activityFilter);
     pet.show();
@@ -99,6 +126,8 @@ int main(int argc, char *argv[]) {
     UpdateManager updater(&app);
     SettingsDialog settingsDialog(&updater, &pet);
     settingsDialog.setModal(false);
+    PetCreatorDialog creatorDialog(&pet);
+    creatorDialog.setModal(false);
 
     QObject::connect(&settingsDialog, &SettingsDialog::languageChanged,
                      &pet, &PetWindow::applyUiLanguage);
@@ -119,6 +148,14 @@ int main(int argc, char *argv[]) {
         settingsDialog.raise();
         settingsDialog.activateWindow();
     };
+    const auto showCreator = [&creatorDialog]{
+        AppLogger::recordOperatorEvent(QStringLiteral("pet_creator_open"));
+        creatorDialog.refresh();
+        creatorDialog.show();
+        creatorDialog.raise();
+        creatorDialog.activateWindow();
+    };
+
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
@@ -128,6 +165,12 @@ int main(int argc, char *argv[]) {
     auto *trayMenu=new QMenu(&pet);
     auto *openSettings=trayMenu->addAction(zhUi ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
     QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
+
+    auto *openCreator=trayMenu->addAction(zhUi ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
+    QObject::connect(openCreator,&QAction::triggered,&app,showCreator);
+
+    auto *quickReminder=trayMenu->addAction(zhUi ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
+    QObject::connect(quickReminder,&QAction::triggered,&pet,&PetWindow::createQuickReminder);
 
     auto *autonomyMenu=trayMenu->addMenu(zhUi ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
     auto *autonomyGroup=new QActionGroup(autonomyMenu);

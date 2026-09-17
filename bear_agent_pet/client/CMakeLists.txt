@@ -20,7 +20,11 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindowFullCanvas.cpp
     src/PetWindowSettings.cpp
     src/PetWindowAutonomy.cpp
+    src/PetWindowPetPackages.cpp
+    src/PetWindowReminders.cpp
     src/PetWindow.h
+    src/PetCreatorDialog.cpp
+    src/PetCreatorDialog.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
     src/TonyResponseRouter.cpp
@@ -38,7 +42,10 @@ qt_add_executable(TonyDesktopPet WIN32
     src/AgentClient.cpp
     src/AgentClient.h
     src/LocalBridge.cpp
+    src/LocalBridgeReminders.cpp
     src/LocalBridge.h
+    src/LocalReminderManager.cpp
+    src/LocalReminderManager.h
     src/SshTunnel.cpp
     src/SshTunnel.h
     src/AppLogger.cpp
@@ -63,6 +70,22 @@ if(WIN32)
   target_link_libraries(TonyDesktopPet PRIVATE Crypt32)
 endif()
 
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(TonyCoreTests
+      tests/TonyCoreTests.cpp
+      src/TonyBehaviorEngine.cpp
+      src/TonyBehaviorEngine.h
+      src/TonyMemoryStore.cpp
+      src/TonyMemoryStore.h
+      src/LocalReminderManager.cpp
+      src/LocalReminderManager.h
+  )
+  target_link_libraries(TonyCoreTests PRIVATE Qt6::Core)
+  target_include_directories(TonyCoreTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  add_test(NAME TonyCoreTests COMMAND TonyCoreTests)
+endif()
+
 install(TARGETS TonyDesktopPet RUNTIME DESTINATION .)
 install(DIRECTORY assets/ DESTINATION assets)
 install(FILES VERSION install/tony-install-root.marker DESTINATION .)
@@ -70,5 +93,5 @@ add_custom_command(TARGET TonyDesktopPet POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
         "$<TARGET_FILE_DIR:TonyDesktopPet>/assets"
-    COMMENT "Copying Tony state artwork, animation frames and response packs"
+    COMMENT "Copying Tony state artwork, animation frames, pet manifest and response packs"
 )

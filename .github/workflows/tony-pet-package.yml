@@ -1,0 +1,76 @@
+name: Validate Tony Pet package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'bear_agent_pet/client/tools/tonypet.py'
+      - 'bear_agent_pet/client/assets/pet.json'
+      - 'bear_agent_pet/client/assets/states/**'
+      - 'bear_agent_pet/client/assets/animations/**'
+      - 'bear_agent_pet/client/assets/config/**'
+      - 'bear_agent_pet/docs/**'
+      - '.github/workflows/tony-pet-package.yml'
+  push:
+    paths:
+      - 'bear_agent_pet/client/tools/tonypet.py'
+      - 'bear_agent_pet/client/assets/pet.json'
+      - 'bear_agent_pet/client/assets/states/**'
+      - 'bear_agent_pet/client/assets/animations/**'
+      - 'bear_agent_pet/client/assets/config/**'
+      - 'bear_agent_pet/docs/**'
+      - '.github/workflows/tony-pet-package.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Tony reference pet
+        run: |
+          python bear_agent_pet/client/tools/tonypet.py validate bear_agent_pet/client/assets
+
+      - name: Pack and round-trip Tony reference pet
+        run: |
+          rm -rf /tmp/tonypet-roundtrip /tmp/Tony.tonypet
+          python bear_agent_pet/client/tools/tonypet.py pack \
+            bear_agent_pet/client/assets /tmp/Tony.tonypet
+          python bear_agent_pet/client/tools/tonypet.py unpack \
+            /tmp/Tony.tonypet /tmp/tonypet-roundtrip
+          python bear_agent_pet/client/tools/tonypet.py validate /tmp/tonypet-roundtrip
+
+      - name: Reject package path traversal
+        run: |
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('/tmp/unsafe.tonypet', 'w') as z:
+              z.writestr('../escape.txt', 'nope')
+              z.writestr('pet.json', '{}')
+          PY
+          if python bear_agent_pet/client/tools/tonypet.py unpack /tmp/unsafe.tonypet /tmp/unsafe-out; then
+            echo 'Unsafe package was accepted' >&2
+            exit 1
+          fi
+          echo 'TONYPET_PATH_TRAVERSAL_REJECTION=PASS'
+
+      - name: Reject unconfirmed creator rights
+        run: |
+          cp -a bear_agent_pet/client/assets /tmp/no-rights-pet
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path('/tmp/no-rights-pet/pet.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          data['rights']['confirmed'] = False
+          path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+          PY
+          if python bear_agent_pet/client/tools/tonypet.py validate /tmp/no-rights-pet; then
+            echo 'Package without rights confirmation was accepted' >&2
+            exit 1
+          fi
+          echo 'TONYPET_RIGHTS_GUARD=PASS'
