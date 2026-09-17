@@ -20,6 +20,7 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindowFullCanvas.cpp
     src/PetWindowSettings.cpp
     src/PetWindowAutonomy.cpp
+    src/PetWindowPetPackages.cpp
     src/PetWindow.h
     src/TonyBehaviorEngine.cpp
     src/TonyBehaviorEngine.h
