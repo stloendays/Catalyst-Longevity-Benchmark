@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 WIN_PATH_RE = re.compile(r"(?:[A-Za-z]:\\[^\r\n\"']+|[A-Za-z]:/[^\r\n\"']+)")
+ISO_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})")
 
 
 def _has(text: str, *phrases: str) -> bool:
@@ -12,16 +14,110 @@ def _has(text: str, *phrases: str) -> bool:
     return any(p.casefold() in t for p in phrases)
 
 
+def _iso_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _relative_reminder(text: str) -> dict[str, Any] | None:
+    english = re.search(
+        r"\bremind\s+me\s+in\s+(\d{1,5})\s*(minutes?|mins?|hours?|hrs?)\s+(?:to\s+)?(.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    chinese = re.search(r"(\d{1,5})\s*(分钟|小時|小时)后提醒我\s*(.+)$", text, re.DOTALL)
+    match = english or chinese
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2).casefold()
+    body = match.group(3).strip().strip("。.!！")
+    if not body:
+        return None
+    if unit in {"hour", "hours", "hr", "hrs", "小时", "小時"}:
+        delay = timedelta(hours=amount)
+    else:
+        delay = timedelta(minutes=amount)
+    if delay <= timedelta(0) or delay > timedelta(days=366):
+        return None
+    due = datetime.now(timezone.utc) + delay
+    return {
+        "tool": "create_reminder",
+        "args": {
+            "title": "Tony Reminder",
+            "text": body[:500],
+            "due_at": _iso_utc(due),
+        },
+        "reason": "Create the relative local reminder explicitly requested by the user",
+        "needs_backend": False,
+    }
+
+
+def _absolute_reminder(text: str) -> dict[str, Any] | None:
+    match = ISO_TIME_RE.search(text)
+    if not match or not _has(text, "remind", "reminder", "提醒"):
+        return None
+    raw = match.group(0)
+    normalized = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    if re.search(r"[+-]\d{4}$", normalized):
+        normalized = normalized[:-5] + normalized[-5:-2] + ":" + normalized[-2:]
+    try:
+        due = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if due.tzinfo is None:
+        return None
+    body = text[match.end():].strip(" :：,-，;；")
+    body = re.sub(r"^(?:to\s+|提醒我\s*)", "", body, flags=re.IGNORECASE).strip()
+    if not body:
+        body = "Reminder"
+    return {
+        "tool": "create_reminder",
+        "args": {
+            "title": "Tony Reminder",
+            "text": body[:500],
+            "due_at": _iso_utc(due),
+        },
+        "reason": "Create the local reminder at the explicit ISO 8601 time requested by the user",
+        "needs_backend": False,
+    }
+
+
 def plan_local_tool(message: str) -> dict[str, Any] | None:
     """Return a conservative semantic local-tool plan for explicit desktop requests.
 
     The planner intentionally supports only a small allowlist. It never emits shell,
     PowerShell, file deletion, arbitrary file writes, registry changes, or process
-    execution. The Windows client independently re-validates the tool and arguments.
+    execution. The Windows client independently re-validates every tool and argument.
     """
     text = message.strip()
     if not text:
         return None
+
+    reminder = _relative_reminder(text) or _absolute_reminder(text)
+    if reminder:
+        return reminder
+
+    if _has(text,
+            "list my reminders", "show my reminders", "what reminders do i have",
+            "查看提醒", "我的提醒", "有哪些提醒"):
+        return {
+            "tool": "list_reminders",
+            "args": {},
+            "reason": "Read the local reminder list explicitly requested by the user",
+            "needs_backend": True,
+        }
+
+    cancel_en = re.search(r"cancel\s+reminder\s+([0-9a-f-]{16,64})", text, re.IGNORECASE)
+    cancel_zh = re.search(r"取消提醒\s*([0-9a-f-]{16,64})", text, re.IGNORECASE)
+    cancel = cancel_en or cancel_zh
+    if cancel:
+        return {
+            "tool": "cancel_reminder",
+            "args": {"id": cancel.group(1)},
+            "reason": "Cancel the explicit local reminder requested by the user",
+            "needs_backend": False,
+        }
 
     if _has(text,
             "read my clipboard", "what is in my clipboard", "what's in my clipboard",
@@ -117,6 +213,11 @@ def direct_success_text(tool: str, result: dict[str, Any], *, chinese: bool) -> 
         return "已经写入剪贴板。" if chinese else "Copied it to the clipboard."
     if tool == "show_notification":
         return "通知已经弹出了。" if chinese else "Notification shown."
+    if tool == "create_reminder":
+        due = result.get("due_at", "")
+        return (f"提醒已经保存在本机：{due}" if chinese else f"Reminder saved locally for {due}.")
+    if tool == "cancel_reminder":
+        return "提醒已经取消。" if chinese else "Reminder cancelled."
     return "本地操作已完成。" if chinese else "Local action completed."
 
 
