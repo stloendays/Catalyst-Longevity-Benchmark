@@ -1,7 +1,9 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QIcon>
 #include <QKeySequence>
 #include <QMenu>
@@ -70,6 +72,25 @@ private:
     bool leftDown_{false};
     bool dragged_{false};
 };
+
+void applyPetCommandLine(const QStringList &arguments) {
+    QSettings settings;
+    for(const auto &argument : arguments) {
+        if(argument == QStringLiteral("--pet-reset")) {
+            settings.remove(QStringLiteral("pet/asset_root"));
+            settings.remove(QStringLiteral("pet/active_id"));
+            settings.remove(QStringLiteral("pet/active_name"));
+            settings.remove(QStringLiteral("pet/active_version"));
+            continue;
+        }
+        constexpr auto prefix = "--pet-root=";
+        if(!argument.startsWith(QStringLiteral(prefix), Qt::CaseInsensitive)) continue;
+        const QString raw = argument.mid(static_cast<int>(sizeof(prefix) - 1)).trimmed();
+        if(raw.isEmpty()) continue;
+        const QString root = QDir(raw).absolutePath();
+        settings.setValue(QStringLiteral("pet/asset_root"), root);
+    }
+}
 }
 
 int main(int argc, char *argv[]) {
@@ -77,6 +98,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("TonyAgent");
     QCoreApplication::setApplicationName("Tony Desktop Pet");
     QCoreApplication::setApplicationVersion(QStringLiteral(TONY_APP_VERSION));
+
+    applyPetCommandLine(app.arguments());
 
     // Tony's character voice is English-only. Pin the shared runtime language
     // before PetWindow, the local router, autonomous speech and Agent initialize.
@@ -90,6 +113,10 @@ int main(int argc, char *argv[]) {
     qInfo().noquote() << "Tony Desktop Pet starting" << QCoreApplication::applicationVersion();
 
     PetWindow pet;
+    QString petPackageError;
+    if(!pet.applyActivePetPackage(&petPackageError) && !petPackageError.isEmpty())
+        qWarning().noquote() << "Custom pet package was not activated:" << petPackageError;
+
     PetActivityFilter activityFilter;
     pet.installEventFilter(&activityFilter);
     pet.show();
