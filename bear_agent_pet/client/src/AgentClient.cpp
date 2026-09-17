@@ -78,8 +78,6 @@ AgentClient::AgentClient(QObject *parent): QObject(parent) {
         scheduleReconnect();
     });
 
-    // Re-arm only after each HTTPS status request completes. This stays reliable
-    // when owner approval happens seconds, minutes, or hours after the code is shown.
     pairingPollTimer_.setInterval(2000);
     pairingPollTimer_.setSingleShot(true);
     connect(&pairingPollTimer_, &QTimer::timeout, this, &AgentClient::pollDevicePairing);
@@ -375,7 +373,13 @@ void AgentClient::sendClientHello() {
         {"device_name",QSysInfo::machineHostName()},
         {"platform",QSysInfo::productType()},
         {"language",language_},
-        {"capabilities",QJsonArray{QStringLiteral("operator_log_sync_v1"),QStringLiteral("device_code_pairing_v1"),QStringLiteral("model_profile_routing_v1")}}
+        {"capabilities",QJsonArray{
+            QStringLiteral("operator_log_sync_v1"),
+            QStringLiteral("device_code_pairing_v1"),
+            QStringLiteral("model_profile_routing_v1"),
+            QStringLiteral("local_tools_v1"),
+            QStringLiteral("local_reminders_v1")
+        }}
     };
     socket_.sendTextMessage(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
