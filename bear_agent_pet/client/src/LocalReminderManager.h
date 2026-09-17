@@ -2,7 +2,9 @@
 
 #include <QDateTime>
 #include <QJsonArray>
+#include <QList>
 #include <QObject>
+#include <QString>
 #include <QTimer>
 
 class LocalReminderManager : public QObject {
