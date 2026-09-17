@@ -14,6 +14,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from .local_tools import direct_success_text, looks_chinese, plan_local_tool, tool_context_for_model
 from .main import PairRequest, action_for_text, authorized, call_backend_stream, local_model_id, normalize_language, normalize_model_profile, quality_model_id, send_json
 from .pairing import (
     approve_device_pairing_request,
@@ -29,7 +30,7 @@ from .pairing import (
     revoke_device_as_owner,
 )
 
-app = FastAPI(title="Tony Desktop Companion", version="1.0.8")
+app = FastAPI(title="Tony Desktop Companion", version="1.0.9")
 
 _PAIR_FAILURES: dict[str, list[float]] = {}
 _PAIR_REQUESTS: dict[str, list[float]] = {}
@@ -40,6 +41,7 @@ _DEVICE_PAIR_TTL_SECONDS = 72 * 60 * 60
 _BATCH_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_BATCH_BYTES = 768 * 1024
 _MAX_EVENTS = 10000
+_MAX_PENDING_TOOLS = 4
 
 
 class DevicePairStartRequest(BaseModel):
@@ -219,13 +221,20 @@ async def finish_answer(ws: WebSocket, answer: str, used_agent: str, fallback_us
     await send_json(ws, {"type": "avatar_action", "action": final_action, "emotion": final_emotion, "duration_ms": final_duration})
 
 
+def _tool_failure_text(tool: str, error: str, *, chinese: bool) -> str:
+    detail = error.strip()[:300]
+    if chinese:
+        return f"这个本地操作没有完成：{detail}" if detail else "这个本地操作没有完成。"
+    return f"That local action was not completed: {detail}" if detail else "That local action was not completed."
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
         "service": "Tony Desktop Companion",
-        "version": "1.0.8",
-        "backend": "local-qwen-routed-chat",
+        "version": "1.0.9",
+        "backend": "local-qwen-routed-agent",
         "local_model": local_model_id(),
         "quality_model": quality_model_id(),
         "model_profile": "auto",
@@ -236,8 +245,8 @@ async def health() -> dict[str, Any]:
         "default_language": "English",
         "persona": "teddy-companion+technical-agent",
         "technical_routing": True,
-        "routing_modes": ["persona-core", "companion", "technical", "fast-0.8b", "quality-2b"],
-        "chat_only": True,
+        "routing_modes": ["persona-core", "companion", "technical", "local-tools", "fast-0.8b", "quality-2b"],
+        "chat_only": False,
         "streaming": True,
         "thinking_visible": False,
         "persona_core": True,
@@ -248,7 +257,11 @@ async def health() -> dict[str, Any]:
         "owner_device_management": True,
         "reusable_friend_code_recovery": reusable_friend_code_enabled(),
         "paired_devices": paired_device_count(),
-        "local_tools_enabled": False,
+        "local_tools_enabled": True,
+        "local_tool_allowlist": [
+            "read_clipboard", "write_clipboard", "capture_screen", "open_url", "open_file",
+            "show_notification", "create_reminder", "list_reminders", "cancel_reminder",
+        ],
         "openclaw_enabled": False,
         "operator_log_ingest": "encrypted-spool",
     }
@@ -362,6 +375,8 @@ async def agent_ws(ws: WebSocket) -> None:
     connection_id = secrets.token_hex(6)
     session_key = f"tony-{connection_id}"
     preferred_language = "en"
+    client_capabilities: set[str] = set()
+    pending_tools: dict[str, dict[str, Any]] = {}
     await send_json(ws, {"type": "agent_state", "state": "idle"})
     await send_json(ws, {"type": "avatar_action", "action": "wave", "emotion": "affectionate", "duration_ms": 1200})
 
@@ -377,18 +392,25 @@ async def agent_ws(ws: WebSocket) -> None:
             message_type = payload.get("type")
             if message_type == "client_hello":
                 preferred_language = normalize_language(str(payload.get("language", "en")))
+                raw_capabilities = payload.get("capabilities") or []
+                client_capabilities = {
+                    str(item).strip() for item in raw_capabilities
+                    if isinstance(item, str) and str(item).strip()
+                }
                 await send_json(ws, {
                     "type": "client_hello_ack",
                     "protocol_version": "1",
-                    "server_version": "1.0.8",
+                    "server_version": "1.0.9",
                     "accepted_capabilities": [
                         "operator_log_sync_v1",
                         "device_code_pairing_v1",
                         "owner_device_management_v1",
                         "routed_chat_v1",
                         "model_profile_routing_v1",
+                        "local_tools_v1",
+                        "local_reminders_v1",
                     ],
-                    "chat_only": True,
+                    "chat_only": False,
                     "streaming": True,
                     "thinking_visible": False,
                     "local_model": local_model_id(),
@@ -407,6 +429,47 @@ async def agent_ws(ws: WebSocket) -> None:
                 await send_json(ws, {"type": "operator_log_ack", "batch_id": batch_id, "event_count": event_count})
                 continue
 
+            if message_type == "tool_result":
+                request_id = str(payload.get("request_id", "")).strip()
+                tool = str(payload.get("tool", "")).strip()
+                pending = pending_tools.pop(request_id, None)
+                if pending is None or tool != pending.get("tool"):
+                    await send_json(ws, {"type": "error", "message": "Unexpected local tool result."})
+                    continue
+
+                ok = bool(payload.get("ok"))
+                result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+                language = str(pending.get("language", preferred_language))
+                chinese = normalize_language(language) == "zh" or looks_chinese(str(pending.get("message", "")))
+                if not ok:
+                    answer = _tool_failure_text(tool, str(payload.get("error", "")), chinese=chinese)
+                    await finish_answer(ws, answer, "tony-local-tools", False)
+                    continue
+
+                if not bool(pending.get("needs_backend")):
+                    answer = direct_success_text(tool, result, chinese=chinese)
+                    await finish_answer(ws, answer, "tony-local-tools", False)
+                    continue
+
+                await send_json(ws, {"type": "agent_state", "state": "working", "agent": "tony-tool-result-router"})
+                try:
+                    async def emit_tool_delta(piece: str) -> None:
+                        await send_json(ws, {"type": "text_delta", "content": piece})
+
+                    context_message = tool_context_for_model(str(pending.get("message", "")), tool, result)
+                    answer, used_agent, fallback_used = await call_backend_stream(
+                        context_message,
+                        session_key,
+                        emit_tool_delta,
+                        language,
+                        str(pending.get("model_profile", "auto")),
+                    )
+                    await finish_answer(ws, answer, used_agent, fallback_used)
+                except Exception as exc:
+                    await send_json(ws, {"type": "error", "message": f"Tony could not process the local result: {exc}"})
+                    await send_json(ws, {"type": "agent_state", "state": "error"})
+                continue
+
             if message_type not in {"message", "user_message"}:
                 continue
             content = str(payload.get("content", "")).strip()
@@ -416,6 +479,28 @@ async def agent_ws(ws: WebSocket) -> None:
             request_model_profile = normalize_model_profile(str(payload.get("model_profile", "auto")))
             action, emotion, duration = action_for_text(content)
             await send_json(ws, {"type": "avatar_action", "action": action, "emotion": emotion, "duration_ms": duration})
+
+            tool_plan = plan_local_tool(content) if "local_tools_v1" in client_capabilities else None
+            if tool_plan is not None and len(pending_tools) < _MAX_PENDING_TOOLS:
+                request_id = secrets.token_hex(12)
+                pending_tools[request_id] = {
+                    "tool": str(tool_plan["tool"]),
+                    "message": content,
+                    "needs_backend": bool(tool_plan.get("needs_backend")),
+                    "language": request_language,
+                    "model_profile": request_model_profile,
+                    "created_at": time.monotonic(),
+                }
+                await send_json(ws, {"type": "agent_state", "state": "tool_running"})
+                await send_json(ws, {
+                    "type": "tool_request",
+                    "request_id": request_id,
+                    "tool": str(tool_plan["tool"]),
+                    "args": dict(tool_plan.get("args") or {}),
+                    "reason": str(tool_plan.get("reason", ""))[:240],
+                })
+                continue
+
             await send_json(ws, {"type": "agent_state", "state": "thinking"})
             await send_json(ws, {"type": "agent_state", "state": "working", "agent": f"tony-router-{request_model_profile}"})
 
@@ -438,6 +523,7 @@ async def agent_ws(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     finally:
+        pending_tools.clear()
         try:
             from .main import SESSION_HISTORY, SESSION_MEMORY
             SESSION_HISTORY.pop(session_key, None)
