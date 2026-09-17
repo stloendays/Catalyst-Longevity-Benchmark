@@ -1,6 +1,6 @@
 # Tony Desktop Pet
 
-Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side OpenClaw agent. The built-in reference character is **Tony**, a Teddy / toy-poodle-style pet.
+Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side agent gateway. The built-in reference character is **Tony**, a Teddy / toy-poodle-style pet.
 
 Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their own pet artwork and declarative `pet.json`, validate/package it as `.tonypet`, and preview the pet in the same desktop runtime while keeping Tony as the safe default.
 
@@ -17,7 +17,16 @@ Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their 
 - packaged artwork/state validation;
 - versioned Windows packaging and automatic update support;
 - creator-facing `.tonypet` validation, packing and safe unpacking;
-- custom-pet preview from a local creator folder.
+- graphical **Pets & Creator** flow for selecting, validating, previewing and resetting custom pets;
+- custom-pet preview from either the GUI or a local creator folder on the command line.
+
+## Pets & Creator
+
+Open Tony's tray menu and choose **Pets & Creator…**. A creator can select a folder containing `pet.json` and transparent artwork. Tony validates identity, rights confirmation and the idle fallback before changing the visible desktop pet. Invalid packages do not replace the current pet.
+
+The current creator layer changes the pet's visual body and presentation while Tony Runtime continues to provide AI, memory, autonomy and local tools. Per-pet brain/personality switching is the next layer of the package format rather than being hidden inside image assets.
+
+To restore the built-in reference character, choose **Restore Tony** in the Creator window.
 
 ## Runtime assets
 
@@ -33,7 +42,7 @@ The client falls back to the pet's idle state when a custom package does not pro
 
 ## Create and validate a pet
 
-A creator folder must contain `pet.json` plus the artwork referenced by that manifest. The built-in Tony assets are the reference implementation.
+A creator folder must contain `pet.json` plus the artwork referenced by that manifest. The built-in Tony assets are the reference implementation. `poses.idle.state` is required so every pet always has a safe static fallback.
 
 Validate a pet folder:
 
@@ -49,33 +58,34 @@ python tools/tonypet.py pack C:\path\to\MyPet C:\path\to\MyPet.tonypet
 
 The packer deliberately excludes executable code, credentials, tokens, memories, operator logs and other machine-private content. `rights.confirmed` must be true before packaging.
 
-### Preview a creator pet
-
-Until the graphical Creator page is added, a local creator folder can be selected directly:
+For development/automation, a local creator folder can also be selected directly:
 
 ```powershell
 TonyDesktopPet.exe --pet-root=C:\path\to\MyPet
 ```
 
-That selection is persisted for later starts. Return to built-in Tony with:
+Return to built-in Tony with:
 
 ```powershell
 TonyDesktopPet.exe --pet-reset
 ```
 
-An invalid custom manifest never replaces the built-in Tony artwork; the runtime keeps the built-in assets as the startup fallback.
-
 ## Local reminders
 
-Tony's local bridge supports permissioned reminder tools in addition to clipboard, screenshot, URL/file opening and notifications:
+Tony has a persistent local reminder manager. Reminders live in the local Qt settings store, fire through the desktop tray, and are never included in `.tonypet` packages.
+
+There are two user paths:
+
+1. choose **Quick Reminder…** in Tony's tray and create a reminder entirely on the local PC;
+2. ask Tony naturally, for example `remind me in 20 minutes to stretch` or `20分钟后提醒我喝水`.
+
+For the Agent path, the gateway emits only a whitelisted `tool_request`; the Windows client independently validates it and asks the user for confirmation before creating, reading or cancelling reminder data. The local bridge supports:
 
 - `create_reminder`
 - `list_reminders`
 - `cancel_reminder`
 
-Reminders are persisted in the local Qt settings store, fire through the Windows tray, and are never packaged into `.tonypet` files. The client still asks for confirmation when the server Agent wants to create, read or cancel reminder data.
-
-The gateway recognizes simple explicit phrases such as `remind me in 20 minutes to stretch` and `20分钟后提醒我喝水`, while absolute reminders can use ISO 8601 timestamps.
+The gateway never receives arbitrary shell access from this mechanism. Existing local-tool policy still excludes shell/PowerShell execution, arbitrary file writes, file deletion and similar unrestricted operations.
 
 ## Build
 
@@ -86,10 +96,12 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
 cmake --build build --config Release
 ```
 
-Run the core regression tests with:
+Run the regression tests with:
 
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
+
+The repository CI additionally builds the full desktop target and runs gateway syntax checks plus local-tool routing tests.
 
 Double-click Tony to talk to the agent. Right-click Tony for manual actions and settings.
