@@ -1,0 +1,42 @@
+name: Tony core tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'bear_agent_pet/client/CMakeLists.txt'
+      - 'bear_agent_pet/client/src/TonyBehaviorEngine.*'
+      - 'bear_agent_pet/client/src/TonyMemoryStore.*'
+      - 'bear_agent_pet/client/tests/**'
+      - '.github/workflows/tony-core-tests.yml'
+  pull_request:
+    paths:
+      - 'bear_agent_pet/client/CMakeLists.txt'
+      - 'bear_agent_pet/client/src/TonyBehaviorEngine.*'
+      - 'bear_agent_pet/client/src/TonyMemoryStore.*'
+      - 'bear_agent_pet/client/tests/**'
+      - '.github/workflows/tony-core-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt development packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev libqt6websockets6-dev
+
+      - name: Configure Tony with tests
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build-tests -DBUILD_TESTING=ON
+
+      - name: Build Tony core tests
+        run: cmake --build bear_agent_pet/client/build-tests --target TonyCoreTests --parallel 2
+
+      - name: Run Tony core tests
+        run: ctest --test-dir bear_agent_pet/client/build-tests --output-on-failure
