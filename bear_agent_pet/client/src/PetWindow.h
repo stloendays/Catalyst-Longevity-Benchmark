@@ -26,6 +26,7 @@ public:
     ~PetWindow() override;
 
     bool applyActivePetPackage(QString *error=nullptr);
+    void createQuickReminder();
     TonyBehaviorEngine::Snapshot autonomySnapshot() const;
     qint64 autonomyInactivityMs() const;
     bool autonomousSurfaceAvailable() const;
