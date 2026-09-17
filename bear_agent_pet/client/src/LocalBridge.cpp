@@ -3,20 +3,31 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QJsonArray>
 #include <QMessageBox>
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QUrl>
-#include <QDateTime>
 
 LocalBridge::LocalBridge(QWidget *promptParent, QObject *parent)
-    : QObject(parent), promptParent_(promptParent) {}
+    : QObject(parent), promptParent_(promptParent), reminders_(this) {
+    connect(&reminders_, &LocalReminderManager::reminderDue, this,
+            [this](const QString &, const QString &title, const QString &text){
+        if(tray_ && tray_->isVisible()) {
+            tray_->showMessage(title.isEmpty() ? QStringLiteral("Tony Reminder") : title,
+                               text.isEmpty() ? QStringLiteral("Tony is reminding you now.") : text,
+                               QSystemTrayIcon::Information,
+                               9000);
+        }
+    });
+}
 
 QStringList LocalBridge::capabilities() const {
     return {
@@ -25,7 +36,10 @@ QStringList LocalBridge::capabilities() const {
         "capture_screen",
         "open_url",
         "open_file",
-        "show_notification"
+        "show_notification",
+        "create_reminder",
+        "list_reminders",
+        "cancel_reminder"
     };
 }
 
@@ -78,6 +92,79 @@ void LocalBridge::execute(const QString &requestId, const QString &toolRaw, cons
         } else {
             fail(requestId, tool, "系统托盘不可用，无法显示通知。");
         }
+        return;
+    }
+
+    if(tool == "create_reminder") {
+        const QString title = args.value("title").toString("Tony Reminder").trimmed().left(80);
+        const QString text = args.value("text").toString().trimmed().left(500);
+        const QString dueText = args.value("due_at").toString().trimmed();
+        const QDateTime due = QDateTime::fromString(dueText, Qt::ISODate);
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        if(title.isEmpty() || text.isEmpty() || !due.isValid()) {
+            fail(requestId, tool, "提醒需要 title、text 和合法的 ISO 8601 due_at 时间。");
+            return;
+        }
+        const QDateTime dueUtc = due.toUTC();
+        if(dueUtc <= now) {
+            fail(requestId, tool, "提醒时间必须晚于当前时间。");
+            return;
+        }
+        if(now.daysTo(dueUtc) > 366) {
+            fail(requestId, tool, "当前版本只允许创建未来一年内的提醒。");
+            return;
+        }
+        if(reminders_.count() >= 100) {
+            fail(requestId, tool, "本机最多保留 100 个未触发提醒，请先取消旧提醒。");
+            return;
+        }
+        const QString localDue = dueUtc.toLocalTime().toString(Qt::ISODate);
+        if(!confirm("Tony 想创建本地提醒",
+                    QString("服务器 Agent 请求在 %1 提醒你：\n\n%2\n%3")
+                        .arg(localDue, title, text))) {
+            fail(requestId, tool, "用户拒绝创建提醒。");
+            return;
+        }
+        const QString id = reminders_.createReminder(title, text, dueUtc);
+        succeed(requestId, tool, {
+            {"id", id},
+            {"title", title},
+            {"due_at", dueUtc.toString(Qt::ISODate)},
+            {"stored_locally", true}
+        });
+        return;
+    }
+
+    if(tool == "list_reminders") {
+        if(!confirm("Tony 想查看本地提醒",
+                    "服务器 Agent 请求读取 Tony 保存在这台电脑上的未触发提醒列表。")) {
+            fail(requestId, tool, "用户拒绝读取提醒列表。");
+            return;
+        }
+        const QJsonArray items = reminders_.reminders();
+        succeed(requestId, tool, {
+            {"reminders", items},
+            {"count", items.size()}
+        });
+        return;
+    }
+
+    if(tool == "cancel_reminder") {
+        const QString id = args.value("id").toString().trimmed();
+        if(id.isEmpty()) {
+            fail(requestId, tool, "需要提供要取消的提醒 id。");
+            return;
+        }
+        if(!confirm("Tony 想取消本地提醒",
+                    QString("服务器 Agent 请求取消提醒：\n\n%1").arg(id))) {
+            fail(requestId, tool, "用户拒绝取消提醒。");
+            return;
+        }
+        if(!reminders_.cancelReminder(id)) {
+            fail(requestId, tool, "没有找到对应的未触发提醒。");
+            return;
+        }
+        succeed(requestId, tool, {{"id", id}, {"cancelled", true}});
         return;
     }
 
