@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 jobs:
-  core-tests:
+  desktop-build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -45,6 +45,12 @@ jobs:
 
       - name: Run Tony C++ core tests
         run: ctest --test-dir bear_agent_pet/client/build-tests --output-on-failure
+
+  gateway-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Check gateway Python syntax
         run: |
