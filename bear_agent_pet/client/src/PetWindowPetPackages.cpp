@@ -15,10 +15,10 @@ QString canonicalChild(const QString &root, const QString &relative, bool direct
     const QString clean = QDir::cleanPath(QDir::fromNativeSeparators(relative.trimmed()));
     if(clean == QStringLiteral("..") || clean.startsWith(QStringLiteral("../"))) return {};
 
-    const QString canonicalRoot = QFileInfo(root).canonicalFilePath();
+    const QString canonicalRoot = QDir::fromNativeSeparators(QFileInfo(root).canonicalFilePath());
     if(canonicalRoot.isEmpty()) return {};
     const QFileInfo childInfo(QDir(canonicalRoot).filePath(clean));
-    const QString canonical = childInfo.canonicalFilePath();
+    const QString canonical = QDir::fromNativeSeparators(childInfo.canonicalFilePath());
     if(canonical.isEmpty()) return {};
 
 #ifdef Q_OS_WIN
@@ -26,7 +26,9 @@ QString canonicalChild(const QString &root, const QString &relative, bool direct
 #else
     constexpr auto cs = Qt::CaseSensitive;
 #endif
-    const QString prefix = canonicalRoot + QDir::separator();
+    const QString prefix = canonicalRoot.endsWith(QLatin1Char('/'))
+        ? canonicalRoot
+        : canonicalRoot + QLatin1Char('/');
     if(canonical.compare(canonicalRoot, cs) != 0 && !canonical.startsWith(prefix, cs)) return {};
     if(directory ? !childInfo.isDir() : !childInfo.isFile()) return {};
     return canonical;
@@ -51,8 +53,8 @@ bool PetWindow::applyActivePetPackage(QString *error) {
     if(root.isEmpty()) return true; // Built-in Tony assets already loaded by the constructor.
 
     const QString builtInRoot = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("assets"));
-    const QString canonicalRoot = QFileInfo(root).canonicalFilePath();
-    const QString canonicalBuiltIn = QFileInfo(builtInRoot).canonicalFilePath();
+    const QString canonicalRoot = QDir::fromNativeSeparators(QFileInfo(root).canonicalFilePath());
+    const QString canonicalBuiltIn = QDir::fromNativeSeparators(QFileInfo(builtInRoot).canonicalFilePath());
     if(!canonicalRoot.isEmpty() && canonicalRoot == canonicalBuiltIn) return true;
 
     const QString manifestPath = canonicalChild(root, QStringLiteral("pet.json"));
