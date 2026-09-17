@@ -156,6 +156,9 @@ int main(int argc, char *argv[]) {
     auto *openSettings=trayMenu->addAction(zhUi ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
     QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
 
+    auto *quickReminder=trayMenu->addAction(zhUi ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
+    QObject::connect(quickReminder,&QAction::triggered,&pet,&PetWindow::createQuickReminder);
+
     auto *autonomyMenu=trayMenu->addMenu(zhUi ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
     auto *autonomyGroup=new QActionGroup(autonomyMenu);
     autonomyGroup->setExclusive(true);
