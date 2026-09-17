@@ -63,6 +63,20 @@ if(WIN32)
   target_link_libraries(TonyDesktopPet PRIVATE Crypt32)
 endif()
 
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(TonyCoreTests
+      tests/TonyCoreTests.cpp
+      src/TonyBehaviorEngine.cpp
+      src/TonyBehaviorEngine.h
+      src/TonyMemoryStore.cpp
+      src/TonyMemoryStore.h
+  )
+  target_link_libraries(TonyCoreTests PRIVATE Qt6::Core)
+  target_include_directories(TonyCoreTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  add_test(NAME TonyCoreTests COMMAND TonyCoreTests)
+endif()
+
 install(TARGETS TonyDesktopPet RUNTIME DESTINATION .)
 install(DIRECTORY assets/ DESTINATION assets)
 install(FILES VERSION install/tony-install-root.marker DESTINATION .)
