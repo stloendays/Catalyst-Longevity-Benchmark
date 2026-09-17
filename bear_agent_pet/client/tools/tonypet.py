@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate, pack, and safely unpack Tony Pet packages.
 
-A .tonypet file is a ZIP archive with pet.json at its root.  The package is
+A .tonypet file is a ZIP archive with pet.json at its root. The package is
 content-only: credentials, logs, memories, machine settings, and executable
 code are deliberately rejected.
 """
@@ -138,6 +138,9 @@ def validate_manifest(root: Path) -> tuple[dict, set[Path]]:
         fail("poses must contain at least one pose")
     if "idle" not in poses:
         fail("poses.idle is required")
+    idle_pose = poses.get("idle")
+    if not isinstance(idle_pose, dict) or not idle_pose.get("state"):
+        fail("poses.idle.state is required so the runtime always has a safe static fallback")
 
     for pose_name, pose in poses.items():
         if not isinstance(pose_name, str) or not ID_RE.fullmatch(pose_name):
