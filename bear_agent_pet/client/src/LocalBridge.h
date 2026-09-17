@@ -4,6 +4,8 @@
 #include <QJsonObject>
 #include <QStringList>
 
+#include "LocalReminderManager.h"
+
 class QWidget;
 class QSystemTrayIcon;
 
@@ -34,4 +36,5 @@ private:
 
     QWidget *promptParent_{nullptr};
     QSystemTrayIcon *tray_{nullptr};
+    LocalReminderManager reminders_;
 };
