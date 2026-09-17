@@ -13,6 +13,7 @@
 #include <QTimer>
 
 #include "AppLogger.h"
+#include "PetCreatorDialog.h"
 #include "PetWindow.h"
 #include "SettingsDialog.h"
 #include "TonyAutonomousCompanion.h"
@@ -87,8 +88,7 @@ void applyPetCommandLine(const QStringList &arguments) {
         if(!argument.startsWith(prefix, Qt::CaseInsensitive)) continue;
         const QString raw = argument.mid(prefix.size()).trimmed();
         if(raw.isEmpty()) continue;
-        const QString root = QDir(raw).absolutePath();
-        settings.setValue(QStringLiteral("pet/asset_root"), root);
+        settings.setValue(QStringLiteral("pet/asset_root"), QDir(raw).absolutePath());
     }
 }
 }
@@ -126,6 +126,8 @@ int main(int argc, char *argv[]) {
     UpdateManager updater(&app);
     SettingsDialog settingsDialog(&updater, &pet);
     settingsDialog.setModal(false);
+    PetCreatorDialog creatorDialog(&pet);
+    creatorDialog.setModal(false);
 
     QObject::connect(&settingsDialog, &SettingsDialog::languageChanged,
                      &pet, &PetWindow::applyUiLanguage);
@@ -146,6 +148,14 @@ int main(int argc, char *argv[]) {
         settingsDialog.raise();
         settingsDialog.activateWindow();
     };
+    const auto showCreator = [&creatorDialog]{
+        AppLogger::recordOperatorEvent(QStringLiteral("pet_creator_open"));
+        creatorDialog.refresh();
+        creatorDialog.show();
+        creatorDialog.raise();
+        creatorDialog.activateWindow();
+    };
+
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
@@ -155,6 +165,9 @@ int main(int argc, char *argv[]) {
     auto *trayMenu=new QMenu(&pet);
     auto *openSettings=trayMenu->addAction(zhUi ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
     QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
+
+    auto *openCreator=trayMenu->addAction(zhUi ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
+    QObject::connect(openCreator,&QAction::triggered,&app,showCreator);
 
     auto *quickReminder=trayMenu->addAction(zhUi ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
     QObject::connect(quickReminder,&QAction::triggered,&pet,&PetWindow::createQuickReminder);
