@@ -147,10 +147,33 @@ bool PetWindow::applyActivePetPackage(QString *error) {
     if(tray_.isVisible()) tray_.setToolTip(QStringLiteral("%1 · Desktop Agent").arg(petName));
 
     QSettings settings;
+    settings.setValue(QStringLiteral("pet/asset_root"), canonicalRoot);
     settings.setValue(QStringLiteral("pet/active_id"), petId);
     settings.setValue(QStringLiteral("pet/active_name"), petName);
     settings.setValue(QStringLiteral("pet/active_version"), petVersion);
     qInfo().noquote() << "Activated custom Tony Pet package" << petId << petVersion << canonicalRoot;
+    action_=Action::Idle;
+    frame_=0;
     update();
     return true;
+}
+
+void PetWindow::resetToBuiltInPet() {
+    QSettings settings;
+    settings.remove(QStringLiteral("pet/asset_root"));
+    settings.remove(QStringLiteral("pet/active_id"));
+    settings.remove(QStringLiteral("pet/active_name"));
+    settings.remove(QStringLiteral("pet/active_version"));
+
+    stateAssets_.clear();
+    animationAssets_.clear();
+    pet_ = {};
+    loadAssets();
+    setFixedSize(280, 250);
+    setWindowTitle(QStringLiteral("Tony"));
+    if(tray_.isVisible()) tray_.setToolTip(QStringLiteral("Tony · Desktop Agent"));
+    action_=Action::Idle;
+    frame_=0;
+    qInfo().noquote() << "Restored built-in Tony reference pet";
+    update();
 }
