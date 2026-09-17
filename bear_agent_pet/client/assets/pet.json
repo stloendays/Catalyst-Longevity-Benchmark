@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "id": "tony",
+  "name": "Tony",
+  "version": "1.0.9",
+  "species": "Teddy dog",
+  "creator": "stloendays",
+  "description": "Tony is the reference Agent Pet: a Teddy-style desktop companion with autonomous behavior, memory, AI routing, and local tools.",
+  "runtime": {
+    "minimum": "1.0.9"
+  },
+  "rights": {
+    "confirmed": true,
+    "notes": "Reference package for the Tony Desktop Pet project."
+  },
+  "presentation": {
+    "default_width": 280,
+    "default_height": 250,
+    "mirror_when_walking_left": true
+  },
+  "poses": {
+    "idle": {
+      "state": "states/idle.png",
+      "enabled": true,
+      "fps": 8,
+      "bubbles": [
+        "I'm here.",
+        "Need a tiny study buddy?"
+      ]
+    },
+    "walk": {
+      "state": "states/walk.png",
+      "animation_dir": "animations/walk",
+      "enabled": true,
+      "fps": 9,
+      "mirror_left": true
+    },
+    "working": {
+      "state": "states/working.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "thinking": {
+      "state": "states/thinking.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "celebrate": {
+      "state": "states/celebrate.png",
+      "enabled": true,
+      "fps": 10
+    },
+    "sleep": {
+      "state": "states/sleep.png",
+      "enabled": true,
+      "fps": 5
+    },
+    "shiver": {
+      "state": "states/shiver.png",
+      "animation_dir": "animations/shiver",
+      "enabled": true,
+      "fps": 11,
+      "bubbles": [
+        "It's a little cold..."
+      ]
+    },
+    "ask_hug": {
+      "state": "states/ask_hug.png",
+      "animation_dir": "animations/ask_hug",
+      "enabled": true,
+      "fps": 9,
+      "bubbles": [
+        "Can I get a hug?"
+      ]
+    },
+    "hug": {
+      "state": "states/hug.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "blush": {
+      "state": "states/blush.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "blush_wave": {
+      "state": "states/blush_wave.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "study": {
+      "state": "states/study.png",
+      "enabled": true,
+      "fps": 7,
+      "bubbles": [
+        "I'm learning chemistry."
+      ]
+    },
+    "adjust_glasses": {
+      "state": "states/adjust_glasses.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "remove_glasses": {
+      "state": "states/remove_glasses.png",
+      "enabled": true,
+      "fps": 8
+    },
+    "wave": {
+      "state": "states/wave.png",
+      "enabled": true,
+      "fps": 9
+    }
+  },
+  "persona": {
+    "response_pack": "config/tony_responses.json",
+    "autonomy_pack": "config/tony_autonomous_responses.json"
+  },
+  "capabilities": [
+    "ai_chat",
+    "memory",
+    "autonomy",
+    "local_tools"
+  ]
+}
