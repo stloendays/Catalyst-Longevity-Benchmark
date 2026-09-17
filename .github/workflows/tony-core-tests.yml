@@ -25,14 +25,17 @@ permissions:
 jobs:
   core-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt development packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-base-dev libqt6websockets6-dev
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'linux_gcc_64'
+          modules: 'qtwebsockets'
+          cache: true
 
       - name: Configure Tony with tests
         run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build-tests -DBUILD_TESTING=ON
