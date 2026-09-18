@@ -2,12 +2,6 @@ name: Build Tony v1.0.9 full-canvas render
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/tony-v109-full-canvas-render
-    paths:
-      - 'bear_agent_pet/client/**'
-      - '.github/workflows/tony-v109-full-canvas-render.yml'
 
 permissions:
   contents: read
