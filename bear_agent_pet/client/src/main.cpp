@@ -238,72 +238,50 @@ int main(int argc, char *argv[]) {
 
     trayMenu->addSeparator();
     auto *quickReminder=trayMenu->addAction(QString());
+    auto *openNews=trayMenu->addAction(QString());
     auto *openCreator=trayMenu->addAction(QString());
     auto *openSettings=trayMenu->addAction(QString());
     auto *helpAction=trayMenu->addAction(QString());
     QObject::connect(quickReminder,&QAction::triggered,&pet,&PetWindow::createQuickReminder);
+    QObject::connect(openNews,&QAction::triggered,&app,showNews);
     QObject::connect(openCreator,&QAction::triggered,&app,showCreator);
     QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
     QObject::connect(helpAction,&QAction::triggered,&pet,&PetWindow::showWelcomeGuide);
 
     trayMenu->addSeparator();
-    auto *newsMenu=trayMenu->addMenu(QString());
-    auto *newsEnabled=newsMenu->addAction(QString());
-    newsEnabled->setCheckable(true);
-    newsEnabled->setChecked(news.enabled());
-    auto *newsNow=newsMenu->addAction(QString());
-    auto *newsOpen=newsMenu->addAction(QString());
-    newsOpen->setEnabled(news.latestStoryUrl().isValid());
+    auto *quietMenu=trayMenu->addMenu(QString());
+    auto *quietOneHour=quietMenu->addAction(QString());
+    auto *quietFourHours=quietMenu->addAction(QString());
+    auto *quietUntilMorning=quietMenu->addAction(QString());
+    quietMenu->addSeparator();
+    auto *quietOff=quietMenu->addAction(QString());
 
-    newsMenu->addSeparator();
-    auto *newsSourceMenu=newsMenu->addMenu(QString());
-    const auto newsSources=news.sources();
-    QVector<QAction*> newsSourceActions;
-    newsSourceActions.reserve(newsSources.size());
-    for(const auto &source : newsSources) {
-        auto *action=newsSourceMenu->addAction(source.name);
-        action->setCheckable(true);
-        action->setChecked(news.sourceEnabled(source.id));
-        QObject::connect(action,&QAction::toggled,&app,[&news,id=source.id](bool checked){
-            news.setSourceEnabled(id,checked);
-        });
-        newsSourceActions.push_back(action);
-    }
-
-    auto *newsFrequencyMenu=newsMenu->addMenu(QString());
-    auto *newsFrequencyGroup=new QActionGroup(newsFrequencyMenu);
-    newsFrequencyGroup->setExclusive(true);
-    const auto addNewsFrequency=[&](int minutes){
-        auto *action=newsFrequencyMenu->addAction(QString());
-        action->setCheckable(true);
-        action->setData(minutes);
-        action->setChecked(news.intervalMinutes()==minutes);
-        newsFrequencyGroup->addAction(action);
-        QObject::connect(action,&QAction::triggered,&app,[&news,minutes](bool checked){
-            if(checked) news.setIntervalMinutes(minutes);
-        });
-        return action;
-    };
-    auto *newsEveryHour=addNewsFrequency(60);
-    auto *newsEveryTwoHours=addNewsFrequency(120);
-    auto *newsEveryFourHours=addNewsFrequency(240);
-
-    QObject::connect(newsEnabled,&QAction::toggled,&app,[&news,&pet,uiIsChinese](bool checked){
-        news.setEnabled(checked);
+    const auto announceQuiet=[&pet,uiIsChinese](const QString &kind){
         const bool zh=uiIsChinese();
-        pet.showAutonomyNotice(
-            checked
-                ? (zh ? QStringLiteral("联网新闻已开启。Tony 会避开夜间和你正在操作的时候，只偶尔分享没说过的新标题。")
-                      : QStringLiteral("News Companion is on. Tony will avoid quiet hours and active moments, and only share unseen headlines occasionally."))
-                : (zh ? QStringLiteral("联网新闻已暂停。")
-                      : QStringLiteral("News Companion is paused.")));
-    });
-    QObject::connect(newsNow,&QAction::triggered,&app,[&news]{ news.fetchNow(true); });
-    QObject::connect(newsOpen,&QAction::triggered,&news,&NewsCompanion::openLatestStory);
-    QObject::connect(&news,&NewsCompanion::latestStoryChanged,&app,
-                     [newsOpen](const QString &,const QString &,const QUrl &url){
-        newsOpen->setEnabled(url.isValid());
-    });
+        QString text;
+        if(kind==QStringLiteral("off")) {
+            TonyQuietMode::clear();
+            text=zh ? QStringLiteral("免打扰已关闭。Tony 会恢复原来的主动模式和新闻设置。")
+                    : QStringLiteral("Do Not Disturb is off. Tony will resume your previous autonomy and news settings.");
+        } else if(kind==QStringLiteral("1h")) {
+            TonyQuietMode::setForMinutes(60);
+            text=zh ? QStringLiteral("好，接下来 1 小时我不主动打扰你。")
+                    : QStringLiteral("Okay. I will stay quiet for the next hour.");
+        } else if(kind==QStringLiteral("4h")) {
+            TonyQuietMode::setForMinutes(240);
+            text=zh ? QStringLiteral("好，接下来 4 小时我不主动打扰你。")
+                    : QStringLiteral("Okay. I will stay quiet for the next 4 hours.");
+        } else {
+            TonyQuietMode::setUntilTomorrowMorning(8);
+            text=zh ? QStringLiteral("好，我会安静到明早 8 点。")
+                    : QStringLiteral("Okay. I will stay quiet until 8 AM.");
+        }
+        pet.showAutonomyNotice(text);
+    };
+    QObject::connect(quietOneHour,&QAction::triggered,&app,[&]{ announceQuiet(QStringLiteral("1h")); });
+    QObject::connect(quietFourHours,&QAction::triggered,&app,[&]{ announceQuiet(QStringLiteral("4h")); });
+    QObject::connect(quietUntilMorning,&QAction::triggered,&app,[&]{ announceQuiet(QStringLiteral("morning")); });
+    QObject::connect(quietOff,&QAction::triggered,&app,[&]{ announceQuiet(QStringLiteral("off")); });
 
     trayMenu->addSeparator();
     auto *autonomyMenu=trayMenu->addMenu(QString());
@@ -338,18 +316,20 @@ int main(int argc, char *argv[]) {
         hugAction->setText(zh ? QStringLiteral("抱抱 Tony") : QStringLiteral("Hug Tony"));
         statusAction->setText(zh ? QStringLiteral("Tony 现在怎么样？") : QStringLiteral("How is Tony feeling?"));
         quickReminder->setText(zh ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
+        openNews->setText(zh ? QStringLiteral("联网新闻…") : QStringLiteral("News Companion…"));
         openCreator->setText(zh ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
         openSettings->setText(zh ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
         helpAction->setText(zh ? QStringLiteral("使用帮助") : QStringLiteral("Help / controls"));
-        newsMenu->setTitle(zh ? QStringLiteral("联网新闻") : QStringLiteral("News Companion"));
-        newsEnabled->setText(zh ? QStringLiteral("自动播报新闻") : QStringLiteral("Automatic headlines"));
-        newsNow->setText(zh ? QStringLiteral("现在说一条新闻") : QStringLiteral("Tell me one now"));
-        newsOpen->setText(zh ? QStringLiteral("打开最近一条原文") : QStringLiteral("Open latest story"));
-        newsSourceMenu->setTitle(zh ? QStringLiteral("新闻源") : QStringLiteral("Sources"));
-        newsFrequencyMenu->setTitle(zh ? QStringLiteral("播报频率") : QStringLiteral("Frequency"));
-        newsEveryHour->setText(zh ? QStringLiteral("每小时最多一条") : QStringLiteral("At most once per hour"));
-        newsEveryTwoHours->setText(zh ? QStringLiteral("每两小时最多一条") : QStringLiteral("At most every 2 hours"));
-        newsEveryFourHours->setText(zh ? QStringLiteral("每四小时最多一条") : QStringLiteral("At most every 4 hours"));
+        quietMenu->setTitle(
+            TonyQuietMode::isActive()
+                ? (zh ? QStringLiteral("免打扰 · %1").arg(TonyQuietMode::remainingLabel(true))
+                      : QStringLiteral("Do Not Disturb · %1").arg(TonyQuietMode::remainingLabel(false)))
+                : (zh ? QStringLiteral("免打扰") : QStringLiteral("Do Not Disturb")));
+        quietOneHour->setText(zh ? QStringLiteral("安静 1 小时") : QStringLiteral("Quiet for 1 hour"));
+        quietFourHours->setText(zh ? QStringLiteral("安静 4 小时") : QStringLiteral("Quiet for 4 hours"));
+        quietUntilMorning->setText(zh ? QStringLiteral("安静到早上 8 点") : QStringLiteral("Quiet until 8 AM"));
+        quietOff->setText(zh ? QStringLiteral("恢复主动提醒") : QStringLiteral("Resume proactive features"));
+        quietOff->setEnabled(TonyQuietMode::isActive());
         autonomyMenu->setTitle(zh ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
         autonomyOff->setText(zh ? QStringLiteral("关闭") : QStringLiteral("Off"));
         autonomyQuiet->setText(zh ? QStringLiteral("安静") : QStringLiteral("Quiet"));
@@ -358,8 +338,15 @@ int main(int argc, char *argv[]) {
         quitAction->setText(zh ? QStringLiteral("退出 Tony") : QStringLiteral("Quit Tony"));
     };
     refreshTrayLanguage();
+    QObject::connect(trayMenu,&QMenu::aboutToShow,&app,[&]{
+        refreshTrayLanguage();
+        newsDialog.refresh();
+    });
     QObject::connect(&settingsDialog,&SettingsDialog::languageChanged,&app,
-                     [refreshTrayLanguage](const QString &){ refreshTrayLanguage(); });
+                     [&newsDialog,refreshTrayLanguage](const QString &){
+        refreshTrayLanguage();
+        newsDialog.refresh();
+    });
 
     pet.trayIcon()->setContextMenu(trayMenu);
 
