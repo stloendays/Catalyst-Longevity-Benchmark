@@ -187,6 +187,7 @@ void NewsCompanion::fetchNow(bool userInitiated) {
         }
     }
 
+    userInitiated_ = userInitiated;
     fetchQueue_.clear();
     for(int i = 0; i < sources_.size(); ++i) {
         if(sourceEnabled(sources_.at(i).id))
@@ -218,7 +219,6 @@ void NewsCompanion::fetchNow(bool userInitiated) {
 
     fetchQueuePos_ = 0;
     fetching_ = true;
-    userInitiated_ = userInitiated;
     emit statusChanged(QStringLiteral("Checking trusted news feeds..."));
     if(userInitiated_ && pet_) {
         const bool zh = QSettings().value(
@@ -252,6 +252,7 @@ void NewsCompanion::fetchNextSource() {
     connect(reply, &QNetworkReply::finished, this, [this, reply, source]{
         const QByteArray raw = reply->readAll();
         const bool ok = reply->error() == QNetworkReply::NoError;
+        const QString errorText = reply->errorString();
         reply->deleteLater();
 
         if(ok) {
@@ -285,7 +286,7 @@ void NewsCompanion::fetchNextSource() {
                 return;
             }
         } else {
-            qWarning().noquote() << "News feed failed" << source.name << reply->errorString();
+            qWarning().noquote() << "News feed failed" << source.name << errorText;
         }
 
         fetchNextSource();
