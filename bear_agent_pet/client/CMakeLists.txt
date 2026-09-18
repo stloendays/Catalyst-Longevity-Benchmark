@@ -38,6 +38,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/TonyAutonomousCompanion.h
     src/TonyQuietMode.cpp
     src/TonyQuietMode.h
+    src/TonyConversationStore.cpp
+    src/TonyConversationStore.h
     src/NewsCompanion.cpp
     src/NewsCompanion.h
     src/NewsSettingsDialog.cpp
@@ -85,6 +87,8 @@ if(BUILD_TESTING)
       src/TonyBehaviorEngine.h
       src/TonyMemoryStore.cpp
       src/TonyMemoryStore.h
+      src/TonyConversationStore.cpp
+      src/TonyConversationStore.h
       src/LocalReminderManager.cpp
       src/LocalReminderManager.h
   )
