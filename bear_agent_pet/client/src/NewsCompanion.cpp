@@ -329,7 +329,7 @@ QVector<NewsCompanion::Item> NewsCompanion::parseFeed(
             const QString name = xml.name().toString().toLower();
             if(name == QStringLiteral("item") || name == QStringLiteral("entry")) {
                 if(current.url.scheme().toLower() != QStringLiteral("https"))
-                    current.url = {};
+                    current.url = QUrl{};
                 if(current.stableId.isEmpty())
                     current.stableId = current.url.toString();
                 if(current.stableId.isEmpty())
