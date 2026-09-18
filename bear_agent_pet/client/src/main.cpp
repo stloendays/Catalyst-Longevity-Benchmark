@@ -1,12 +1,15 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QEvent>
 #include <QFileInfo>
 #include <QIcon>
 #include <QKeySequence>
 #include <QLocale>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QSettings>
@@ -15,10 +18,12 @@
 
 #include "AppLogger.h"
 #include "NewsCompanion.h"
+#include "NewsSettingsDialog.h"
 #include "PetCreatorDialog.h"
 #include "PetWindow.h"
 #include "SettingsDialog.h"
 #include "TonyAutonomousCompanion.h"
+#include "TonyQuietMode.h"
 #include "UpdateManager.h"
 
 #ifndef TONY_APP_VERSION
@@ -76,6 +81,12 @@ private:
     bool dragged_{false};
 };
 
+QString singleInstanceServerName() {
+    const QByteArray digest = QCryptographicHash::hash(
+        QDir::homePath().toUtf8(), QCryptographicHash::Sha256).toHex().left(12);
+    return QStringLiteral("TonyDesktopPet-%1").arg(QString::fromLatin1(digest));
+}
+
 void applyPetCommandLine(const QStringList &arguments) {
     QSettings settings;
     const QString prefix = QStringLiteral("--pet-root=");
@@ -102,6 +113,24 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion(QStringLiteral(TONY_APP_VERSION));
 
     applyPetCommandLine(app.arguments());
+
+    QLocalServer singleInstanceServer;
+    const QString instanceName = singleInstanceServerName();
+    if(!singleInstanceServer.listen(instanceName)) {
+        QLocalSocket existingInstance;
+        existingInstance.connectToServer(instanceName, QIODevice::WriteOnly);
+        if(existingInstance.waitForConnected(450)) {
+            existingInstance.write("activate\n");
+            existingInstance.flush();
+            existingInstance.waitForBytesWritten(300);
+            return 0;
+        }
+
+        // Recover from a stale local-server endpoint left by an unclean exit.
+        QLocalServer::removeServer(instanceName);
+        if(!singleInstanceServer.listen(instanceName))
+            qWarning().noquote() << "Tony single-instance guard unavailable:" << instanceName;
+    }
 
     // Respect the saved interface language. On first launch, follow the OS locale
     // instead of silently forcing English every time Tony starts.
@@ -131,6 +160,18 @@ int main(int argc, char *argv[]) {
     pet.installEventFilter(&activityFilter);
     pet.show();
 
+    QObject::connect(&singleInstanceServer, &QLocalServer::newConnection, &app, [&]{
+        while(auto *socket = singleInstanceServer.nextPendingConnection()) {
+            socket->readAll();
+            pet.show();
+            pet.raise();
+            pet.activateWindow();
+            pet.openChat();
+            socket->disconnectFromServer();
+            socket->deleteLater();
+        }
+    });
+
     TonyAutonomousCompanion autonomy(&pet,&app);
     NewsCompanion news(&pet,&app);
     QObject::connect(&news, &NewsCompanion::headlineReady,
@@ -141,6 +182,8 @@ int main(int argc, char *argv[]) {
     settingsDialog.setModal(false);
     PetCreatorDialog creatorDialog(&pet);
     creatorDialog.setModal(false);
+    NewsSettingsDialog newsDialog(&news, &pet);
+    newsDialog.setModal(false);
 
     QObject::connect(&settingsDialog, &SettingsDialog::languageChanged,
                      &pet, &PetWindow::applyUiLanguage);
@@ -167,6 +210,13 @@ int main(int argc, char *argv[]) {
         creatorDialog.show();
         creatorDialog.raise();
         creatorDialog.activateWindow();
+    };
+    const auto showNews = [&newsDialog]{
+        AppLogger::recordOperatorEvent(QStringLiteral("news_settings_open"));
+        newsDialog.refresh();
+        newsDialog.show();
+        newsDialog.raise();
+        newsDialog.activateWindow();
     };
 
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
