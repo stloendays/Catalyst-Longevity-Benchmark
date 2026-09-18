@@ -175,6 +175,7 @@ private:
     bool autoRested_{false};
     bool walkingOnWindow_{false};
     bool pairingRequestActive_{false};
+    bool recordNextAgentAnswer_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
