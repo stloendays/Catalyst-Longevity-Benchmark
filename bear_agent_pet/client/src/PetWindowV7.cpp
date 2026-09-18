@@ -182,7 +182,12 @@ PetWindow::PetWindow(QWidget *parent)
         showBubble(answer_,0);
     });
     connect(&agent_, &AgentClient::answerFinished, this, [this]{
-        if(!answer_.isEmpty()) showBubble(answer_,8000);
+        if(!answer_.isEmpty()) {
+            showBubble(answer_,8000);
+            if(recordNextAgentAnswer_)
+                conversation_.append(QStringLiteral("assistant"), answer_);
+        }
+        recordNextAgentAnswer_=false;
         if(!actionTimer_.isActive()) restoreAgentAction();
     });
     connect(&agent_, &AgentClient::toolRequest, this,
@@ -259,6 +264,7 @@ PetWindow::PetWindow(QWidget *parent)
         showBubble(text,6500);
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
+        recordNextAgentAnswer_=false;
         agentState_="error";
         emotion_="worried";
         setAction(Action::Think,2800);
@@ -1878,6 +1884,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
     const QString prompt=text.trimmed();
     if(prompt.isEmpty()) return;
     markInteraction();
+    conversation_.append(QStringLiteral("user"), prompt);
     behavior_.onConversation();
     if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
 
@@ -1905,8 +1912,10 @@ void PetWindow::submitTonyPrompt(const QString &text){
             setAction(actionFromWire(decision.action),decision.durationMs);
         else
             restoreAgentAction();
-        if(!decision.reply.isEmpty())
+        if(!decision.reply.isEmpty()) {
+            conversation_.append(QStringLiteral("assistant"), decision.reply);
             showBubble(decision.reply,qMax(3000,decision.durationMs+1100));
+        }
         return;
     }
 
@@ -1914,6 +1923,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
     agentState_="thinking";
     restoreAgentAction();
     if(agent_.connected()) {
+        recordNextAgentAnswer_=true;
         agent_.sendMessage(decision.forwardText.isEmpty() ? prompt : decision.forwardText);
     } else {
         agentState_="idle";
