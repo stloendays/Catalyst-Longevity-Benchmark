@@ -1,6 +1,7 @@
 #pragma once
 #include <QElapsedTimer>
 #include <QHash>
+#include <QJsonArray>
 #include <QPixmap>
 #include <QScreen>
 #include <QPoint>
@@ -16,6 +17,7 @@
 #include "SpeechBubble.h"
 #include "SshTunnel.h"
 #include "TonyBehaviorEngine.h"
+#include "TonyConversationStore.h"
 
 class QEnterEvent;
 
@@ -28,6 +30,13 @@ public:
     bool applyActivePetPackage(QString *error=nullptr);
     void resetToBuiltInPet();
     void createQuickReminder();
+    QJsonArray localReminders() const;
+    bool cancelLocalReminder(const QString &id);
+    QJsonArray recentConversation() const;
+    void clearConversationHistory();
+    void requestDailyBrief(const QString &period,
+                           const QString &newsTitle={},
+                           const QString &newsSource={});
     TonyBehaviorEngine::Snapshot autonomySnapshot() const;
     qint64 autonomyInactivityMs() const;
     bool autonomousSurfaceAvailable() const;
@@ -137,6 +146,7 @@ private:
     SpeechBubble bubble_;
     ChatComposer composer_;
     TonyBehaviorEngine behavior_;
+    TonyConversationStore conversation_;
     Action action_{Action::Idle};
     QPoint dragOffset_;
     QPoint basePos_;
@@ -165,6 +175,7 @@ private:
     bool autoRested_{false};
     bool walkingOnWindow_{false};
     bool pairingRequestActive_{false};
+    bool recordNextAgentAnswer_{false};
     int idleBlinkTick_{0};
     int frame_{0};
     int walkDirection_{1};
