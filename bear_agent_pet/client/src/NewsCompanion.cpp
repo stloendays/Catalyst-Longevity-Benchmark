@@ -2,6 +2,7 @@
 
 #include "AppLogger.h"
 #include "PetWindow.h"
+#include "TonyQuietMode.h"
 
 #include <algorithm>
 
@@ -176,6 +177,10 @@ void NewsCompanion::fetchNow(bool userInitiated) {
     if(!userInitiated && !enabled()) return;
 
     if(!userInitiated) {
+        if(TonyQuietMode::isActive()) {
+            scheduleNext(15);
+            return;
+        }
         if(quietHours()) {
             scheduleNext(30);
             return;
