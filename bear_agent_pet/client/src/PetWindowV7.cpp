@@ -280,7 +280,11 @@ PetWindow::PetWindow(QWidget *parent)
     tray_.setVisible(true);
     localBridge_.setTrayIcon(&tray_);
     connect(&tray_, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason r){
-        if(r==QSystemTrayIcon::Trigger){ show(); raise(); }
+        if(r==QSystemTrayIcon::Trigger) {
+            show();
+            raise();
+            askTony();
+        }
     });
 
     QSettings s;
@@ -1846,6 +1850,21 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==spin) { emotion_="playful"; setAction(Action::Spin,1800); }
     else if(chosen==dance) { emotion_="happy"; setAction(Action::Dance,2600); }
     else if(chosen==quit) qApp->quit();
+}
+
+void PetWindow::openChat(){ askTony(); }
+void PetWindow::hug(){ hugTony(); }
+void PetWindow::showStatus(){ showLifeStatus(); }
+
+void PetWindow::showWelcomeGuide(){
+    markInteraction();
+    emotion_="friendly";
+    setAction(Action::Wave,1300);
+    showBubble(
+        uiText(
+            "Hi, I'm Tony. Click me for a reaction, double-click or click my tray icon to chat, drag me around the desktop, and right-click me for actions and settings.",
+            "嗨，我是 Tony。单击我会有反应；双击我或单击托盘图标可以聊天；可以把我拖到桌面任意位置；右键还能看到动作、提醒和设置。"),
+        9000);
 }
 
 void PetWindow::askTony(){

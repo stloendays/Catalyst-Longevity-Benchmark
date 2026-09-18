@@ -206,8 +206,10 @@ void UpdateManager::downloadAvailableUpdate() {
         reply->deleteLater();
 
         if(automaticUpdatesEnabled() && !userInitiatedCheck_) {
-            emit statusChanged(QStringLiteral("Installing the verified update automatically…"));
-            QTimer::singleShot(1500, this, [this]{ applyDownloadedUpdate(); });
+            emit statusChanged(QStringLiteral("Tony %1 is ready. Install it when convenient from Tony Settings.")
+                                   .arg(latestVersion_));
+            qInfo().noquote() << "Background update downloaded; waiting for user-controlled install"
+                              << latestVersion_;
         }
     });
 }

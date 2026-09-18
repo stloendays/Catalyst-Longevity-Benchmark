@@ -43,6 +43,10 @@ public slots:
     void configureConnection();
     void applyUiLanguage(const QString &language);
     void syncOperatorLogsForUpdate(const QString &targetVersion);
+    void openChat();
+    void hug();
+    void showStatus();
+    void showWelcomeGuide();
 protected:
     void paintEvent(QPaintEvent*) override;
     // Tony 1.0.9 keeps the pre-1.0.9 painter callable for regression diagnosis,

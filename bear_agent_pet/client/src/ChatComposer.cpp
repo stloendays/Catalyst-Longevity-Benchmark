@@ -28,11 +28,11 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
     setWindowFlags(Qt::Tool|Qt::FramelessWindowHint|Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_StyledBackground,true);
-    setFixedWidth(440);
+    setFixedWidth(480);
 
     title_=new QLabel("Tony",this);
     title_->setObjectName("title");
-    hint_=new QLabel("What do you want to tell me?",this);
+    hint_=new QLabel("Enter to send · Esc to close",this);
     hint_->setObjectName("hint");
 
     modelBox_=new QComboBox(this);
@@ -49,9 +49,10 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     edit_=new QLineEdit(this);
     edit_->setObjectName("message");
-    edit_->setPlaceholderText("Type a message…");
+    edit_->setPlaceholderText("Ask Tony anything…");
     edit_->setClearButtonEnabled(true);
     send_=new QPushButton("Send",this);
+    send_->setEnabled(false);
     send_->setObjectName("send");
     send_->setCursor(Qt::PointingHandCursor);
 
@@ -137,6 +138,9 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
 
     connect(send_,&QPushButton::clicked,this,&ChatComposer::submitCurrent);
     connect(edit_,&QLineEdit::returnPressed,this,&ChatComposer::submitCurrent);
+    connect(edit_,&QLineEdit::textChanged,this,[this](const QString &text){
+        send_->setEnabled(!text.trimmed().isEmpty());
+    });
     connect(modelBox_,&QComboBox::currentIndexChanged,this,[this](int index){
         const QString profile=normalizedModelProfile(modelBox_->itemData(index).toString());
         QSettings().setValue(QStringLiteral("agent/model_profile"),profile);
@@ -164,12 +168,12 @@ void ChatComposer::setLanguage(const QString &language) {
     const QString n=language.trimmed().toLower();
     language_=(n.startsWith("zh") || n=="cn") ? "zh" : "en";
     if(language_=="zh") {
-        hint_->setText("想对我说什么？");
-        edit_->setPlaceholderText("输入消息…");
+        hint_->setText("Enter 发送 · Esc 关闭");
+        edit_->setPlaceholderText("问 Tony 点什么…");
         send_->setText("发送");
     } else {
-        hint_->setText("What do you want to tell me?");
-        edit_->setPlaceholderText("Type a message…");
+        hint_->setText("Enter to send · Esc to close");
+        edit_->setPlaceholderText("Ask Tony anything…");
         send_->setText("Send");
     }
     refreshModelLabels();

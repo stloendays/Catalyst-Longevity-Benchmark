@@ -3,10 +3,15 @@
 #include "AppLogger.h"
 
 #include <QDateTime>
-#include <QInputDialog>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QJsonObject>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QSettings>
+#include <QSpinBox>
+#include <QVBoxLayout>
 
 namespace {
 bool reminderUiChinese() {
@@ -17,28 +22,59 @@ bool reminderUiChinese() {
 
 void PetWindow::createQuickReminder() {
     const bool zh = reminderUiChinese();
-    bool accepted = false;
-    const int minutes = QInputDialog::getInt(
-        this,
-        zh ? QStringLiteral("Tony 快速提醒") : QStringLiteral("Tony Quick Reminder"),
-        zh ? QStringLiteral("多少分钟后提醒？") : QStringLiteral("Remind me in how many minutes?"),
-        20,
-        1,
-        7 * 24 * 60,
-        1,
-        &accepted);
-    if(!accepted) return;
 
-    const QString text = QInputDialog::getText(
-        this,
-        zh ? QStringLiteral("提醒内容") : QStringLiteral("Reminder text"),
-        zh ? QStringLiteral("Tony 到时要提醒你什么？") : QStringLiteral("What should Tony remind you about?"),
-        QLineEdit::Normal,
-        {},
-        &accepted).trimmed();
-    if(!accepted || text.isEmpty()) return;
+    QDialog dialog(this);
+    dialog.setWindowTitle(zh ? QStringLiteral("Tony 快速提醒")
+                             : QStringLiteral("Tony Quick Reminder"));
+    dialog.setMinimumWidth(420);
 
-    const QDateTime dueUtc = QDateTime::currentDateTimeUtc().addSecs(static_cast<qint64>(minutes) * 60);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    form->setSpacing(10);
+
+    auto *minutesInput = new QSpinBox(&dialog);
+    minutesInput->setRange(1, 7 * 24 * 60);
+    minutesInput->setValue(20);
+    minutesInput->setSuffix(zh ? QStringLiteral(" 分钟") : QStringLiteral(" min"));
+
+    auto *textInput = new QLineEdit(&dialog);
+    textInput->setPlaceholderText(
+        zh ? QStringLiteral("例如：起来活动一下")
+           : QStringLiteral("e.g. stand up and stretch"));
+    textInput->setClearButtonEnabled(true);
+
+    form->addRow(
+        zh ? QStringLiteral("多久后提醒") : QStringLiteral("Remind me in"),
+        minutesInput);
+    form->addRow(
+        zh ? QStringLiteral("提醒内容") : QStringLiteral("Reminder"),
+        textInput);
+    layout->addLayout(form);
+
+    auto *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dialog);
+    auto *okButton = buttons->button(QDialogButtonBox::Ok);
+    okButton->setText(zh ? QStringLiteral("设置提醒") : QStringLiteral("Set reminder"));
+    okButton->setEnabled(false);
+    buttons->button(QDialogButtonBox::Cancel)
+        ->setText(zh ? QStringLiteral("取消") : QStringLiteral("Cancel"));
+    layout->addWidget(buttons);
+
+    connect(textInput, &QLineEdit::textChanged, &dialog, [okButton](const QString &text){
+        okButton->setEnabled(!text.trimmed().isEmpty());
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    textInput->setFocus();
+    if(dialog.exec() != QDialog::Accepted) return;
+
+    const int minutes = minutesInput->value();
+    const QString text = textInput->text().trimmed();
+    if(text.isEmpty()) return;
+
+    const QDateTime dueUtc =
+        QDateTime::currentDateTimeUtc().addSecs(static_cast<qint64>(minutes) * 60);
     const QString title = zh ? QStringLiteral("Tony 提醒") : QStringLiteral("Tony Reminder");
     const QString id = localBridge_.createLocalReminder(title, text.left(500), dueUtc);
     if(id.isEmpty()) return;

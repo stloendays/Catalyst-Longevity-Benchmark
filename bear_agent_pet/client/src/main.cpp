@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QIcon>
 #include <QKeySequence>
+#include <QLocale>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QSettings>
@@ -101,9 +102,17 @@ int main(int argc, char *argv[]) {
 
     applyPetCommandLine(app.arguments());
 
-    // Tony's character voice is English-only. Pin the shared runtime language
-    // before PetWindow, the local router, autonomous speech and Agent initialize.
-    QSettings().setValue(QStringLiteral("ui/language"), QStringLiteral("en"));
+    // Respect the saved interface language. On first launch, follow the OS locale
+    // instead of silently forcing English every time Tony starts.
+    QSettings startupSettings;
+    if(!startupSettings.contains(QStringLiteral("ui/language"))) {
+        const QString systemLocale = QLocale::system().name().toLower();
+        startupSettings.setValue(
+            QStringLiteral("ui/language"),
+            systemLocale.startsWith(QStringLiteral("zh"))
+                ? QStringLiteral("zh")
+                : QStringLiteral("en"));
+    }
 
     const QIcon appIcon(QCoreApplication::applicationDirPath()+QStringLiteral("/assets/tony-app.ico"));
     if(!appIcon.isNull()) app.setWindowIcon(appIcon);
@@ -160,24 +169,36 @@ int main(int argc, char *argv[]) {
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
 
-    const bool zhUi=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString()
-                        .startsWith(QStringLiteral("zh"),Qt::CaseInsensitive);
+    const auto uiIsChinese=[]{
+        return QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString()
+            .startsWith(QStringLiteral("zh"),Qt::CaseInsensitive);
+    };
     auto *trayMenu=new QMenu(&pet);
-    auto *openSettings=trayMenu->addAction(zhUi ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
-    QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
 
-    auto *openCreator=trayMenu->addAction(zhUi ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
-    QObject::connect(openCreator,&QAction::triggered,&app,showCreator);
+    auto *chatAction=trayMenu->addAction(QString());
+    auto *hugAction=trayMenu->addAction(QString());
+    auto *statusAction=trayMenu->addAction(QString());
+    QObject::connect(chatAction,&QAction::triggered,&pet,&PetWindow::openChat);
+    QObject::connect(hugAction,&QAction::triggered,&pet,&PetWindow::hug);
+    QObject::connect(statusAction,&QAction::triggered,&pet,&PetWindow::showStatus);
 
-    auto *quickReminder=trayMenu->addAction(zhUi ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
+    trayMenu->addSeparator();
+    auto *quickReminder=trayMenu->addAction(QString());
+    auto *openCreator=trayMenu->addAction(QString());
+    auto *openSettings=trayMenu->addAction(QString());
+    auto *helpAction=trayMenu->addAction(QString());
     QObject::connect(quickReminder,&QAction::triggered,&pet,&PetWindow::createQuickReminder);
+    QObject::connect(openCreator,&QAction::triggered,&app,showCreator);
+    QObject::connect(openSettings,&QAction::triggered,&app,showSettings);
+    QObject::connect(helpAction,&QAction::triggered,&pet,&PetWindow::showWelcomeGuide);
 
-    auto *autonomyMenu=trayMenu->addMenu(zhUi ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
+    trayMenu->addSeparator();
+    auto *autonomyMenu=trayMenu->addMenu(QString());
     auto *autonomyGroup=new QActionGroup(autonomyMenu);
     autonomyGroup->setExclusive(true);
     const QString activeMode=autonomy.mode();
-    const auto addAutonomyAction=[&](const QString &mode,const QString &en,const QString &zh){
-        auto *action=autonomyMenu->addAction(zhUi ? zh : en);
+    const auto addAutonomyAction=[&](const QString &mode){
+        auto *action=autonomyMenu->addAction(QString());
         action->setCheckable(true);
         action->setData(mode);
         action->setChecked(activeMode==mode);
@@ -187,18 +208,59 @@ int main(int argc, char *argv[]) {
             autonomy.setMode(mode);
             autonomy.announceMode();
         });
+        return action;
     };
-    addAutonomyAction(QStringLiteral("off"),QStringLiteral("Off"),QStringLiteral("关闭"));
-    addAutonomyAction(QStringLiteral("quiet"),QStringLiteral("Quiet"),QStringLiteral("安静"));
-    addAutonomyAction(QStringLiteral("normal"),QStringLiteral("Normal"),QStringLiteral("正常"));
-    addAutonomyAction(QStringLiteral("lively"),QStringLiteral("Lively"),QStringLiteral("活泼"));
+    auto *autonomyOff=addAutonomyAction(QStringLiteral("off"));
+    auto *autonomyQuiet=addAutonomyAction(QStringLiteral("quiet"));
+    auto *autonomyNormal=addAutonomyAction(QStringLiteral("normal"));
+    auto *autonomyLively=addAutonomyAction(QStringLiteral("lively"));
 
     trayMenu->addSeparator();
-    auto *quitAction=trayMenu->addAction(zhUi ? QStringLiteral("退出 Tony") : QStringLiteral("Quit Tony"));
+    auto *quitAction=trayMenu->addAction(QString());
     QObject::connect(quitAction,&QAction::triggered,&app,&QApplication::quit);
+
+    const auto refreshTrayLanguage=[=]{
+        const bool zh=uiIsChinese();
+        chatAction->setText(zh ? QStringLiteral("和 Tony 聊天…") : QStringLiteral("Chat with Tony…"));
+        hugAction->setText(zh ? QStringLiteral("抱抱 Tony") : QStringLiteral("Hug Tony"));
+        statusAction->setText(zh ? QStringLiteral("Tony 现在怎么样？") : QStringLiteral("How is Tony feeling?"));
+        quickReminder->setText(zh ? QStringLiteral("快速提醒…") : QStringLiteral("Quick Reminder…"));
+        openCreator->setText(zh ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
+        openSettings->setText(zh ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
+        helpAction->setText(zh ? QStringLiteral("使用帮助") : QStringLiteral("Help / controls"));
+        autonomyMenu->setTitle(zh ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
+        autonomyOff->setText(zh ? QStringLiteral("关闭") : QStringLiteral("Off"));
+        autonomyQuiet->setText(zh ? QStringLiteral("安静") : QStringLiteral("Quiet"));
+        autonomyNormal->setText(zh ? QStringLiteral("正常") : QStringLiteral("Normal"));
+        autonomyLively->setText(zh ? QStringLiteral("活泼") : QStringLiteral("Lively"));
+        quitAction->setText(zh ? QStringLiteral("退出 Tony") : QStringLiteral("Quit Tony"));
+    };
+    refreshTrayLanguage();
+    QObject::connect(&settingsDialog,&SettingsDialog::languageChanged,&app,
+                     [refreshTrayLanguage](const QString &){ refreshTrayLanguage(); });
+
     pet.trayIcon()->setContextMenu(trayMenu);
 
+    QObject::connect(&updater,&UpdateManager::updateDownloaded,&app,
+                     [&pet,uiIsChinese](const QString &version){
+        const bool zh=uiIsChinese();
+        pet.trayIcon()->showMessage(
+            zh ? QStringLiteral("Tony 更新已准备好") : QStringLiteral("Tony update ready"),
+            zh ? QStringLiteral("Tony %1 已下载并校验。你可以在“Tony 设置 → 自动更新”里选择何时安装。").arg(version)
+               : QStringLiteral("Tony %1 is downloaded and verified. Install it when convenient from Tony Settings → Automatic Updates.").arg(version),
+            QSystemTrayIcon::Information,
+            6500);
+    });
+    QObject::connect(pet.trayIcon(),&QSystemTrayIcon::messageClicked,&app,showSettings);
+
     updater.scheduleStartupCheck();
+
+    QTimer::singleShot(900,&app,[&pet]{
+        QSettings settings;
+        if(settings.value(QStringLiteral("ux/welcome_seen"),false).toBool()) return;
+        settings.setValue(QStringLiteral("ux/welcome_seen"),true);
+        pet.showWelcomeGuide();
+    });
 
     // First launch stays non-modal. An unpaired PetWindow automatically exposes
     // a short-lived device connection code after Tony is visibly on the desktop.

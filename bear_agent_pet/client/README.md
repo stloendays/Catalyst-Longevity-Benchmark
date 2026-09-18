@@ -4,6 +4,17 @@ Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side ag
 
 Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their own pet artwork and declarative `pet.json`, validate/package it as `.tonypet`, and preview the pet in the same desktop runtime while keeping Tony as the safe default.
 
+## Tony 1.1.0 UX refresh
+
+Tony 1.1.0 focuses on making the existing Agent Pet features easier to discover and less disruptive:
+
+- the saved English / 简体中文 interface preference is respected across launches;
+- a first-run guide explains click, double-click, drag, right-click and tray interactions;
+- left-clicking Tony's tray icon opens chat immediately;
+- the tray menu puts chat, hug and status before configuration actions;
+- the chat composer has clearer keyboard guidance and disables Send for empty messages;
+- automatic updates may check and download in the background, but Tony no longer restarts itself without the user choosing when to install.
+
 ## Current capabilities
 
 - transparent always-on-desktop pet window;
