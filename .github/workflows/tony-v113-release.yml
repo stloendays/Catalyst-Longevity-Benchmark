@@ -1,0 +1,234 @@
+name: Publish Tony v1.1.3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v109-full-canvas-render
+      - feature/tony-v113-today-hub
+    paths:
+      - 'bear_agent_pet/client/**'
+      - '.github/workflows/tony-v113-release.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tony-v113-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
+          if ($version -ne '1.1.3') { throw "Expected Tony 1.1.3, got $version" }
+          "TONY_VERSION=$version" >> $env:GITHUB_ENV
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtwebsockets'
+          cache: true
+
+      - name: Validate artwork and pet package
+        shell: pwsh
+        run: |
+          python bear_agent_pet/client/tools/validate_state_assets.py
+          python bear_agent_pet/client/tools/tonypet.py validate bear_agent_pet/client/assets
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S bear_agent_pet/client -B bear_agent_pet/client/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build bear_agent_pet/client/build --config Release --parallel
+
+      - name: Run C++ tests
+        shell: pwsh
+        run: ctest --test-dir bear_agent_pet/client/build -C Release --output-on-failure
+
+      - name: Package Windows runtime
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package"
+          if (Test-Path $package) { Remove-Item $package -Recurse -Force }
+          cmake --install bear_agent_pet/client/build --config Release --prefix $package
+          if ($LASTEXITCODE -ne 0) { throw "CMake install failed" }
+          Copy-Item bear_agent_pet/client/RUN_TONY.md "$package/RUN_TONY.md"
+          "TonyDesktopPet $env:TONY_VERSION`ncommit=$env:GITHUB_SHA" | Set-Content "$package/VERSION.txt" -Encoding utf8
+          windeployqt --release --no-translations "$package/TonyDesktopPet.exe"
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+
+          $root = (Resolve-Path $package).Path
+          $managed = Get-ChildItem $package -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($root.Length + 1)
+          } | Sort-Object
+          @($managed) + 'tony-file-list.txt' | Sort-Object -Unique | Set-Content "$package/tony-file-list.txt" -Encoding utf8
+
+          foreach ($required in @('TonyDesktopPet.exe','VERSION','VERSION.txt','tony-install-root.marker','tony-file-list.txt','assets/pet.json')) {
+            if (-not (Test-Path (Join-Path $package $required))) { throw "Missing package entry: $required" }
+          }
+
+      - name: Smoke test packaged Tony
+        shell: pwsh
+        run: |
+          $package = "$PWD/bear_agent_pet/client/package"
+          $originalPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          try {
+            $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+            try {
+              Start-Sleep -Seconds 4
+              if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
+
+              $second = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+              try {
+                $second | Wait-Process -Timeout 6 -ErrorAction Stop
+              } catch {
+                if (-not $second.HasExited) { Stop-Process -Id $second.Id -Force }
+                throw "Second Tony instance did not hand off to the existing pet."
+              }
+              if ($second.ExitCode -ne 0) { throw "Second Tony instance exited with $($second.ExitCode)" }
+              if ($process.HasExited) { throw "Primary Tony exited during single-instance handoff." }
+              Write-Host 'TONY_V113_SINGLE_INSTANCE=PASS'
+              Write-Host 'TONY_V113_SMOKE=PASS'
+            } finally {
+              if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            }
+          } finally {
+            $env:PATH = $originalPath
+          }
+
+      - name: Build release archive
+        shell: pwsh
+        run: |
+          $zip = "$PWD/TonyDesktopPet-$env:TONY_VERSION-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path bear_agent_pet/client/package/* -DestinationPath $zip -CompressionLevel Optimal
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha  TonyDesktopPet-$env:TONY_VERSION-windows-x64.zip" | Set-Content "$zip.sha256" -Encoding ascii
+          Write-Host "TONY_V113_ARCHIVE=PASS sha256=$sha"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TonyDesktopPet-1.1.3-windows-x64-release
+          path: |
+            TonyDesktopPet-1.1.3-windows-x64.zip
+            TonyDesktopPet-1.1.3-windows-x64.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    if: github.ref == 'refs/heads/feature/tony-v109-full-canvas-render'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: '1.1.3'
+      RELEASE_TAG: tony-v1.1.3
+      UPDATE_TAG: tony-desktop-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: TonyDesktopPet-1.1.3-windows-x64-release
+          path: release
+
+      - name: Prepare updater manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "release/TonyDesktopPet-${VERSION}-windows-x64.zip" TonyDesktopPet-windows-x64.zip
+          SHA256="$(sha256sum TonyDesktopPet-windows-x64.zip | awk '{print $1}')"
+          SIZE="$(stat -c '%s' TonyDesktopPet-windows-x64.zip)"
+          export SHA256 SIZE
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          repo=os.environ['GITHUB_REPOSITORY']
+          version=os.environ['VERSION']
+          manifest={
+              'schema': 1,
+              'product': 'Tony Desktop Pet',
+              'platform': 'windows-x64',
+              'version': version,
+              'url': f'https://github.com/{repo}/releases/download/tony-desktop-latest/TonyDesktopPet-windows-x64.zip?version={version}',
+              'sha256': os.environ['SHA256'],
+              'size': int(os.environ['SIZE']),
+              'published_at': datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+              'commit': os.environ['GITHUB_SHA'],
+              'minimum_updater_version': '0.9.0',
+          }
+          with open('latest.json','w',encoding='utf-8',newline='\n') as f:
+              json.dump(manifest,f,indent=2)
+              f.write('\n')
+          print('TONY_V113_MANIFEST=PASS', manifest['version'], manifest['sha256'], manifest['size'])
+          PY
+
+      - name: Publish Tony 1.1.3 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          Tony Desktop Pet v1.1.3 — Today Hub
+
+          - Adds Tony Today as a compact daily dashboard for reminders, latest news and recent local conversations.
+          - Adds Ctrl+Shift+T for fast access to the Today hub.
+          - Adds bounded local chat history for user-initiated conversations and daily briefs; automatic news is excluded.
+          - Adds Morning Brief and Evening Brief using local time, upcoming reminders, Tony state and the latest saved headline.
+          - Keeps a useful local briefing fallback when the Agent is offline.
+          - Adds reminder cancellation and local conversation-history clearing directly from Today.
+          - Preserves Tony 1.1.2 single-instance behavior, Do Not Disturb, News Companion, Creator and local-tool controls.
+          - Built, tested, packaged and smoke-tested on Windows with Qt 6.8.3.
+          EOF
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG"               "release/TonyDesktopPet-${VERSION}-windows-x64.zip"               "release/TonyDesktopPet-${VERSION}-windows-x64.zip.sha256"               --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$GITHUB_SHA"               --title "Tony Desktop Pet v${VERSION}"               --notes-file release-notes.md
+          else
+            gh release create "$RELEASE_TAG"               "release/TonyDesktopPet-${VERSION}-windows-x64.zip"               "release/TonyDesktopPet-${VERSION}-windows-x64.zip.sha256"               --repo "$GITHUB_REPOSITORY"               --target "$GITHUB_SHA"               --title "Tony Desktop Pet v${VERSION}"               --notes-file release-notes.md
+          fi
+
+      - name: Publish automatic update channel
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$UPDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$UPDATE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$GITHUB_SHA"               --prerelease               --title 'Tony Desktop Pet automatic update channel'               --notes 'Managed automatically by Tony release workflows. latest.json is the updater manifest.'
+          fi
+          gh release upload "$UPDATE_TAG"             TonyDesktopPet-windows-x64.zip latest.json             --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Verify published update
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$UPDATE_TAG"
+          curl -fL --retry 5 --retry-delay 2 "$BASE/latest.json?verify=$GITHUB_RUN_ID" -o published-latest.json
+          curl -fL --retry 5 --retry-delay 2 "$BASE/TonyDesktopPet-windows-x64.zip?verify=$GITHUB_RUN_ID" -o published-package.zip
+          python - <<'PY'
+          import hashlib, json, os
+          with open('published-latest.json',encoding='utf-8-sig') as f:
+              m=json.load(f)
+          assert m['version']==os.environ['VERSION'], m
+          assert m['commit']==os.environ['GITHUB_SHA'], m
+          h=hashlib.sha256()
+          with open('published-package.zip','rb') as f:
+              for chunk in iter(lambda:f.read(1024*1024), b''):
+                  h.update(chunk)
+          assert h.hexdigest()==m['sha256'], (h.hexdigest(),m['sha256'])
+          assert os.path.getsize('published-package.zip')==m['size']
+          print('TONY_V113_PUBLIC_UPDATE_VERIFY=PASS',m['version'],m['sha256'],m['size'])
+          PY
