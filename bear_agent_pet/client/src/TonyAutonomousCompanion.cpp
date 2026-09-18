@@ -3,6 +3,7 @@
 #include "AppLogger.h"
 #include "PetWindow.h"
 #include "TonyResponsePack.h"
+#include "TonyQuietMode.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -209,7 +210,8 @@ void TonyAutonomousCompanion::tick() {
     if(!pet_) return;
 
     const QString currentMode=mode();
-    if(currentMode==QStringLiteral("off") || !pet_->autonomousSurfaceAvailable()) return;
+    if(currentMode==QStringLiteral("off") || TonyQuietMode::isActive() ||
+       !pet_->autonomousSurfaceAvailable()) return;
 
     const qint64 nowMs=QDateTime::currentMSecsSinceEpoch();
     if(nowMs-startedAtMs_<3*60*1000) return;
