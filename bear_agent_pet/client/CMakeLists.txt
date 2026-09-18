@@ -40,6 +40,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/TonyQuietMode.h
     src/NewsCompanion.cpp
     src/NewsCompanion.h
+    src/NewsSettingsDialog.cpp
+    src/NewsSettingsDialog.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
     src/ChatComposer.cpp
