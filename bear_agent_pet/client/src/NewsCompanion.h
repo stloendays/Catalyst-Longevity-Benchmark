@@ -25,6 +25,9 @@ public:
     void setEnabled(bool enabled);
     int intervalMinutes() const;
     void setIntervalMinutes(int minutes);
+    int quietStartHour() const;
+    int quietEndHour() const;
+    void setQuietHours(int startHour, int endHour);
 
     QVector<Source> sources() const;
     bool sourceEnabled(const QString &id) const;
