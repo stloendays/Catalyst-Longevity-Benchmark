@@ -195,6 +195,14 @@ void NewsCompanion::fetchNow(bool userInitiated) {
 
     if(fetchQueue_.isEmpty()) {
         emit statusChanged(QStringLiteral("No news sources are enabled."));
+        if(userInitiated_ && pet_) {
+            const bool zh = QSettings().value(
+                QStringLiteral("ui/language"), QStringLiteral("en"))
+                .toString().startsWith(QStringLiteral("zh"), Qt::CaseInsensitive);
+            pet_->showAutonomyNotice(
+                zh ? QStringLiteral("还没有启用任何新闻源。")
+                   : QStringLiteral("No news sources are enabled yet."));
+        }
         scheduleNext();
         return;
     }
@@ -212,6 +220,14 @@ void NewsCompanion::fetchNow(bool userInitiated) {
     fetching_ = true;
     userInitiated_ = userInitiated;
     emit statusChanged(QStringLiteral("Checking trusted news feeds..."));
+    if(userInitiated_ && pet_) {
+        const bool zh = QSettings().value(
+            QStringLiteral("ui/language"), QStringLiteral("en"))
+            .toString().startsWith(QStringLiteral("zh"), Qt::CaseInsensitive);
+        pet_->showAutonomyNotice(
+            zh ? QStringLiteral("我去网上看看有没有新的消息。")
+               : QStringLiteral("Let me check the news feeds for something new."));
+    }
     fetchNextSource();
 }
 
@@ -219,6 +235,14 @@ void NewsCompanion::fetchNextSource() {
     if(fetchQueuePos_ >= fetchQueue_.size()) {
         fetching_ = false;
         emit statusChanged(QStringLiteral("No unseen headlines right now."));
+        if(userInitiated_ && pet_) {
+            const bool zh = QSettings().value(
+                QStringLiteral("ui/language"), QStringLiteral("en"))
+                .toString().startsWith(QStringLiteral("zh"), Qt::CaseInsensitive);
+            pet_->showAutonomyNotice(
+                zh ? QStringLiteral("暂时没有我还没说过的新标题，或者新闻源现在连接不上。")
+                   : QStringLiteral("I couldn't find an unseen headline right now, or the feeds are temporarily unavailable."));
+        }
         scheduleNext();
         return;
     }
