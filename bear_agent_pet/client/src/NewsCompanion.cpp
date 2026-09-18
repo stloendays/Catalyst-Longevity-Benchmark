@@ -2,6 +2,7 @@
 
 #include "AppLogger.h"
 #include "PetWindow.h"
+#include "TonyQuietMode.h"
 
 #include <algorithm>
 
@@ -96,6 +97,20 @@ void NewsCompanion::setIntervalMinutes(int minutes) {
     if(enabled()) scheduleNext(normalized);
 }
 
+int NewsCompanion::quietStartHour() const {
+    return qBound(0, QSettings().value(QStringLiteral("news/quiet_start_hour"), 23).toInt(), 23);
+}
+
+int NewsCompanion::quietEndHour() const {
+    return qBound(0, QSettings().value(QStringLiteral("news/quiet_end_hour"), 8).toInt(), 23);
+}
+
+void NewsCompanion::setQuietHours(int startHour, int endHour) {
+    QSettings settings;
+    settings.setValue(QStringLiteral("news/quiet_start_hour"), qBound(0, startHour, 23));
+    settings.setValue(QStringLiteral("news/quiet_end_hour"), qBound(0, endHour, 23));
+}
+
 QVector<NewsCompanion::Source> NewsCompanion::sources() const {
     return sources_;
 }
@@ -155,8 +170,8 @@ void NewsCompanion::loadSources() {
 
 bool NewsCompanion::quietHours() const {
     const int hour = QTime::currentTime().hour();
-    const int start = QSettings().value(QStringLiteral("news/quiet_start_hour"), 23).toInt();
-    const int end = QSettings().value(QStringLiteral("news/quiet_end_hour"), 8).toInt();
+    const int start = quietStartHour();
+    const int end = quietEndHour();
     if(start == end) return false;
     if(start < end) return hour >= start && hour < end;
     return hour >= start || hour < end;
@@ -176,6 +191,10 @@ void NewsCompanion::fetchNow(bool userInitiated) {
     if(!userInitiated && !enabled()) return;
 
     if(!userInitiated) {
+        if(TonyQuietMode::isActive()) {
+            scheduleNext(15);
+            return;
+        }
         if(quietHours()) {
             scheduleNext(30);
             return;

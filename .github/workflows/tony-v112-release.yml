@@ -1,13 +1,20 @@
-name: Publish Tony v1.1.1
+name: Publish Tony v1.1.2
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/tony-v109-full-canvas-render
+      - feature/tony-v112-ux-polish
+    paths:
+      - 'bear_agent_pet/client/**'
+      - '.github/workflows/tony-v112-release.yml'
 
 permissions:
   contents: write
 
 concurrency:
-  group: tony-v111-release
+  group: tony-v112-release
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content bear_agent_pet/client/VERSION -Raw).Trim()
-          if ($version -ne '1.1.1') { throw "Expected Tony 1.1.1, got $version" }
+          if ($version -ne '1.1.2') { throw "Expected Tony 1.1.2, got $version" }
           "TONY_VERSION=$version" >> $env:GITHUB_ENV
 
       - uses: jurplel/install-qt-action@v4
@@ -80,9 +87,20 @@ jobs:
           try {
             $process = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
             try {
-              Start-Sleep -Seconds 6
+              Start-Sleep -Seconds 4
               if ($process.HasExited) { throw "Tony exited during smoke test: $($process.ExitCode)" }
-              Write-Host 'TONY_V111_SMOKE=PASS'
+
+              $second = Start-Process -FilePath "$package/TonyDesktopPet.exe" -WorkingDirectory $package -WindowStyle Hidden -PassThru
+              try {
+                $second | Wait-Process -Timeout 6 -ErrorAction Stop
+              } catch {
+                if (-not $second.HasExited) { Stop-Process -Id $second.Id -Force }
+                throw "Second Tony instance did not hand off to the existing pet."
+              }
+              if ($second.ExitCode -ne 0) { throw "Second Tony instance exited with $($second.ExitCode)" }
+              if ($process.HasExited) { throw "Primary Tony exited during single-instance handoff." }
+              Write-Host 'TONY_V112_SINGLE_INSTANCE=PASS'
+              Write-Host 'TONY_V112_SMOKE=PASS'
             } finally {
               if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
             }
@@ -98,14 +116,14 @@ jobs:
           Compress-Archive -Path bear_agent_pet/client/package/* -DestinationPath $zip -CompressionLevel Optimal
           $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$sha  TonyDesktopPet-$env:TONY_VERSION-windows-x64.zip" | Set-Content "$zip.sha256" -Encoding ascii
-          Write-Host "TONY_V111_ARCHIVE=PASS sha256=$sha"
+          Write-Host "TONY_V112_ARCHIVE=PASS sha256=$sha"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TonyDesktopPet-1.1.1-windows-x64-release
+          name: TonyDesktopPet-1.1.2-windows-x64-release
           path: |
-            TonyDesktopPet-1.1.1-windows-x64.zip
-            TonyDesktopPet-1.1.1-windows-x64.zip.sha256
+            TonyDesktopPet-1.1.2-windows-x64.zip
+            TonyDesktopPet-1.1.2-windows-x64.zip.sha256
           if-no-files-found: error
 
   publish:
@@ -114,15 +132,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      VERSION: '1.1.1'
-      RELEASE_TAG: tony-v1.1.1
+      VERSION: '1.1.2'
+      RELEASE_TAG: tony-v1.1.2
       UPDATE_TAG: tony-desktop-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: TonyDesktopPet-1.1.1-windows-x64-release
+          name: TonyDesktopPet-1.1.2-windows-x64-release
           path: release
 
       - name: Prepare updater manifest
@@ -153,19 +171,19 @@ jobs:
           with open('latest.json','w',encoding='utf-8',newline='\n') as f:
               json.dump(manifest,f,indent=2)
               f.write('\n')
-          print('TONY_V111_MANIFEST=PASS', manifest['version'], manifest['sha256'], manifest['size'])
+          print('TONY_V112_MANIFEST=PASS', manifest['version'], manifest['sha256'], manifest['size'])
           PY
 
-      - name: Publish Tony 1.1.1 release
+      - name: Publish Tony 1.1.2 release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cat > release-notes.md <<'EOF'
-          Tony Desktop Pet v1.1.1 — News Companion
+          Tony Desktop Pet v1.1.2 — UX Polish
 
-          - Adds an opt-in News Companion that fetches HTTPS RSS/Atom headlines from trusted source presets.
+          - Adds an opt-in UX Polish that fetches HTTPS RSS/Atom headlines from trusted source presets.
           - Adds tray controls for automatic headlines, manual fetch, source selection, cadence and opening the original article.
           - Adds local headline deduplication, 23:00–08:00 quiet hours and activity-aware deferral.
           - Treats remote headlines as untrusted data before asking the Agent for a short neutral briefing.
@@ -211,5 +229,5 @@ jobs:
                   h.update(chunk)
           assert h.hexdigest()==m['sha256'], (h.hexdigest(),m['sha256'])
           assert os.path.getsize('published-package.zip')==m['size']
-          print('TONY_V111_PUBLIC_UPDATE_VERIFY=PASS',m['version'],m['sha256'],m['size'])
+          print('TONY_V112_PUBLIC_UPDATE_VERIFY=PASS',m['version'],m['sha256'],m['size'])
           PY
