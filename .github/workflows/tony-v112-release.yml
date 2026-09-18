@@ -2,13 +2,6 @@ name: Publish Tony v1.1.2
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/tony-v109-full-canvas-render
-      - feature/tony-v112-ux-polish
-    paths:
-      - 'bear_agent_pet/client/**'
-      - '.github/workflows/tony-v112-release.yml'
 
 permissions:
   contents: write
