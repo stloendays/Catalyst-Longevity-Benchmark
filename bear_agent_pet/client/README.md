@@ -81,6 +81,14 @@ Return to built-in Tony with:
 TonyDesktopPet.exe --pet-reset
 ```
 
+## Tony 1.1.3 Today hub
+
+- adds **Tony Today…** as a single daily dashboard for upcoming reminders, the latest saved news headline, and recent local conversation history;
+- adds `Ctrl+Shift+T` as a fast shortcut to the Today hub;
+- adds bounded local conversation history (up to 60 entries) for user-initiated chat and daily briefs; automatic news is excluded from chat history;
+- adds manual **Morning Brief** and **Evening Brief** actions that combine current local time, upcoming reminders, Tony's current state, and the latest saved headline into a concise Agent briefing;
+- keeps a disconnected fallback so Daily Brief still returns a useful local summary when the Agent is offline;
+- lets users cancel upcoming reminders and clear only local chat history directly from Today without deleting Tony's explicit memory.
 ## Tony 1.1.2 UX polish
 
 - Tony is single-instance: launching the executable again activates the existing pet and opens chat instead of creating a duplicate pet.
