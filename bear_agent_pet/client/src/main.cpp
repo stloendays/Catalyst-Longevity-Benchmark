@@ -10,10 +10,13 @@
 #include <QLocale>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QLockFile>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QSettings>
 #include <QShortcut>
+#include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 
 #include "AppLogger.h"
@@ -114,23 +117,35 @@ int main(int argc, char *argv[]) {
 
     applyPetCommandLine(app.arguments());
 
-    QLocalServer singleInstanceServer;
     const QString instanceName = singleInstanceServerName();
-    if(!singleInstanceServer.listen(instanceName)) {
-        QLocalSocket existingInstance;
-        existingInstance.connectToServer(instanceName, QIODevice::WriteOnly);
-        if(existingInstance.waitForConnected(450)) {
-            existingInstance.write("activate\n");
-            existingInstance.flush();
-            existingInstance.waitForBytesWritten(300);
-            return 0;
-        }
+    const QString lockPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+        + QStringLiteral("/") + instanceName + QStringLiteral(".lock");
+    QLockFile singleInstanceLock(lockPath);
+    singleInstanceLock.setStaleLockTime(0);
 
-        // Recover from a stale local-server endpoint left by an unclean exit.
-        QLocalServer::removeServer(instanceName);
-        if(!singleInstanceServer.listen(instanceName))
-            qWarning().noquote() << "Tony single-instance guard unavailable:" << instanceName;
+    if(!singleInstanceLock.tryLock(0)) {
+        // The lock is the authoritative single-instance guard. The activation
+        // socket may need a moment if the first Tony is still starting.
+        for(int attempt = 0; attempt < 10; ++attempt) {
+            QLocalSocket existingInstance;
+            existingInstance.connectToServer(instanceName, QIODevice::WriteOnly);
+            if(existingInstance.waitForConnected(180)) {
+                existingInstance.write("activate\n");
+                existingInstance.flush();
+                existingInstance.waitForBytesWritten(250);
+                break;
+            }
+            QThread::msleep(80);
+        }
+        return 0;
     }
+
+    QLocalServer singleInstanceServer;
+    // The lock proves this is the only Tony process, so a leftover local
+    // socket endpoint can be removed safely after an unclean exit.
+    QLocalServer::removeServer(instanceName);
+    if(!singleInstanceServer.listen(instanceName))
+        qWarning().noquote() << "Tony activation socket unavailable:" << instanceName;
 
     // Respect the saved interface language. On first launch, follow the OS locale
     // instead of silently forcing English every time Tony starts.
