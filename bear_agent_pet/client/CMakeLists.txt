@@ -23,6 +23,7 @@ qt_add_executable(TonyDesktopPet WIN32
     src/PetWindowPetPackages.cpp
     src/PetWindowReminders.cpp
     src/PetWindowNews.cpp
+    src/PetWindowToday.cpp
     src/PetWindow.h
     src/PetCreatorDialog.cpp
     src/PetCreatorDialog.h
@@ -44,6 +45,8 @@ qt_add_executable(TonyDesktopPet WIN32
     src/NewsCompanion.h
     src/NewsSettingsDialog.cpp
     src/NewsSettingsDialog.h
+    src/TodayDialog.cpp
+    src/TodayDialog.h
     src/SpeechBubble.cpp
     src/SpeechBubble.h
     src/ChatComposer.cpp
