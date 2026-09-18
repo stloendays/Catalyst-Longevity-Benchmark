@@ -3,6 +3,8 @@
 #include "AppLogger.h"
 #include "PetWindow.h"
 
+#include <algorithm>
+
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -15,6 +17,7 @@
 #include <QNetworkRequest>
 #include <QRandomGenerator>
 #include <QSettings>
+#include <QTime>
 #include <QXmlStreamReader>
 
 namespace {
