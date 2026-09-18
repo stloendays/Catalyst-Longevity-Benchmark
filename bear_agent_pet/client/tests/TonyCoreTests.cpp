@@ -1,5 +1,6 @@
 #include "LocalReminderManager.h"
 #include "TonyBehaviorEngine.h"
+#include "TonyConversationStore.h"
 #include "TonyMemoryStore.h"
 
 #include <QCoreApplication>
@@ -111,6 +112,38 @@ bool testMemoryStore() {
     return ok;
 }
 
+
+bool testConversationStore() {
+    QSettings().remove(QStringLiteral("tony/conversation/v1"));
+    TonyConversationStore store;
+    bool ok = true;
+
+    store.append(QStringLiteral("user"), QStringLiteral("  hello   Tony  "));
+    store.append(QStringLiteral("assistant"), QStringLiteral("  Hi there.  "));
+    QJsonArray rows = store.entries();
+    ok &= expect(rows.size() == 2, "conversation stores both sides");
+    ok &= expect(rows.at(0).toObject().value(QStringLiteral("role")).toString() == QStringLiteral("user"),
+                 "conversation keeps user role");
+    ok &= expect(rows.at(0).toObject().value(QStringLiteral("text")).toString() == QStringLiteral("hello Tony"),
+                 "conversation normalizes whitespace");
+    ok &= expect(rows.at(1).toObject().value(QStringLiteral("role")).toString() == QStringLiteral("assistant"),
+                 "conversation keeps assistant role");
+
+    store.clear();
+    for(int i = 0; i < 70; ++i)
+        store.append(QStringLiteral("user"), QStringLiteral("message %1").arg(i));
+    rows = store.entries();
+    ok &= expect(rows.size() == 60, "conversation caps local history at 60 entries");
+    ok &= expect(rows.first().toObject().value(QStringLiteral("text")).toString() == QStringLiteral("message 10"),
+                 "conversation evicts oldest entries first");
+    ok &= expect(rows.last().toObject().value(QStringLiteral("text")).toString() == QStringLiteral("message 69"),
+                 "conversation keeps newest entries");
+
+    store.clear();
+    ok &= expect(store.entries().isEmpty(), "conversation clear removes local history");
+    return ok;
+}
+
 bool testLocalReminderManager() {
     QSettings().remove(QStringLiteral("tony/reminders/v1"));
     bool ok = true;
@@ -168,6 +201,7 @@ int main(int argc, char **argv) {
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
     ok &= testMemoryStore();
+    ok &= testConversationStore();
     ok &= testLocalReminderManager();
 
     if(!ok) return 1;
