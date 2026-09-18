@@ -14,6 +14,7 @@
 #include <QTimer>
 
 #include "AppLogger.h"
+#include "NewsCompanion.h"
 #include "PetCreatorDialog.h"
 #include "PetWindow.h"
 #include "SettingsDialog.h"
@@ -131,6 +132,9 @@ int main(int argc, char *argv[]) {
     pet.show();
 
     TonyAutonomousCompanion autonomy(&pet,&app);
+    NewsCompanion news(&pet,&app);
+    QObject::connect(&news, &NewsCompanion::headlineReady,
+                     &pet, &PetWindow::announceNewsHeadline);
 
     UpdateManager updater(&app);
     SettingsDialog settingsDialog(&updater, &pet);
@@ -193,6 +197,65 @@ int main(int argc, char *argv[]) {
     QObject::connect(helpAction,&QAction::triggered,&pet,&PetWindow::showWelcomeGuide);
 
     trayMenu->addSeparator();
+    auto *newsMenu=trayMenu->addMenu(QString());
+    auto *newsEnabled=newsMenu->addAction(QString());
+    newsEnabled->setCheckable(true);
+    newsEnabled->setChecked(news.enabled());
+    auto *newsNow=newsMenu->addAction(QString());
+    auto *newsOpen=newsMenu->addAction(QString());
+    newsOpen->setEnabled(news.latestStoryUrl().isValid());
+
+    newsMenu->addSeparator();
+    auto *newsSourceMenu=newsMenu->addMenu(QString());
+    const auto newsSources=news.sources();
+    QVector<QAction*> newsSourceActions;
+    newsSourceActions.reserve(newsSources.size());
+    for(const auto &source : newsSources) {
+        auto *action=newsSourceMenu->addAction(source.name);
+        action->setCheckable(true);
+        action->setChecked(news.sourceEnabled(source.id));
+        QObject::connect(action,&QAction::toggled,&app,[&news,id=source.id](bool checked){
+            news.setSourceEnabled(id,checked);
+        });
+        newsSourceActions.push_back(action);
+    }
+
+    auto *newsFrequencyMenu=newsMenu->addMenu(QString());
+    auto *newsFrequencyGroup=new QActionGroup(newsFrequencyMenu);
+    newsFrequencyGroup->setExclusive(true);
+    const auto addNewsFrequency=[&](int minutes){
+        auto *action=newsFrequencyMenu->addAction(QString());
+        action->setCheckable(true);
+        action->setData(minutes);
+        action->setChecked(news.intervalMinutes()==minutes);
+        newsFrequencyGroup->addAction(action);
+        QObject::connect(action,&QAction::triggered,&app,[&news,minutes](bool checked){
+            if(checked) news.setIntervalMinutes(minutes);
+        });
+        return action;
+    };
+    auto *newsEveryHour=addNewsFrequency(60);
+    auto *newsEveryTwoHours=addNewsFrequency(120);
+    auto *newsEveryFourHours=addNewsFrequency(240);
+
+    QObject::connect(newsEnabled,&QAction::toggled,&app,[&news,&pet,uiIsChinese](bool checked){
+        news.setEnabled(checked);
+        const bool zh=uiIsChinese();
+        pet.showAutonomyNotice(
+            checked
+                ? (zh ? QStringLiteral("联网新闻已开启。Tony 会避开夜间和你正在操作的时候，只偶尔分享没说过的新标题。")
+                      : QStringLiteral("News Companion is on. Tony will avoid quiet hours and active moments, and only share unseen headlines occasionally."))
+                : (zh ? QStringLiteral("联网新闻已暂停。")
+                      : QStringLiteral("News Companion is paused.")));
+    });
+    QObject::connect(newsNow,&QAction::triggered,&app,[&news]{ news.fetchNow(true); });
+    QObject::connect(newsOpen,&QAction::triggered,&news,&NewsCompanion::openLatestStory);
+    QObject::connect(&news,&NewsCompanion::latestStoryChanged,&app,
+                     [newsOpen](const QString &,const QString &,const QUrl &url){
+        newsOpen->setEnabled(url.isValid());
+    });
+
+    trayMenu->addSeparator();
     auto *autonomyMenu=trayMenu->addMenu(QString());
     auto *autonomyGroup=new QActionGroup(autonomyMenu);
     autonomyGroup->setExclusive(true);
@@ -228,6 +291,15 @@ int main(int argc, char *argv[]) {
         openCreator->setText(zh ? QStringLiteral("宠物与创作…") : QStringLiteral("Pets & Creator…"));
         openSettings->setText(zh ? QStringLiteral("Tony 设置…") : QStringLiteral("Tony Settings…"));
         helpAction->setText(zh ? QStringLiteral("使用帮助") : QStringLiteral("Help / controls"));
+        newsMenu->setTitle(zh ? QStringLiteral("联网新闻") : QStringLiteral("News Companion"));
+        newsEnabled->setText(zh ? QStringLiteral("自动播报新闻") : QStringLiteral("Automatic headlines"));
+        newsNow->setText(zh ? QStringLiteral("现在说一条新闻") : QStringLiteral("Tell me one now"));
+        newsOpen->setText(zh ? QStringLiteral("打开最近一条原文") : QStringLiteral("Open latest story"));
+        newsSourceMenu->setTitle(zh ? QStringLiteral("新闻源") : QStringLiteral("Sources"));
+        newsFrequencyMenu->setTitle(zh ? QStringLiteral("播报频率") : QStringLiteral("Frequency"));
+        newsEveryHour->setText(zh ? QStringLiteral("每小时最多一条") : QStringLiteral("At most once per hour"));
+        newsEveryTwoHours->setText(zh ? QStringLiteral("每两小时最多一条") : QStringLiteral("At most every 2 hours"));
+        newsEveryFourHours->setText(zh ? QStringLiteral("每四小时最多一条") : QStringLiteral("At most every 4 hours"));
         autonomyMenu->setTitle(zh ? QStringLiteral("主动模式") : QStringLiteral("Autonomy"));
         autonomyOff->setText(zh ? QStringLiteral("关闭") : QStringLiteral("Off"));
         autonomyQuiet->setText(zh ? QStringLiteral("安静") : QStringLiteral("Quiet"));
