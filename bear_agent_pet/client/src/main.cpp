@@ -27,6 +27,7 @@
 #include "SettingsDialog.h"
 #include "TonyAutonomousCompanion.h"
 #include "TonyQuietMode.h"
+#include "TodayDialog.h"
 #include "UpdateManager.h"
 
 #ifndef TONY_APP_VERSION
@@ -199,6 +200,8 @@ int main(int argc, char *argv[]) {
     creatorDialog.setModal(false);
     NewsSettingsDialog newsDialog(&news, &pet);
     newsDialog.setModal(false);
+    TodayDialog todayDialog(&pet, &news, &pet);
+    todayDialog.setModal(false);
 
     QObject::connect(&settingsDialog, &SettingsDialog::languageChanged,
                      &pet, &PetWindow::applyUiLanguage);
@@ -233,10 +236,21 @@ int main(int argc, char *argv[]) {
         newsDialog.raise();
         newsDialog.activateWindow();
     };
+    const auto showToday = [&todayDialog]{
+        AppLogger::recordOperatorEvent(QStringLiteral("today_hub_open"));
+        todayDialog.refresh();
+        todayDialog.show();
+        todayDialog.raise();
+        todayDialog.activateWindow();
+    };
 
     auto *settingsShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+,")), &pet);
     settingsShortcut->setContext(Qt::ApplicationShortcut);
     QObject::connect(settingsShortcut, &QShortcut::activated, &app, showSettings);
+
+    auto *todayShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+T")), &pet);
+    todayShortcut->setContext(Qt::ApplicationShortcut);
+    QObject::connect(todayShortcut, &QShortcut::activated, &app, showToday);
 
     const auto uiIsChinese=[]{
         return QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString()
@@ -244,9 +258,11 @@ int main(int argc, char *argv[]) {
     };
     auto *trayMenu=new QMenu(&pet);
 
+    auto *todayAction=trayMenu->addAction(QString());
     auto *chatAction=trayMenu->addAction(QString());
     auto *hugAction=trayMenu->addAction(QString());
     auto *statusAction=trayMenu->addAction(QString());
+    QObject::connect(todayAction,&QAction::triggered,&app,showToday);
     QObject::connect(chatAction,&QAction::triggered,&pet,&PetWindow::openChat);
     QObject::connect(hugAction,&QAction::triggered,&pet,&PetWindow::hug);
     QObject::connect(statusAction,&QAction::triggered,&pet,&PetWindow::showStatus);
@@ -327,6 +343,7 @@ int main(int argc, char *argv[]) {
 
     const auto refreshTrayLanguage=[=]{
         const bool zh=uiIsChinese();
+        todayAction->setText(zh ? QStringLiteral("Tony 今日…") : QStringLiteral("Tony Today…"));
         chatAction->setText(zh ? QStringLiteral("和 Tony 聊天…") : QStringLiteral("Chat with Tony…"));
         hugAction->setText(zh ? QStringLiteral("抱抱 Tony") : QStringLiteral("Hug Tony"));
         statusAction->setText(zh ? QStringLiteral("Tony 现在怎么样？") : QStringLiteral("How is Tony feeling?"));
@@ -356,11 +373,13 @@ int main(int argc, char *argv[]) {
     QObject::connect(trayMenu,&QMenu::aboutToShow,&app,[&]{
         refreshTrayLanguage();
         newsDialog.refresh();
+        todayDialog.refresh();
     });
     QObject::connect(&settingsDialog,&SettingsDialog::languageChanged,&app,
-                     [&newsDialog,refreshTrayLanguage](const QString &){
+                     [&newsDialog,&todayDialog,refreshTrayLanguage](const QString &){
         refreshTrayLanguage();
         newsDialog.refresh();
+        todayDialog.refresh();
     });
 
     pet.trayIcon()->setContextMenu(trayMenu);
