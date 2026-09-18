@@ -81,6 +81,12 @@ Return to built-in Tony with:
 TonyDesktopPet.exe --pet-reset
 ```
 
+## Tony 1.1.2 UX polish
+
+- Tony is single-instance: launching the executable again activates the existing pet and opens chat instead of creating a duplicate pet.
+- A temporary **Do Not Disturb** mode can silence proactive speech and automatic news for 1 hour, 4 hours, or until 08:00 without changing the user's saved autonomy/news preferences.
+- News Companion settings are consolidated into one dialog for enable/disable, cadence, quiet hours, source selection, manual fetch, and opening the latest original story.
+- Manual interactions, chat, reminders, and manual news checks still work during Do Not Disturb.
 ## News Companion
 
 Tony can optionally fetch RSS/Atom headlines from the internet and surface them as calm, source-attributed briefings.
