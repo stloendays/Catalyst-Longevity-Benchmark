@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "bbc_world",
+      "name": "BBC World",
+      "category": "world",
+      "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+      "enabled_by_default": true
+    },
+    {
+      "id": "bbc_technology",
+      "name": "BBC Technology",
+      "category": "technology",
+      "url": "https://feeds.bbci.co.uk/news/technology/rss.xml",
+      "enabled_by_default": true
+    },
+    {
+      "id": "nasa",
+      "name": "NASA",
+      "category": "science",
+      "url": "https://www.nasa.gov/feed/",
+      "enabled_by_default": true
+    },
+    {
+      "id": "jpl",
+      "name": "NASA JPL",
+      "category": "science",
+      "url": "https://www.jpl.nasa.gov/feeds/news/",
+      "enabled_by_default": true
+    }
+  ]
+}

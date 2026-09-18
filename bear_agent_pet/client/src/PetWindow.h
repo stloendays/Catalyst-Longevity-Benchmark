@@ -47,6 +47,7 @@ public slots:
     void hug();
     void showStatus();
     void showWelcomeGuide();
+    void announceNewsHeadline(const QString &title, const QString &source, const QUrl &url);
 protected:
     void paintEvent(QPaintEvent*) override;
     // Tony 1.0.9 keeps the pre-1.0.9 painter callable for regression diagnosis,

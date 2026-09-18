@@ -81,6 +81,29 @@ Return to built-in Tony with:
 TonyDesktopPet.exe --pet-reset
 ```
 
+## News Companion
+
+Tony can optionally fetch RSS/Atom headlines from the internet and surface them as calm, source-attributed briefings.
+
+Open the tray menu and choose **News Companion**:
+
+- **Automatic headlines** enables/disables background news;
+- **Tell me one now** fetches an unseen headline immediately;
+- **Open latest story** opens the original HTTPS article in the browser;
+- **Sources** enables/disables individual packaged feeds;
+- **Frequency** limits automatic briefings to at most once per 1, 2, or 4 hours.
+
+Automatic news is opt-in and defaults to off. When enabled, Tony:
+
+- uses HTTPS RSS/Atom feeds defined in `assets/config/news_sources.json`;
+- avoids 23:00–08:00 by default;
+- waits when Tony is already chatting, running a tool, being dragged, showing another bubble, or the user has just interacted;
+- stores only small local deduplication keys so the same headline is not repeated;
+- keeps the original article URL available through **Open latest story**;
+- treats remote headlines as untrusted data before sending them to the Agent for a one-sentence summary;
+- instructs the Agent to stay factual and neutral and not invent details beyond the headline.
+
+The built-in source file currently includes BBC World, BBC Technology, NASA, and NASA JPL. The source list is declarative so future creator/user-defined feed management can be added without changing the fetch engine.
 ## Local reminders
 
 Tony has a persistent local reminder manager. Reminders live in the local Qt settings store, fire through the desktop tray, and are never included in `.tonypet` packages.
