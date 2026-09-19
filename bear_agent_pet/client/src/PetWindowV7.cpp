@@ -185,6 +185,7 @@ PetWindow::PetWindow(QWidget *parent)
             composer_.setConversation(conversation_.entries(), answer_);
     });
     connect(&agent_, &AgentClient::answerFinished, this, [this]{
+        composer_.setBusy(false);
         if(!answer_.isEmpty()) {
             showBubble(answer_,8000);
             if(recordNextAgentAnswer_)
@@ -269,6 +270,7 @@ PetWindow::PetWindow(QWidget *parent)
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
         recordNextAgentAnswer_=false;
+        composer_.setBusy(false);
         composer_.setConversation(conversation_.entries());
         agentState_="error";
         emotion_="worried";
@@ -1892,6 +1894,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
     markInteraction();
     conversation_.append(QStringLiteral("user"), prompt);
     composer_.setConversation(conversation_.entries());
+    composer_.setBusy(true);
     behavior_.onConversation();
     if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
 
@@ -1924,6 +1927,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
             composer_.setConversation(conversation_.entries());
             showBubble(decision.reply,qMax(3000,decision.durationMs+1100));
         }
+        composer_.setBusy(false);
         return;
     }
 
@@ -1934,6 +1938,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
         recordNextAgentAnswer_=true;
         agent_.sendMessage(decision.forwardText.isEmpty() ? prompt : decision.forwardText);
     } else {
+        composer_.setBusy(false);
         agentState_="idle";
         setAction(Action::Think,2800);
         if(pairingCode_.isEmpty()) startAutomaticPairing();
