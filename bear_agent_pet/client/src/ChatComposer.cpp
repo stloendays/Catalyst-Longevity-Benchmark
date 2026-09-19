@@ -282,7 +282,7 @@ void ChatComposer::rebuildTranscript() {
     if(!history_) return;
 
     QStringList lines;
-    const int start=qMax(0,conversation_.size()-30);
+    const int start=0;
     for(int i=start;i<conversation_.size();++i) {
         const QJsonObject row=conversation_.at(i).toObject();
         const QString text=row.value(QStringLiteral("text")).toString().simplified();
