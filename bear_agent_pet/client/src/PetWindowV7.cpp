@@ -116,6 +116,7 @@ PetWindow::PetWindow(QWidget *parent)
     rapidClickClock_.invalidate();
     agent_.setLanguage(uiLanguage());
     composer_.setLanguage(uiLanguage());
+    composer_.setConversation(conversation_.entries());
 
     // Calm desktop-companion cadence: animation is deliberately low-frame-rate.
     // At normal idle Tony stays still; only an occasional blink/wink changes the sprite.
@@ -180,14 +181,18 @@ PetWindow::PetWindow(QWidget *parent)
     connect(&agent_, &AgentClient::textDelta, this, [this](const QString &t){
         answer_ += t;
         showBubble(answer_,0);
+        if(recordNextAgentAnswer_)
+            composer_.setConversation(conversation_.entries(), answer_);
     });
     connect(&agent_, &AgentClient::answerFinished, this, [this]{
+        composer_.setBusy(false);
         if(!answer_.isEmpty()) {
             showBubble(answer_,8000);
             if(recordNextAgentAnswer_)
                 conversation_.append(QStringLiteral("assistant"), answer_);
         }
         recordNextAgentAnswer_=false;
+        composer_.setConversation(conversation_.entries());
         if(!actionTimer_.isActive()) restoreAgentAction();
     });
     connect(&agent_, &AgentClient::toolRequest, this,
@@ -265,6 +270,8 @@ PetWindow::PetWindow(QWidget *parent)
     });
     connect(&agent_, &AgentClient::errorMessage, this, [this](const QString &text){
         recordNextAgentAnswer_=false;
+        composer_.setBusy(false);
+        composer_.setConversation(conversation_.entries());
         agentState_="error";
         emotion_="worried";
         setAction(Action::Think,2800);
@@ -1877,6 +1884,7 @@ void PetWindow::askTony(){
     markInteraction();
     bubble_.dismiss(); emotion_="curious";
     if(agentState_=="idle") setAction(Action::Think,0);
+    composer_.setConversation(conversation_.entries());
     composer_.openAt(mapToGlobal(QPoint(width()/2,40)));
 }
 
@@ -1885,6 +1893,8 @@ void PetWindow::submitTonyPrompt(const QString &text){
     if(prompt.isEmpty()) return;
     markInteraction();
     conversation_.append(QStringLiteral("user"), prompt);
+    composer_.setConversation(conversation_.entries());
+    composer_.setBusy(true);
     behavior_.onConversation();
     if(prompt.contains("paula",Qt::CaseInsensitive)) behavior_.onPaulaMention();
 
@@ -1914,8 +1924,10 @@ void PetWindow::submitTonyPrompt(const QString &text){
             restoreAgentAction();
         if(!decision.reply.isEmpty()) {
             conversation_.append(QStringLiteral("assistant"), decision.reply);
+            composer_.setConversation(conversation_.entries());
             showBubble(decision.reply,qMax(3000,decision.durationMs+1100));
         }
+        composer_.setBusy(false);
         return;
     }
 
@@ -1926,6 +1938,7 @@ void PetWindow::submitTonyPrompt(const QString &text){
         recordNextAgentAnswer_=true;
         agent_.sendMessage(decision.forwardText.isEmpty() ? prompt : decision.forwardText);
     } else {
+        composer_.setBusy(false);
         agentState_="idle";
         setAction(Action::Think,2800);
         if(pairingCode_.isEmpty()) startAutomaticPairing();
