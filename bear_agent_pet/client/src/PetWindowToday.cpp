@@ -24,6 +24,7 @@ QJsonArray PetWindow::recentConversation() const {
 
 void PetWindow::clearConversationHistory() {
     conversation_.clear();
+    composer_.setConversation({});
     AppLogger::recordOperatorEvent(QStringLiteral("conversation_history_cleared"));
 }
 
@@ -81,6 +82,7 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
         }
 
         conversation_.append(QStringLiteral("assistant"), local);
+        composer_.setConversation(conversation_.entries());
         emotion_ = QStringLiteral("gentle");
         setAction(Action::Nod, 1700);
         showBubble(local, 8500);
