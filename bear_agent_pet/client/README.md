@@ -81,7 +81,7 @@ Return to built-in Tony with:
 TonyDesktopPet.exe --pet-reset
 ```
 
-## Tony 1.1.3 Today hub
+## Tony 1.1.4 continuous chat\n\n- upgrades the compact composer into a **continuous conversation window** that stays open after sending;\n- shows Tony's bounded local conversation history directly above the input field;\n- streams the current Agent reply into the transcript while Tony is answering, then commits the final reply to local history;\n- adds a **Collapse / Show chat** control so users can hide the transcript and keep only the lightweight input bar;\n- remembers the collapsed/expanded preference across restarts;\n- keeps `Esc` as an explicit close action; collapsing does not interrupt chat, clear history, or change Tony's memory;\n- keeps Today history actions synchronized with the open conversation window.\n## Tony 1.1.3 Today hub
 
 - adds **Tony Today…** as a single daily dashboard for upcoming reminders, the latest saved news headline, and recent local conversation history;
 - adds `Ctrl+Shift+T` as a fast shortcut to the Today hub;
