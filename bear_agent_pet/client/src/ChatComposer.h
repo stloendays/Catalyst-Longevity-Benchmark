@@ -22,6 +22,7 @@ public:
     void dismiss();
     void setLanguage(const QString &language);
     void setConversation(const QJsonArray &entries, const QString &streamingAssistant={});
+    void setBusy(bool busy);
     void setHistoryCollapsed(bool collapsed);
     bool historyCollapsed() const;
 
@@ -50,4 +51,5 @@ private:
     QJsonArray conversation_;
     QString streamingAssistant_;
     bool historyCollapsed_{false};
+    bool busy_{false};
 };
