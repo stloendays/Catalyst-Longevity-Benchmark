@@ -192,7 +192,7 @@ ChatComposer::ChatComposer(QWidget *parent): QWidget(parent) {
     connect(send_,&QPushButton::clicked,this,&ChatComposer::submitCurrent);
     connect(edit_,&QLineEdit::returnPressed,this,&ChatComposer::submitCurrent);
     connect(edit_,&QLineEdit::textChanged,this,[this](const QString &text){
-        send_->setEnabled(!text.trimmed().isEmpty());
+        send_->setEnabled(!busy_ && !text.trimmed().isEmpty());
     });
     connect(collapse_,&QToolButton::clicked,this,[this]{
         setHistoryCollapsed(!historyCollapsed_);
@@ -243,15 +243,17 @@ void ChatComposer::setLanguage(const QString &language) {
     const QString n=language.trimmed().toLower();
     language_=(n.startsWith("zh") || n=="cn") ? "zh" : "en";
     if(language_=="zh") {
-        hint_->setText("Enter 发送 · Esc 关闭");
+        hint_->setText(busy_ ? QStringLiteral("Tony 正在回复 · 可以先输入下一条")
+                             : QStringLiteral("Enter 发送 · Esc 关闭"));
         edit_->setPlaceholderText("继续和 Tony 聊…");
         history_->setPlaceholderText("最近的连续对话会显示在这里。");
-        send_->setText("发送");
+        send_->setText(busy_ ? QStringLiteral("回复中…") : QStringLiteral("发送"));
     } else {
-        hint_->setText("Enter to send · Esc to close");
+        hint_->setText(busy_ ? QStringLiteral("Tony is replying · you can type the next message")
+                             : QStringLiteral("Enter to send · Esc to close"));
         edit_->setPlaceholderText("Continue chatting with Tony…");
         history_->setPlaceholderText("Your recent conversation appears here.");
-        send_->setText("Send");
+        send_->setText(busy_ ? QStringLiteral("Replying…") : QStringLiteral("Send"));
     }
     refreshModelLabels();
     refreshCollapseLabel();
@@ -262,6 +264,20 @@ void ChatComposer::setConversation(const QJsonArray &entries, const QString &str
     conversation_=entries;
     streamingAssistant_=streamingAssistant;
     rebuildTranscript();
+}
+
+void ChatComposer::setBusy(bool busy) {
+    busy_=busy;
+    send_->setEnabled(!busy_ && !edit_->text().trimmed().isEmpty());
+    if(language_=="zh") {
+        hint_->setText(busy_ ? QStringLiteral("Tony 正在回复 · 可以先输入下一条")
+                             : QStringLiteral("Enter 发送 · Esc 关闭"));
+        send_->setText(busy_ ? QStringLiteral("回复中…") : QStringLiteral("发送"));
+    } else {
+        hint_->setText(busy_ ? QStringLiteral("Tony is replying · you can type the next message")
+                             : QStringLiteral("Enter to send · Esc to close"));
+        send_->setText(busy_ ? QStringLiteral("Replying…") : QStringLiteral("Send"));
+    }
 }
 
 void ChatComposer::setHistoryCollapsed(bool collapsed) {
@@ -339,6 +355,7 @@ void ChatComposer::keyPressEvent(QKeyEvent *event) {
 }
 
 void ChatComposer::submitCurrent() {
+    if(busy_) return;
     const QString text=edit_->text().trimmed();
     if(text.isEmpty()) return;
     const QString profile=normalizedModelProfile(modelBox_->currentData().toString());
