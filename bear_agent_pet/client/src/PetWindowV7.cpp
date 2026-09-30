@@ -946,7 +946,9 @@ void PetWindow::tickDesktop(){
                 walkingOnWindow_=false;
                 walkDirection_=targetX>=pos().x() ? 1 : -1;
                 emotion_="playful";
-                setAction(Action::Walk,qBound(1100,qAbs(targetX-pos().x())*9,4200));
+                const int distance=qAbs(targetX-pos().x());
+                const int estimatedStep=qBound(3,3 + qMin(life.health,life.energy)/18,8);
+                setAction(Action::Walk,qBound(1200,(distance*110)/estimatedStep+550,6200));
                 hasWalkTarget_=true;
                 walkTarget_=QPoint(targetX,pos().y());
                 cursorStillTicks_=0;
@@ -1170,7 +1172,7 @@ void PetWindow::startCursorWalk(const QPoint &cursor){
     const auto life=behavior_.snapshot();
     const int vitality=qMax(25,qMin(life.health,life.energy));
     const int estimatedSpeed=qBound(3,3 + vitality/18,8);
-    setAction(Action::Walk,qBound(900,(horizontalDistance*110)/estimatedSpeed+450,5200));
+    setAction(Action::Walk,qBound(1100,(horizontalDistance*110)/estimatedSpeed+650,12000));
     // setAction keeps explicit Walk targets; assign once more to make that invariant obvious.
     hasWalkTarget_=true;
     walkTarget_=target;
