@@ -279,13 +279,21 @@ void TonyBehaviorEngine::onFed(Food food) {
     refreshCondition();
 }
 
-void TonyBehaviorEngine::onRested() {
-    calmXp_=clampCounter(calmXp_+2);
+void TonyBehaviorEngine::applyRest(bool shapePersonality) {
+    if(shapePersonality) calmXp_=clampCounter(calmXp_+2);
     health_ = clamp100(health_ + 2.0);
     energy_ = clamp100(energy_ + 9.0);
     warmth_ = clamp100(warmth_ + 2.0);
     satiety_ = clamp100(satiety_ - 1.0);
     refreshCondition();
+}
+
+void TonyBehaviorEngine::onRested() {
+    applyRest(true);
+}
+
+void TonyBehaviorEngine::onPassiveRested() {
+    applyRest(false);
 }
 
 void TonyBehaviorEngine::onPlayed() {
@@ -330,15 +338,15 @@ TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
     const bool night = hour >= 23 || hour < 7;
 
     if(underWeather_ && rng->bounded(100) < 72) {
-        onRested();
+        onPassiveRested();
         return Impulse::Sleep;
     }
     if(health_ < 38.0 && rng->bounded(100) < 88) {
-        onRested();
+        onPassiveRested();
         return Impulse::Sleep;
     }
     if(night && energy_ < 46.0 && rng->bounded(100) < 78) {
-        onRested();
+        onPassiveRested();
         return Impulse::Sleep;
     }
     if(warmth_ < 35.0 && rng->bounded(100) < 82) return Impulse::Shiver;
