@@ -132,6 +132,43 @@ Decision makeDecision(const TonyBehaviorEngine::Snapshot &life,
         };
     }
 
+    if(life.personality!="balanced" && rng->bounded(100)<42) {
+        if(life.personality=="playful") {
+            return {
+                QStringLiteral("autonomous_personality_playful"),QStringLiteral("walk"),QStringLiteral("playful"),2800,4500,
+                {QStringLiteral("I feel like doing a tiny patrol. Sitting still is overrated."),
+                 QStringLiteral("Playful mode won this round. Tiny walk.")},
+                {QStringLiteral("有点坐不住，Tony 想去小小巡逻一下。"),
+                 QStringLiteral("这一轮是活泼模式赢了，走两步。")}
+            };
+        }
+        if(life.personality=="social") {
+            return {
+                QStringLiteral("autonomous_personality_social"),QStringLiteral("wave"),QStringLiteral("friendly"),1900,4500,
+                {QStringLiteral("Just checking in. I like being near you."),
+                 QStringLiteral("Hello again. Social Tony reporting in.")},
+                {QStringLiteral("就是来确认一下你还在旁边。Tony 喜欢靠近一点。"),
+                 QStringLiteral("又来打个招呼，黏人 Tony 报到。")}
+            };
+        }
+        if(life.personality=="scholar") {
+            return {
+                QStringLiteral("autonomous_personality_scholar"),QStringLiteral("adjust_glasses"),QStringLiteral("focused"),2100,4700,
+                {QStringLiteral("I have a strong urge to learn one more thing."),
+                 QStringLiteral("Scholar mode: glasses adjusted, brain online.")},
+                {QStringLiteral("突然很想再学一个知识点。"),
+                 QStringLiteral("好学模式：眼镜扶好，脑子上线。")}
+            };
+        }
+        return {
+            QStringLiteral("autonomous_personality_calm"),QStringLiteral("nod"),QStringLiteral("content"),1800,4400,
+            {QStringLiteral("Everything is fine. Quiet company is enough."),
+             QStringLiteral("Calm mode. No need to rush anything.")},
+            {QStringLiteral("现在这样安静陪着就很好。"),
+             QStringLiteral("安静模式，不需要急着做什么。")}
+        };
+    }
+
     if(hour>=7 && hour<11 && !morningAlreadyUsed) {
         return {
             QStringLiteral("autonomous_morning"),QStringLiteral("stretch"),QStringLiteral("content"),2200,4500,
@@ -307,6 +344,9 @@ void TonyAutonomousCompanion::tick() {
             {QStringLiteral("mood"),life.mood},
             {QStringLiteral("level"),life.level},
             {QStringLiteral("growth_stage"),life.growthStage},
+            {QStringLiteral("personality"),life.personality},
+            {QStringLiteral("favorite_food"),life.favoriteFood},
+            {QStringLiteral("achievement_count"),life.achievements.size()},
             {QStringLiteral("health"),life.health},
             {QStringLiteral("energy"),life.energy},
             {QStringLiteral("satiety"),life.satiety},
