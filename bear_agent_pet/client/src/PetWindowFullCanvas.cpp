@@ -193,8 +193,8 @@ void PetWindow::paintEvent(QPaintEvent*) {
     // Keep the canvas uncluttered in normal use. HP appears on hover, and
     // automatically when Tony is below 60 so a low-health state is never hidden.
     const auto life=behavior_.snapshot();
-    if(hovered_ || life.health<60 || life.satiety<30) {
-        const QRectF bar(width()/2.0-80.0,8.0,160.0,10.0);
+    if(hovered_ || life.health<60 || life.satiety<30 || life.underWeather) {
+        const QRectF bar(width()/2.0-95.0,8.0,190.0,10.0);
         p.save();
         p.setRenderHint(QPainter::Antialiasing,true);
         p.setPen(Qt::NoPen);
@@ -204,6 +204,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
         fill.setWidth(fill.width()*qBound(0,life.health,100)/100.0);
         QColor hpColor(62,190,92,220);
         if(life.health<60 || life.satiety<30) hpColor=QColor(232,172,54,225);
+        if(life.underWeather) hpColor=QColor(222,118,58,230);
         if(life.health<30) hpColor=QColor(220,76,76,230);
         p.setBrush(hpColor);
         p.drawRoundedRect(fill,3,3);
@@ -213,9 +214,23 @@ void PetWindow::paintEvent(QPaintEvent*) {
         f.setPointSize(8);
         p.setFont(f);
         const QString language=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString().toLower();
+        const QString stageEn=
+            life.growthStage=="pup" ? QStringLiteral("PUP") :
+            life.growthStage=="explorer" ? QStringLiteral("EXP") :
+            life.growthStage=="companion" ? QStringLiteral("COMP") :
+            QStringLiteral("VET");
+        const QString stageZh=
+            life.growthStage=="pup" ? QStringLiteral("幼犬") :
+            life.growthStage=="explorer" ? QStringLiteral("探索") :
+            life.growthStage=="companion" ? QStringLiteral("伙伴") :
+            QStringLiteral("成熟");
         const QString label=language.startsWith(QStringLiteral("zh"))
-            ? QStringLiteral("LV %1 · HP %2 · 饱食 %3").arg(life.level).arg(life.health).arg(life.satiety)
-            : QStringLiteral("LV %1 · HP %2 · FOOD %3").arg(life.level).arg(life.health).arg(life.satiety);
+            ? QStringLiteral("%1 L%2 · HP %3 · 饱食 %4%5")
+                .arg(stageZh).arg(life.level).arg(life.health).arg(life.satiety)
+                .arg(life.underWeather ? QStringLiteral(" · 需照顾") : QString())
+            : QStringLiteral("%1 L%2 · HP %3 · FOOD %4%5")
+                .arg(stageEn).arg(life.level).arg(life.health).arg(life.satiety)
+                .arg(life.underWeather ? QStringLiteral(" · CARE") : QString());
         p.drawText(QRectF(bar.left(),bar.bottom()+1,bar.width(),15),
                    Qt::AlignHCenter|Qt::AlignTop,label);
         p.restore();
