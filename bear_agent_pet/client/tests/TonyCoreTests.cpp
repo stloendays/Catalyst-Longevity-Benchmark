@@ -31,6 +31,7 @@ bool testBehaviorDefaultsAndInteractions() {
     TonyBehaviorEngine engine;
     auto state = engine.snapshot();
     bool ok = true;
+    ok &= expect(state.health == 100, "default health");
     ok &= expect(state.energy == 78, "default energy");
     ok &= expect(state.warmth == 68, "default warmth");
     ok &= expect(state.affection == 62, "default affection");
@@ -38,9 +39,14 @@ bool testBehaviorDefaultsAndInteractions() {
     ok &= expect(state.curiosity == 58, "default curiosity");
     ok &= expect(state.mood == QStringLiteral("content"), "default mood");
 
+    engine.onDragged(true);
+    state = engine.snapshot();
+    ok &= expect(state.health == 94, "rough drag lowers health");
+
     engine.onHugged();
     state = engine.snapshot();
-    ok &= expect(state.energy == 79, "hug raises energy");
+    ok &= expect(state.health == 96, "hug restores health");
+    ok &= expect(state.energy == 75, "hug raises energy after rough drag");
     ok &= expect(state.warmth == 84, "hug raises warmth");
     ok &= expect(state.affection == 69, "hug raises affection");
     ok &= expect(state.loneliness == 4, "hug lowers loneliness");
@@ -66,6 +72,7 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/curiosity")).toDouble(), 58.18, 1e-6,
                      "idle daytime minute raises curiosity deterministically");
 
+    persisted.setValue(QStringLiteral("tony/life/health"), -50.0);
     persisted.setValue(QStringLiteral("tony/life/energy"), 250.0);
     persisted.setValue(QStringLiteral("tony/life/warmth"), -20.0);
     persisted.setValue(QStringLiteral("tony/life/affection"), 120.0);
@@ -76,6 +83,7 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     TonyBehaviorEngine restored;
     restored.restore(persisted);
     const auto clamped = restored.snapshot();
+    ok &= expect(clamped.health == 0, "restore clamps health to 0");
     ok &= expect(clamped.energy == 100, "restore clamps energy to 100");
     ok &= expect(clamped.warmth == 0, "restore clamps warmth to 0");
     ok &= expect(clamped.affection == 100, "restore clamps affection to 100");
