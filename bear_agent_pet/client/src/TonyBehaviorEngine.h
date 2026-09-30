@@ -1,5 +1,6 @@
 #pragma once
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 class QSettings;
@@ -37,7 +38,14 @@ public:
         int affection{0};
         int loneliness{0};
         int curiosity{0};
+        int playfulnessScore{0};
+        int sociabilityScore{0};
+        int scholarScore{0};
+        int calmScore{0};
         QString growthStage;
+        QString personality;
+        QString favoriteFood;
+        QStringList achievements;
         bool underWeather{false};
         QString mood;
     };
@@ -52,6 +60,8 @@ public:
     void onFed();
     void onFed(Food food);
     void onRested();
+    void onPlayed();
+    void onStudied();
     void onDragged(bool rough);
     void onPaulaMention();
 
@@ -60,10 +70,26 @@ public:
 
 private:
     static double clamp100(double value);
+    static int clampCounter(int value);
     void addBondXp(int amount);
-    void refreshCondition();
+    void refreshCondition(bool countRecovery=true);
+    void refreshAchievements();
+    QString personalityName() const;
+    QString favoriteFoodName() const;
+    QStringList achievementNames() const;
 
     int bondXp_{0};
+    int playfulXp_{0};
+    int socialXp_{0};
+    int scholarXp_{0};
+    int calmXp_{0};
+    int snackCount_{0};
+    int mealCount_{0};
+    int warmDrinkCount_{0};
+    int playCount_{0};
+    int studyCount_{0};
+    int recoveryCount_{0};
+    quint32 achievementFlags_{0};
     bool underWeather_{false};
     double health_{100.0};
     double energy_{78.0};
