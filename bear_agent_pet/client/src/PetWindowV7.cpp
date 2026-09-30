@@ -157,7 +157,7 @@ PetWindow::PetWindow(QWidget *parent)
 
     // Desktop sensing runs at 4 Hz: quick enough to notice cursor sweeps without
     // turning foreground-window checks into a busy loop.
-    desktopTimer_.setInterval(250);
+    desktopTimer_.setInterval(180);
     connect(&desktopTimer_, &QTimer::timeout, this, &PetWindow::tickDesktop);
     desktopTimer_.start();
 
@@ -926,6 +926,34 @@ void PetWindow::tickDesktop(){
     if(!idleAgent || !actionFree || perchOnActiveWindow_) return;
 
     const auto life=behavior_.snapshot();
+
+    // A healthy, energetic Tony is allowed to make small self-directed moves.
+    // This is intentionally conservative: short walks after a quiet spell, never
+    // while chat/agent work is active, and never when HP/energy are low.
+    if(followCursor_ && activityClock_.isValid() && activityClock_.elapsed()>18000 &&
+       life.health>=55 && life.energy>=48 && life.curiosity>=50 &&
+       QRandomGenerator::global()->bounded(1000)<16) {
+        QScreen *screen=screenForPoint(frameGeometry().center());
+        if(screen) {
+            const QRect area=screen->availableGeometry();
+            const int maxX=qMax(area.left(),area.right()-width()+1);
+            const int span=qBound(90,120 + life.curiosity*2,320);
+            const int delta=QRandomGenerator::global()->bounded(-span,span+1);
+            const int targetX=qBound(area.left(),pos().x()+delta,maxX);
+            if(qAbs(targetX-pos().x())>=48) {
+                walkTarget_=QPoint(targetX,pos().y());
+                hasWalkTarget_=true;
+                walkingOnWindow_=false;
+                walkDirection_=targetX>=pos().x() ? 1 : -1;
+                emotion_="playful";
+                setAction(Action::Walk,qBound(1100,qAbs(targetX-pos().x())*9,4200));
+                hasWalkTarget_=true;
+                walkTarget_=QPoint(targetX,pos().y());
+                cursorStillTicks_=0;
+                return;
+            }
+        }
+    }
     const QPoint center=frameGeometry().center();
     const int dx=cursor.x()-center.x();
     const int dy=cursor.y()-center.y();
@@ -1139,7 +1167,10 @@ void PetWindow::startCursorWalk(const QPoint &cursor){
     if(dockMode_==DockMode::Top || dockMode_==DockMode::Left || dockMode_==DockMode::Right)
         dockMode_=DockMode::Free;
     emotion_="curious";
-    setAction(Action::Walk,qBound(1000,(horizontalDistance*70)/5+500,6500));
+    const auto life=behavior_.snapshot();
+    const int vitality=qMax(25,qMin(life.health,life.energy));
+    const int estimatedSpeed=qBound(3,3 + vitality/18,8);
+    setAction(Action::Walk,qBound(900,(horizontalDistance*110)/estimatedSpeed+450,5200));
     // setAction keeps explicit Walk targets; assign once more to make that invariant obvious.
     hasWalkTarget_=true;
     walkTarget_=target;
@@ -1385,7 +1416,10 @@ void PetWindow::stepWalkAcrossDesktop(){
             return;
         }
         walkDirection_=remaining>0 ? 1 : -1;
-        const int step=qMin(4,qAbs(remaining));
+        const auto life=behavior_.snapshot();
+        const int vitality=qMin(life.health,life.energy);
+        const int ledgeStep=qBound(3,3 + (vitality>=75 ? 3 : vitality>=50 ? 2 : 1),7);
+        const int step=qMin(ledgeStep,qAbs(remaining));
         QPoint next=pos()+QPoint(walkDirection_*step,0);
         next.setY(windowWalkArea_.top());
         next.setX(qBound(windowWalkArea_.left(),next.x(),windowWalkArea_.right()));
@@ -1409,7 +1443,18 @@ void PetWindow::stepWalkAcrossDesktop(){
     }
 
     const QRect area=screen->availableGeometry();
-    const int stepPixels=hasWalkTarget_ ? 5 : 2;
+    const auto life=behavior_.snapshot();
+    const int remainingAbs=hasWalkTarget_ ? qAbs(walkTarget_.x()-pos().x()) : 0;
+    int stepPixels=2;
+    if(hasWalkTarget_) {
+        // Adaptive gait: close targets ease in, long targets move decisively.
+        // HP and energy cap the gait so a tired Tony visibly slows down.
+        const int vitality=qMin(life.health,life.energy);
+        const int vitalityBonus=vitality>=80 ? 3 : vitality>=60 ? 2 : vitality>=40 ? 1 : 0;
+        const int distanceBonus=remainingAbs>360 ? 3 : remainingAbs>180 ? 2 : remainingAbs>80 ? 1 : 0;
+        stepPixels=qBound(2,3 + vitalityBonus + distanceBonus,9);
+        if(remainingAbs<45) stepPixels=qMin(stepPixels,4);
+    }
     QPoint next=pos()+QPoint(walkDirection_*stepPixels,0);
     const QRect nextFrame(next,QSize(width(),height()));
 
@@ -1568,24 +1613,44 @@ void PetWindow::handleTap(const QPoint &localPos){
 
 void PetWindow::showLifeStatus(){
     const auto s=behavior_.snapshot();
-    if(s.mood=="cold") {
+    const QString vitals=uiText(
+        QStringLiteral("HP %1 · Energy %2").arg(s.health).arg(s.energy),
+        QStringLiteral("生命 %1 · 精力 %2").arg(s.health).arg(s.energy));
+    if(s.mood=="weak") {
+        emotion_="sleepy"; setAction(Action::Sleep,2600);
+        showBubble(uiText(
+            QStringLiteral("%1. I need a quiet recovery period.").arg(vitals),
+            QStringLiteral("%1。现在需要安静休息一会儿。").arg(vitals)),4800);
+    } else if(s.mood=="cold") {
         emotion_="cold"; setAction(Action::Shiver,1900);
-        showBubble(uiText("I'm a little cold. A hug would fix that.","我有一点冷。抱一下大概就好了。"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. I'm a little cold. A hug would help.").arg(vitals),
+            QStringLiteral("%1。我有一点冷，抱一下会好很多。").arg(vitals)),4400);
     } else if(s.mood=="sleepy") {
         emotion_="sleepy"; setAction(Action::Yawn,1900);
-        showBubble(uiText("A little sleepy... but I'm still here.","有一点困……不过我还在陪你。"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. A little sleepy... but I'm still here.").arg(vitals),
+            QStringLiteral("%1。有一点困……不过我还在陪你。").arg(vitals)),4400);
     } else if(s.mood=="cuddly") {
         emotion_="hopeful"; setAction(Action::AskHug,2200);
-        showBubble(uiText("I may be in hug-request mode.","我现在可能处于求抱抱模式。"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. I may be in hug-request mode.").arg(vitals),
+            QStringLiteral("%1。我现在可能处于求抱抱模式。").arg(vitals)),4400);
     } else if(s.mood=="curious") {
         emotion_="curious"; setAction(Action::Curious,1600);
-        showBubble(uiText("Curious. What are we working on?","有点好奇。我们今天在研究什么？"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. Curious. What are we working on?").arg(vitals),
+            QStringLiteral("%1。有点好奇。我们今天在研究什么？").arg(vitals)),4400);
     } else if(s.mood=="happy") {
         emotion_="happy"; setAction(Action::Wave,1400);
-        showBubble(uiText("Pretty happy. Staying close.","挺开心的。就在你旁边待着。"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. Pretty happy. Staying close.").arg(vitals),
+            QStringLiteral("%1。挺开心的，就在你旁边待着。").arg(vitals)),4400);
     } else {
         emotion_="content"; setAction(Action::Stretch,1500);
-        showBubble(uiText("I'm good. Just keeping you company.","我挺好的，就在桌面上陪你。"),4200);
+        showBubble(uiText(
+            QStringLiteral("%1. I'm good. Just keeping you company.").arg(vitals),
+            QStringLiteral("%1。我挺好的，就在桌面上陪你。").arg(vitals)),4400);
     }
 }
 
