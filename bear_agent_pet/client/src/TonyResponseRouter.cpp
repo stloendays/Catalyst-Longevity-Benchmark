@@ -281,7 +281,13 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
         const QString cn=QString("现在的 Tony：Lv %1，生命 %2，精力 %3，饱食 %4，温暖 %5，亲密 %6，孤独 %7，好奇 %8，羁绊 %9/50。心情是 %10。")
             .arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
             .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(state.mood);
-        return fixed("status",{en},{cn},{"head_tilt","nod"},"neutral",4200);
+        out.route=Route::LocalFixed;
+        out.intent=QStringLiteral("status");
+        out.reply=language.trimmed().toLower().startsWith(QStringLiteral("zh")) ? cn : en;
+        out.action=pick(QStringList{QStringLiteral("head_tilt"),QStringLiteral("nod")});
+        out.emotion=QStringLiteral("neutral");
+        out.durationMs=4200;
+        return out;
     }
 
     if(hasAny(p,{"谢谢","thank you","thanks"}))
