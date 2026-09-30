@@ -2047,6 +2047,8 @@ void PetWindow::submitTonyPrompt(const QString &text){
     if(decision.handledLocally()) {
         agentState_="idle";
         if(decision.intent==QStringLiteral("hug")) behavior_.onHugged();
+        else if(decision.intent==QStringLiteral("feed")) behavior_.onFed();
+        else if(decision.intent==QStringLiteral("sleep")) behavior_.onRested();
         emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;
         if(decision.hasActionSequence())
             playActionSequence(decision.actionSequence,decision.emotionSequence,decision.sequenceDurationsMs);
