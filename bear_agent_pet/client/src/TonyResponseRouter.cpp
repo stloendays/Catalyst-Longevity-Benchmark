@@ -287,18 +287,108 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             QStringLiteral("成熟期");
         const QString conditionEn=state.underWeather ? QStringLiteral("under the weather") : QStringLiteral("healthy");
         const QString conditionCn=state.underWeather ? QStringLiteral("有点不舒服") : QStringLiteral("健康");
-        const QString en=QString("%1, Lv %2, HP %3, energy %4, fullness %5, warmth %6, affection %7, loneliness %8, curiosity %9, bond %10/50. Condition: %11. Mood: %12.")
+        const QString personalityEn=
+            state.personality=="playful" ? QStringLiteral("playful") :
+            state.personality=="social" ? QStringLiteral("social") :
+            state.personality=="scholar" ? QStringLiteral("scholar") :
+            state.personality=="calm" ? QStringLiteral("calm") :
+            QStringLiteral("balanced");
+        const QString personalityCn=
+            state.personality=="playful" ? QStringLiteral("活泼") :
+            state.personality=="social" ? QStringLiteral("黏人") :
+            state.personality=="scholar" ? QStringLiteral("好学") :
+            state.personality=="calm" ? QStringLiteral("安静") :
+            QStringLiteral("均衡");
+        const QString en=QString("%1, Lv %2, HP %3, energy %4, fullness %5, warmth %6, affection %7, loneliness %8, curiosity %9, bond %10/50. Personality: %11. Condition: %12. Mood: %13.")
             .arg(stageEn).arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
-            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(conditionEn).arg(state.mood);
-        const QString cn=QString("现在的 Tony：%1，Lv %2，生命 %3，精力 %4，饱食 %5，温暖 %6，亲密 %7，孤独 %8，好奇 %9，羁绊 %10/50。状态：%11。心情：%12。")
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(personalityEn).arg(conditionEn).arg(state.mood);
+        const QString cn=QString("现在的 Tony：%1，Lv %2，生命 %3，精力 %4，饱食 %5，温暖 %6，亲密 %7，孤独 %8，好奇 %9，羁绊 %10/50。性格：%11。状态：%12。心情：%13。")
             .arg(stageCn).arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
-            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(conditionCn).arg(state.mood);
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(personalityCn).arg(conditionCn).arg(state.mood);
         out.route=Route::LocalFixed;
         out.intent=QStringLiteral("status");
         out.reply=language.trimmed().toLower().startsWith(QStringLiteral("zh")) ? cn : en;
         out.action=pick(QStringList{QStringLiteral("head_tilt"),QStringLiteral("nod")});
         out.emotion=QStringLiteral("neutral");
         out.durationMs=4200;
+        return out;
+    }
+
+    if(hasAny(p,{"什么性格","你的性格","性格是什么","personality","what are you like"})) {
+        const QString enName=
+            state.personality=="playful" ? QStringLiteral("playful") :
+            state.personality=="social" ? QStringLiteral("social") :
+            state.personality=="scholar" ? QStringLiteral("scholar") :
+            state.personality=="calm" ? QStringLiteral("calm") :
+            QStringLiteral("balanced");
+        const QString cnName=
+            state.personality=="playful" ? QStringLiteral("活泼") :
+            state.personality=="social" ? QStringLiteral("黏人") :
+            state.personality=="scholar" ? QStringLiteral("好学") :
+            state.personality=="calm" ? QStringLiteral("安静") :
+            QStringLiteral("均衡");
+        out.route=Route::LocalFixed;
+        out.intent=QStringLiteral("personality");
+        out.reply=language.trimmed().toLower().startsWith(QStringLiteral("zh"))
+            ? QStringLiteral("我现在更偏 %1 型。玩心 %2，社交 %3，学习 %4，沉静 %5。长期相处还会继续变化。")
+                .arg(cnName).arg(state.playfulnessScore).arg(state.sociabilityScore).arg(state.scholarScore).arg(state.calmScore)
+            : QStringLiteral("I'm currently more %1. Play %2, social %3, study %4, calm %5. Long-term interaction can still change me.")
+                .arg(enName).arg(state.playfulnessScore).arg(state.sociabilityScore).arg(state.scholarScore).arg(state.calmScore);
+        out.action=QStringLiteral("head_tilt");
+        out.emotion=QStringLiteral("curious");
+        out.durationMs=3900;
+        return out;
+    }
+
+    if(hasAny(p,{"喜欢吃什么","最喜欢吃","favorite food","favourite food","what do you like to eat"})) {
+        const QString enFood=
+            state.favoriteFood=="snack" ? QStringLiteral("small snacks") :
+            state.favoriteFood=="meal" ? QStringLiteral("proper meals") :
+            state.favoriteFood=="warm_drink" ? QStringLiteral("warm drinks") :
+            state.favoriteFood=="mixed" ? QStringLiteral("a mixed menu") :
+            QStringLiteral("nothing yet");
+        const QString cnFood=
+            state.favoriteFood=="snack" ? QStringLiteral("小零食") :
+            state.favoriteFood=="meal" ? QStringLiteral("正餐") :
+            state.favoriteFood=="warm_drink" ? QStringLiteral("热饮") :
+            state.favoriteFood=="mixed" ? QStringLiteral("都挺喜欢") :
+            QStringLiteral("还没有明显偏好");
+        out.route=Route::LocalFixed;
+        out.intent=QStringLiteral("favorite_food");
+        out.reply=language.trimmed().toLower().startsWith(QStringLiteral("zh"))
+            ? QStringLiteral("目前我的食物偏好：%1。这个偏好是按你实际喂我的记录慢慢形成的。").arg(cnFood)
+            : QStringLiteral("My current food preference is %1. It grows from what you actually feed me over time.").arg(enFood);
+        out.action=QStringLiteral("sniff");
+        out.emotion=QStringLiteral("curious");
+        out.durationMs=3800;
+        return out;
+    }
+
+    if(hasAny(p,{"成就","徽章","achievements","badges"})) {
+        QStringList en;
+        QStringList cn;
+        for(const auto &id:state.achievements) {
+            if(id=="first_bond") { en << QStringLiteral("First Bond"); cn << QStringLiteral("初次羁绊"); }
+            else if(id=="explorer") { en << QStringLiteral("Explorer"); cn << QStringLiteral("进入探索期"); }
+            else if(id=="companion") { en << QStringLiteral("Companion"); cn << QStringLiteral("成为伙伴"); }
+            else if(id=="veteran") { en << QStringLiteral("Veteran"); cn << QStringLiteral("成熟陪伴"); }
+            else if(id=="caregiver") { en << QStringLiteral("Caregiver"); cn << QStringLiteral("细心照顾"); }
+            else if(id=="performer") { en << QStringLiteral("Performer"); cn << QStringLiteral("小小表演家"); }
+            else if(id=="scholar") { en << QStringLiteral("Scholar"); cn << QStringLiteral("学习搭子"); }
+            else if(id=="recovered") { en << QStringLiteral("Recovered Together"); cn << QStringLiteral("一起恢复"); }
+            else if(id=="favorite_found") { en << QStringLiteral("Favorite Found"); cn << QStringLiteral("发现最爱"); }
+        }
+        out.route=Route::LocalFixed;
+        out.intent=QStringLiteral("achievements");
+        const bool zh=language.trimmed().toLower().startsWith(QStringLiteral("zh"));
+        out.reply=state.achievements.isEmpty()
+            ? (zh ? QStringLiteral("还没有解锁成就。继续陪我生活就会慢慢出现。")
+                  : QStringLiteral("No achievements yet. They'll appear as we spend more time together."))
+            : (zh ? QStringLiteral("已解锁 %1 个成就：%2。").arg(cn.size()).arg(cn.join(QStringLiteral("、")))
+                  : QStringLiteral("%1 achievement(s) unlocked: %2.").arg(en.size()).arg(en.join(QStringLiteral(", "))));
+        out.action=QStringLiteral("nod");
+        out.emotion=QStringLiteral("content");
+        out.durationMs=4300;
         return out;
     }
 
