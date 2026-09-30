@@ -822,8 +822,31 @@ void PetWindow::runIdleMoment(){
         return;
     }
 
+    const auto life=behavior_.snapshot();
+
+    // Growth is visible in autonomous behavior without removing any manual
+    // controls. Advanced tricks remain rare so Tony does not become distracting.
+    if(!life.underWeather && life.energy>=55 && life.satiety>=35 && life.level>=3 &&
+       QRandomGenerator::global()->bounded(100)<8) {
+        if(life.level>=12) {
+            emotion_="happy";
+            playActionSequence({"wave","spin","dance"},{"friendly","playful","happy"},{600,900,1500});
+        } else if(life.level>=8) {
+            emotion_="happy";
+            setAction(Action::Dance,2300);
+        } else if(life.level>=5) {
+            emotion_="playful";
+            setAction(Action::Spin,1700);
+        } else {
+            emotion_="happy";
+            setAction(Action::Hop,1400);
+        }
+        scheduleIdleMoment();
+        return;
+    }
+
     // Small, quiet micro-actions make Tony feel alive without turning idle mode
-    // into a distraction. Flashy actions remain user/agent initiated.
+    // into a distraction.
     if(QRandomGenerator::global()->bounded(100)<18) {
         switch(QRandomGenerator::global()->bounded(4)) {
         case 0: emotion_="curious"; setAction(Action::HeadTilt,1500); break;
