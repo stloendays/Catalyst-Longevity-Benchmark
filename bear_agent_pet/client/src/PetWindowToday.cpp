@@ -95,6 +95,7 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
     emotion_ = QStringLiteral("focused");
     setAction(Action::Study, 0);
 
+    const auto life=behavior_.snapshot();
     const QString prompt = QStringLiteral(
         "[TONY_DAILY_BRIEF]\n"
         "Create a concise %1 briefing for the desktop-pet user. "
@@ -105,17 +106,27 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
         "Keep the briefing practical, warm, and under 120 words. "
         "Use at most 4 short bullets. Reply in %2.\n"
         "LOCAL_TIME: %3\n"
-        "PET_MOOD: %4\n"
-        "PET_ENERGY: %5\n"
-        "UPCOMING_REMINDERS:\n%6\n"
-        "SAVED_NEWS_SOURCE: %7\n"
-        "SAVED_NEWS_HEADLINE: %8")
+        "PET_STAGE: %4\n"
+        "PET_LEVEL: %5\n"
+        "PET_MOOD: %6\n"
+        "PET_HP: %7\n"
+        "PET_ENERGY: %8\n"
+        "PET_FULLNESS: %9\n"
+        "PET_UNDER_WEATHER: %10\n"
+        "UPCOMING_REMINDERS:\n%11\n"
+        "SAVED_NEWS_SOURCE: %12\n"
+        "SAVED_NEWS_HEADLINE: %13")
         .arg(
             period,
             zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"),
             QDateTime::currentDateTime().toString(Qt::ISODate),
-            behavior_.snapshot().mood,
-            QString::number(behavior_.snapshot().energy),
+            life.growthStage,
+            QString::number(life.level),
+            life.mood,
+            QString::number(life.health),
+            QString::number(life.energy),
+            QString::number(life.satiety),
+            life.underWeather ? QStringLiteral("true") : QStringLiteral("false"),
             reminderLines.isEmpty() ? QStringLiteral("- none") : reminderLines.join(QStringLiteral("\n")),
             cleanNewsSource.isEmpty() ? QStringLiteral("none") : cleanNewsSource,
             cleanNewsTitle.isEmpty() ? QStringLiteral("none") : cleanNewsTitle);
