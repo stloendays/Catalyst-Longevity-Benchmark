@@ -951,7 +951,7 @@ void PetWindow::tickDesktop(){
             if(dockMode_==DockMode::Free) {
                 const int verticalSpan=qBound(40,50 + life.curiosity,130);
                 targetY=qBound(area.top(),
-                               pos().y()+QRandomGenerator::global()->bounded(-verticalSpan,verticalSpan+1),
+                               pos().y()+QRandomGenerator::global()->bounded(verticalSpan*2+1)-verticalSpan,
                                maxY);
             } else if(dockMode_==DockMode::Bottom) {
                 targetY=maxY;
