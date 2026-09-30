@@ -97,6 +97,7 @@ void TonyBehaviorEngine::onPetted() {
     affection_ = clamp100(affection_ + 4.0);
     loneliness_ = clamp100(loneliness_ - 7.0);
     curiosity_ = clamp100(curiosity_ - 1.0);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onHugged() {
@@ -106,6 +107,7 @@ void TonyBehaviorEngine::onHugged() {
     loneliness_ = clamp100(loneliness_ - 14.0);
     warmth_ = clamp100(warmth_ + 16.0);
     energy_ = clamp100(energy_ + 1.0);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onConversation() {
@@ -114,6 +116,7 @@ void TonyBehaviorEngine::onConversation() {
     affection_ = clamp100(affection_ + 1.0);
     loneliness_ = clamp100(loneliness_ - 6.0);
     curiosity_ = clamp100(curiosity_ - 8.0);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onFed() {
@@ -163,6 +166,7 @@ void TonyBehaviorEngine::onDragged(bool rough) {
     curiosity_ = clamp100(curiosity_ + (rough ? 6.0 : 3.0));
     energy_ = clamp100(energy_ - (rough ? 4.0 : 1.0));
     if(!rough) affection_ = clamp100(affection_ + 0.5);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onPaulaMention() {
@@ -171,6 +175,7 @@ void TonyBehaviorEngine::onPaulaMention() {
     affection_ = clamp100(affection_ + 2.0);
     loneliness_ = clamp100(loneliness_ - 2.0);
     curiosity_ = clamp100(curiosity_ + 4.0);
+    refreshCondition();
 }
 
 TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
