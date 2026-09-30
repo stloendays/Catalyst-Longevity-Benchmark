@@ -33,6 +33,7 @@ bool testBehaviorDefaultsAndInteractions() {
     bool ok = true;
     ok &= expect(state.health == 100, "default health");
     ok &= expect(state.energy == 78, "default energy");
+    ok &= expect(state.satiety == 72, "default satiety");
     ok &= expect(state.warmth == 68, "default warmth");
     ok &= expect(state.affection == 62, "default affection");
     ok &= expect(state.loneliness == 18, "default loneliness");
@@ -50,6 +51,12 @@ bool testBehaviorDefaultsAndInteractions() {
     ok &= expect(state.warmth == 84, "hug raises warmth");
     ok &= expect(state.affection == 69, "hug raises affection");
     ok &= expect(state.loneliness == 4, "hug lowers loneliness");
+
+    engine.onFed();
+    state = engine.snapshot();
+    ok &= expect(state.satiety == 100, "feeding raises satiety");
+    ok &= expect(state.health == 97, "feeding restores a little health");
+    ok &= expect(state.energy == 77, "feeding restores energy");
     return ok;
 }
 
@@ -65,6 +72,8 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
 
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/energy")).toDouble(), 77.94, 1e-6,
                      "one daytime minute lowers energy deterministically");
+    ok &= expectNear(persisted.value(QStringLiteral("tony/life/satiety")).toDouble(), 71.96, 1e-6,
+                     "one daytime minute lowers satiety deterministically");
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/warmth")).toDouble(), 67.88, 1e-6,
                      "one daytime minute lowers warmth deterministically");
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/loneliness")).toDouble(), 18.18, 1e-6,
@@ -74,6 +83,7 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
 
     persisted.setValue(QStringLiteral("tony/life/health"), -50.0);
     persisted.setValue(QStringLiteral("tony/life/energy"), 250.0);
+    persisted.setValue(QStringLiteral("tony/life/satiety"), 130.0);
     persisted.setValue(QStringLiteral("tony/life/warmth"), -20.0);
     persisted.setValue(QStringLiteral("tony/life/affection"), 120.0);
     persisted.setValue(QStringLiteral("tony/life/loneliness"), -4.0);
@@ -85,6 +95,7 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     const auto clamped = restored.snapshot();
     ok &= expect(clamped.health == 0, "restore clamps health to 0");
     ok &= expect(clamped.energy == 100, "restore clamps energy to 100");
+    ok &= expect(clamped.satiety == 100, "restore clamps satiety to 100");
     ok &= expect(clamped.warmth == 0, "restore clamps warmth to 0");
     ok &= expect(clamped.affection == 100, "restore clamps affection to 100");
     ok &= expect(clamped.loneliness == 0, "restore clamps loneliness to 0");
