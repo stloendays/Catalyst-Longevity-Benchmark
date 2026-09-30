@@ -4,6 +4,22 @@ Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side ag
 
 Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their own pet artwork and declarative `pet.json`, validate/package it as `.tonypet`, and preview the pet in the same desktop runtime while keeping Tony as the safe default.
 
+## Tony 1.1.5 vitality and agility
+
+- adds a persistent **HP / health** stat alongside energy, warmth, affection, loneliness and curiosity;
+- HP falls only under meaningful stress (very low energy/warmth, extreme loneliness, hunger, or rough dragging) and recovers gradually with rest and care;
+- adds persistent **satiety / fullness** with slow day/night decay, a hungry mood and a user-facing **Give Tony a snack** interaction;
+- hugging, petting, conversation and feeding can restore small amounts of vitality;
+- sleep is now restorative: manual sleep, low-health sleep and automatic corner rest recover HP/energy while consuming a little fullness;
+- adds persistent **bond XP / level** progression (50 XP per level, capped at Lv.99) from care and interaction;
+- Tony visibly slows down when health/energy are low and walks faster when healthy and energetic;
+- cursor pursuit now uses the full x/y target instead of horizontal-only stepping, so Tony can genuinely roam in two dimensions;
+- cursor pursuit and active-window walking use adaptive gait speed instead of a fixed step size;
+- healthy, curious Tony can take occasional short self-directed two-dimensional walks after a quiet period;
+- the desktop sensing cadence is more responsive while remaining lightweight;
+- the vitality HUD stays hidden during normal use, appears on hover, and becomes persistent below 60 HP or 30 fullness;
+- **How are you feeling?** reports level, bond progress, HP, energy and fullness, with dedicated critical, weak, hungry and recovery-oriented states.
+
 ## Tony 1.1.0 UX refresh
 
 Tony 1.1.0 focuses on making the existing Agent Pet features easier to discover and less disruptive:

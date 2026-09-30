@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QSettings>
 #include <QtMath>
 
 namespace {
@@ -188,6 +189,37 @@ void PetWindow::paintEvent(QPaintEvent*) {
         p.drawText(QRectF(-95,-30,190,60),Qt::AlignCenter,"TONY");
     }
     p.restore();
+
+    // Keep the canvas uncluttered in normal use. HP appears on hover, and
+    // automatically when Tony is below 60 so a low-health state is never hidden.
+    const auto life=behavior_.snapshot();
+    if(hovered_ || life.health<60 || life.satiety<30) {
+        const QRectF bar(width()/2.0-80.0,8.0,160.0,10.0);
+        p.save();
+        p.setRenderHint(QPainter::Antialiasing,true);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(20,20,20,95));
+        p.drawRoundedRect(bar,5,5);
+        QRectF fill=bar.adjusted(2,2,-2,-2);
+        fill.setWidth(fill.width()*qBound(0,life.health,100)/100.0);
+        QColor hpColor(62,190,92,220);
+        if(life.health<60 || life.satiety<30) hpColor=QColor(232,172,54,225);
+        if(life.health<30) hpColor=QColor(220,76,76,230);
+        p.setBrush(hpColor);
+        p.drawRoundedRect(fill,3,3);
+        p.setPen(QColor(255,255,255,225));
+        QFont f=p.font();
+        f.setBold(true);
+        f.setPointSize(8);
+        p.setFont(f);
+        const QString language=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString().toLower();
+        const QString label=language.startsWith(QStringLiteral("zh"))
+            ? QStringLiteral("LV %1 · HP %2 · 饱食 %3").arg(life.level).arg(life.health).arg(life.satiety)
+            : QStringLiteral("LV %1 · HP %2 · FOOD %3").arg(life.level).arg(life.health).arg(life.satiety);
+        p.drawText(QRectF(bar.left(),bar.bottom()+1,bar.width(),15),
+                   Qt::AlignHCenter|Qt::AlignTop,label);
+        p.restore();
+    }
 
     // The old bottom name plate consumed 34 px of the image-safe region. Tony's
     // identity is already present in tray/chat UI, so the pet canvas is now fully

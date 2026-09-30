@@ -90,6 +90,10 @@ if(BUILD_TESTING)
       src/TonyBehaviorEngine.h
       src/TonyMemoryStore.cpp
       src/TonyMemoryStore.h
+      src/TonyResponseRouter.cpp
+      src/TonyResponseRouter.h
+      src/TonyResponsePack.cpp
+      src/TonyResponsePack.h
       src/TonyConversationStore.cpp
       src/TonyConversationStore.h
       src/LocalReminderManager.cpp

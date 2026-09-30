@@ -11,6 +11,7 @@ public:
         Sleep,
         Shiver,
         AskHug,
+        AskFood,
         Wave,
         Walk,
         Study,
@@ -21,7 +22,11 @@ public:
     };
 
     struct Snapshot {
+        int health{0};
+        int level{1};
+        int bondXp{0};
         int energy{0};
+        int satiety{0};
         int warmth{0};
         int affection{0};
         int loneliness{0};
@@ -36,6 +41,8 @@ public:
     void onPetted();
     void onHugged();
     void onConversation();
+    void onFed();
+    void onRested();
     void onDragged(bool rough);
     void onPaulaMention();
 
@@ -44,8 +51,12 @@ public:
 
 private:
     static double clamp100(double value);
+    void addBondXp(int amount);
 
+    int bondXp_{0};
+    double health_{100.0};
     double energy_{78.0};
+    double satiety_{72.0};
     double warmth_{68.0};
     double affection_{62.0};
     double loneliness_{18.0};

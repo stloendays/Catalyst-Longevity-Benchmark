@@ -2,6 +2,7 @@
 #include "TonyBehaviorEngine.h"
 #include "TonyConversationStore.h"
 #include "TonyMemoryStore.h"
+#include "TonyResponseRouter.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -31,19 +32,41 @@ bool testBehaviorDefaultsAndInteractions() {
     TonyBehaviorEngine engine;
     auto state = engine.snapshot();
     bool ok = true;
+    ok &= expect(state.health == 100, "default health");
+    ok &= expect(state.level == 1, "default bond level");
+    ok &= expect(state.bondXp == 0, "default bond xp");
     ok &= expect(state.energy == 78, "default energy");
+    ok &= expect(state.satiety == 72, "default satiety");
     ok &= expect(state.warmth == 68, "default warmth");
     ok &= expect(state.affection == 62, "default affection");
     ok &= expect(state.loneliness == 18, "default loneliness");
     ok &= expect(state.curiosity == 58, "default curiosity");
     ok &= expect(state.mood == QStringLiteral("content"), "default mood");
 
+    engine.onDragged(true);
+    state = engine.snapshot();
+    ok &= expect(state.health == 94, "rough drag lowers health");
+
     engine.onHugged();
     state = engine.snapshot();
-    ok &= expect(state.energy == 79, "hug raises energy");
+    ok &= expect(state.health == 96, "hug restores health");
+    ok &= expect(state.energy == 75, "hug raises energy after rough drag");
     ok &= expect(state.warmth == 84, "hug raises warmth");
     ok &= expect(state.affection == 69, "hug raises affection");
     ok &= expect(state.loneliness == 4, "hug lowers loneliness");
+
+    engine.onFed();
+    state = engine.snapshot();
+    ok &= expect(state.satiety == 100, "feeding raises satiety");
+    ok &= expect(state.health == 97, "feeding restores a little health");
+    ok &= expect(state.energy == 77, "feeding restores energy");
+    ok &= expect(state.bondXp == 3, "hug and feeding accumulate bond xp");
+
+    engine.onRested();
+    state = engine.snapshot();
+    ok &= expect(state.health == 99, "rest restores health");
+    ok &= expect(state.energy == 86, "rest restores energy");
+    ok &= expect(state.satiety == 99, "rest consumes a little satiety");
     return ok;
 }
 
@@ -59,6 +82,8 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
 
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/energy")).toDouble(), 77.94, 1e-6,
                      "one daytime minute lowers energy deterministically");
+    ok &= expectNear(persisted.value(QStringLiteral("tony/life/satiety")).toDouble(), 71.96, 1e-6,
+                     "one daytime minute lowers satiety deterministically");
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/warmth")).toDouble(), 67.88, 1e-6,
                      "one daytime minute lowers warmth deterministically");
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/loneliness")).toDouble(), 18.18, 1e-6,
@@ -66,7 +91,10 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/curiosity")).toDouble(), 58.18, 1e-6,
                      "idle daytime minute raises curiosity deterministically");
 
+    persisted.setValue(QStringLiteral("tony/life/bond_xp"), 99999);
+    persisted.setValue(QStringLiteral("tony/life/health"), -50.0);
     persisted.setValue(QStringLiteral("tony/life/energy"), 250.0);
+    persisted.setValue(QStringLiteral("tony/life/satiety"), 130.0);
     persisted.setValue(QStringLiteral("tony/life/warmth"), -20.0);
     persisted.setValue(QStringLiteral("tony/life/affection"), 120.0);
     persisted.setValue(QStringLiteral("tony/life/loneliness"), -4.0);
@@ -76,11 +104,64 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     TonyBehaviorEngine restored;
     restored.restore(persisted);
     const auto clamped = restored.snapshot();
+    ok &= expect(clamped.level == 99, "restore clamps bond level to 99");
+    ok &= expect(clamped.bondXp == 4900, "restore clamps bond xp");
+    ok &= expect(clamped.health == 0, "restore clamps health to 0");
     ok &= expect(clamped.energy == 100, "restore clamps energy to 100");
+    ok &= expect(clamped.satiety == 100, "restore clamps satiety to 100");
     ok &= expect(clamped.warmth == 0, "restore clamps warmth to 0");
     ok &= expect(clamped.affection == 100, "restore clamps affection to 100");
     ok &= expect(clamped.loneliness == 0, "restore clamps loneliness to 0");
     ok &= expect(clamped.curiosity == 100, "restore clamps curiosity to 100");
+    return ok;
+}
+
+bool testHungerMoodAndFeeding(const QString &settingsPath) {
+    QSettings settings(settingsPath, QSettings::IniFormat);
+    settings.clear();
+    settings.setValue(QStringLiteral("tony/life/health"), 80.0);
+    settings.setValue(QStringLiteral("tony/life/energy"), 78.0);
+    settings.setValue(QStringLiteral("tony/life/satiety"), 12.0);
+    settings.setValue(QStringLiteral("tony/life/warmth"), 68.0);
+    settings.setValue(QStringLiteral("tony/life/affection"), 62.0);
+    settings.setValue(QStringLiteral("tony/life/loneliness"), 18.0);
+    settings.setValue(QStringLiteral("tony/life/curiosity"), 58.0);
+    settings.sync();
+
+    TonyBehaviorEngine engine;
+    engine.restore(settings);
+    bool ok = true;
+    auto state = engine.snapshot();
+    ok &= expect(state.mood == QStringLiteral("hungry"), "low satiety produces hungry mood");
+
+    engine.onFed();
+    state = engine.snapshot();
+    ok &= expect(state.satiety == 40, "feeding adds 28 satiety");
+    ok &= expect(state.health == 81, "feeding restores one health point");
+    ok &= expect(state.mood == QStringLiteral("content"), "feeding clears hungry mood");
+    return ok;
+}
+
+bool testResponseRouterVitalityAndCare() {
+    TonyBehaviorEngine engine;
+    const auto state = engine.snapshot();
+    TonyResponseRouter router;
+    bool ok = true;
+
+    const auto status = router.resolve(QStringLiteral("你怎么样"), QStringLiteral("zh"), false, state);
+    ok &= expect(status.handledLocally(), "status is handled locally");
+    ok &= expect(status.intent == QStringLiteral("status"), "status intent is stable");
+    ok &= expect(status.reply.contains(QStringLiteral("生命 100")), "status reply contains HP");
+    ok &= expect(status.reply.contains(QStringLiteral("饱食 72")), "status reply contains satiety");
+    ok &= expect(status.reply.contains(QStringLiteral("Lv 1")), "status reply contains level");
+
+    const auto feed = router.resolve(QStringLiteral("给你零食"), QStringLiteral("zh"), false, state);
+    ok &= expect(feed.handledLocally(), "explicit feeding is local");
+    ok &= expect(feed.intent == QStringLiteral("feed"), "explicit feeding gets feed intent");
+
+    const auto sleep = router.resolve(QStringLiteral("晚安"), QStringLiteral("zh"), false, state);
+    ok &= expect(sleep.handledLocally(), "sleep is local");
+    ok &= expect(sleep.intent == QStringLiteral("sleep"), "sleep intent remains stable");
     return ok;
 }
 
@@ -200,6 +281,8 @@ int main(int argc, char **argv) {
     bool ok = true;
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
+    ok &= testHungerMoodAndFeeding(temp.filePath(QStringLiteral("hunger.ini")));
+    ok &= testResponseRouterVitalityAndCare();
     ok &= testMemoryStore();
     ok &= testConversationStore();
     ok &= testLocalReminderManager();
