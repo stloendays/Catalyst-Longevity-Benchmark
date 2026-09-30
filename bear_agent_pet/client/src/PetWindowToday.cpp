@@ -115,21 +115,21 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
         "PET_UNDER_WEATHER: %10\n"
         "UPCOMING_REMINDERS:\n%11\n"
         "SAVED_NEWS_SOURCE: %12\n"
-        "SAVED_NEWS_HEADLINE: %13")
-        .arg(
-            period,
-            zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"),
-            QDateTime::currentDateTime().toString(Qt::ISODate),
-            life.growthStage,
-            QString::number(life.level),
-            life.mood,
-            QString::number(life.health),
-            QString::number(life.energy),
-            QString::number(life.satiety),
-            life.underWeather ? QStringLiteral("true") : QStringLiteral("false"),
-            reminderLines.isEmpty() ? QStringLiteral("- none") : reminderLines.join(QStringLiteral("\n")),
-            cleanNewsSource.isEmpty() ? QStringLiteral("none") : cleanNewsSource,
-            cleanNewsTitle.isEmpty() ? QStringLiteral("none") : cleanNewsTitle);
+        "SAVED_NEWS_HEADLINE: %13");
+    prompt = prompt
+        .arg(period)
+        .arg(zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"))
+        .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
+        .arg(life.growthStage)
+        .arg(QString::number(life.level))
+        .arg(life.mood)
+        .arg(QString::number(life.health))
+        .arg(QString::number(life.energy))
+        .arg(QString::number(life.satiety))
+        .arg(life.underWeather ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(reminderLines.isEmpty() ? QStringLiteral("- none") : reminderLines.join(QStringLiteral("\n")))
+        .arg(cleanNewsSource.isEmpty() ? QStringLiteral("none") : cleanNewsSource)
+        .arg(cleanNewsTitle.isEmpty() ? QStringLiteral("none") : cleanNewsTitle);
 
     AppLogger::recordOperatorEvent(
         QStringLiteral("daily_brief_requested"),
