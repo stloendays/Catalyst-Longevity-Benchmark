@@ -221,10 +221,27 @@ bool testResponseRouterVitalityAndCare() {
     ok &= expect(status.reply.contains(QStringLiteral("生命 100")), "status reply contains HP");
     ok &= expect(status.reply.contains(QStringLiteral("饱食 72")), "status reply contains satiety");
     ok &= expect(status.reply.contains(QStringLiteral("Lv 1")), "status reply contains level");
+    ok &= expect(status.reply.contains(QStringLiteral("幼犬")), "status reply contains growth stage");
+    ok &= expect(status.reply.contains(QStringLiteral("状态：健康")), "status reply contains care condition");
 
     const auto feed = router.resolve(QStringLiteral("给你零食"), QStringLiteral("zh"), false, state);
     ok &= expect(feed.handledLocally(), "explicit feeding is local");
     ok &= expect(feed.intent == QStringLiteral("feed"), "explicit feeding gets feed intent");
+
+    const auto meal = router.resolve(QStringLiteral("给你正餐"), QStringLiteral("zh"), false, state);
+    ok &= expect(meal.intent == QStringLiteral("feed_meal"), "meal phrasing gets meal intent");
+
+    const auto warmDrink = router.resolve(QStringLiteral("给你热饮"), QStringLiteral("zh"), false, state);
+    ok &= expect(warmDrink.intent == QStringLiteral("feed_warm_drink"), "warm drink phrasing gets warm-drink intent");
+
+    const auto lockedTrick = router.resolve(QStringLiteral("表演特技"), QStringLiteral("zh"), false, state);
+    ok &= expect(lockedTrick.intent == QStringLiteral("trick_locked"), "level-one trick request stays locked");
+
+    auto advancedState = state;
+    advancedState.level = 12;
+    advancedState.growthStage = QStringLiteral("explorer");
+    const auto advancedTrick = router.resolve(QStringLiteral("表演特技"), QStringLiteral("zh"), false, advancedState);
+    ok &= expect(advancedTrick.intent == QStringLiteral("trick_victory"), "level-twelve trick request unlocks victory combo");
 
     const auto sleep = router.resolve(QStringLiteral("晚安"), QStringLiteral("zh"), false, state);
     ok &= expect(sleep.handledLocally(), "sleep is local");
