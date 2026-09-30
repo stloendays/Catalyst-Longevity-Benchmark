@@ -103,6 +103,32 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     return ok;
 }
 
+bool testHungerMoodAndFeeding(const QString &settingsPath) {
+    QSettings settings(settingsPath, QSettings::IniFormat);
+    settings.clear();
+    settings.setValue(QStringLiteral("tony/life/health"), 80.0);
+    settings.setValue(QStringLiteral("tony/life/energy"), 78.0);
+    settings.setValue(QStringLiteral("tony/life/satiety"), 12.0);
+    settings.setValue(QStringLiteral("tony/life/warmth"), 68.0);
+    settings.setValue(QStringLiteral("tony/life/affection"), 62.0);
+    settings.setValue(QStringLiteral("tony/life/loneliness"), 18.0);
+    settings.setValue(QStringLiteral("tony/life/curiosity"), 58.0);
+    settings.sync();
+
+    TonyBehaviorEngine engine;
+    engine.restore(settings);
+    bool ok = true;
+    auto state = engine.snapshot();
+    ok &= expect(state.mood == QStringLiteral("hungry"), "low satiety produces hungry mood");
+
+    engine.onFed();
+    state = engine.snapshot();
+    ok &= expect(state.satiety == 40, "feeding adds 28 satiety");
+    ok &= expect(state.health == 81, "feeding restores one health point");
+    ok &= expect(state.mood == QStringLiteral("content"), "feeding clears hungry mood");
+    return ok;
+}
+
 bool testMemoryStore() {
     auto &memory = TonyMemoryStore::instance();
     memory.clear();
@@ -219,6 +245,7 @@ int main(int argc, char **argv) {
     bool ok = true;
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
+    ok &= testHungerMoodAndFeeding(temp.filePath(QStringLiteral("hunger.ini")));
     ok &= testMemoryStore();
     ok &= testConversationStore();
     ok &= testLocalReminderManager();
