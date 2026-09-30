@@ -209,6 +209,8 @@ bool testGrowthFoodAndCondition(const QString &settingsPath) {
     veteran.restore(settings);
     ok &= expect(veteran.snapshot().level == 30, "1450 bond xp reaches level 30");
     ok &= expect(veteran.snapshot().growthStage == QStringLiteral("veteran"), "level 30 enters veteran stage");
+    ok &= expect(veteran.snapshot().achievements.contains(QStringLiteral("veteran")),
+                 "existing level-30 users derive veteran achievement on restore");
 
     return ok;
 }
