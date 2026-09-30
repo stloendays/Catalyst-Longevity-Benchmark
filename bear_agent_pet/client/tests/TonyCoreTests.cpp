@@ -247,7 +247,12 @@ bool testPersonalityPreferencesAndAchievements(const QString &settingsPath) {
     state=preference.snapshot();
     ok &= expect(state.favoriteFood == QStringLiteral("warm_drink"), "three consistent feeds establish a favorite");
     ok &= expect(state.achievements.contains(QStringLiteral("favorite_found")), "favorite food discovery unlocks achievement");
-    for(int i=0;i<7;++i) preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
+    const int bondBeforeFavoriteFeed=state.bondXp;
+    preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
+    state=preference.snapshot();
+    ok &= expect(state.bondXp == bondBeforeFavoriteFeed+2, "established favorite food gives one bonus bond xp");
+    ok &= expect(state.affection == 64, "established favorite food gives affection bonus");
+    for(int i=0;i<6;++i) preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
     state=preference.snapshot();
     ok &= expect(state.achievements.contains(QStringLiteral("caregiver")), "ten feeds unlock caregiver achievement");
 
