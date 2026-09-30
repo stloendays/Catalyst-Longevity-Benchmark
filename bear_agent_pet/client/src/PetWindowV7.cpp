@@ -1300,6 +1300,7 @@ void PetWindow::moveToRestCorner(){
     move(x,y);
     savePosition();
     autoRested_=true;
+    behavior_.onRested();
     emotion_="sleepy";
     setAction(Action::Sleep,0);
     tray_.setToolTip("Tony · sleeping in a quiet corner");
@@ -1647,10 +1648,18 @@ void PetWindow::handleTap(const QPoint &localPos){
 
 void PetWindow::showLifeStatus(){
     const auto s=behavior_.snapshot();
+    const int xpIntoLevel=s.level>=99 ? 50 : (s.bondXp%50);
     const QString vitals=uiText(
-        QStringLiteral("HP %1 · Energy %2 · Fullness %3").arg(s.health).arg(s.energy).arg(s.satiety),
-        QStringLiteral("生命 %1 · 精力 %2 · 饱食 %3").arg(s.health).arg(s.energy).arg(s.satiety));
-    if(s.mood=="weak") {
+        QStringLiteral("Lv %1 · HP %2 · Energy %3 · Fullness %4 · Bond %5/50")
+            .arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel),
+        QStringLiteral("Lv %1 · 生命 %2 · 精力 %3 · 饱食 %4 · 羁绊 %5/50")
+            .arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel));
+    if(s.mood=="critical") {
+        emotion_="worried"; setAction(Action::Dizzy,2400);
+        showBubble(uiText(
+            QStringLiteral("%1. I'm not feeling well. I need food, warmth and rest.").arg(vitals),
+            QStringLiteral("%1。现在状态很差，需要吃东西、保暖并好好休息。").arg(vitals)),5200);
+    } else if(s.mood=="weak") {
         emotion_="sleepy"; setAction(Action::Sleep,2600);
         showBubble(uiText(
             QStringLiteral("%1. I need a quiet recovery period.").arg(vitals),
@@ -1969,7 +1978,15 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==glasses) setAction(Action::AdjustGlasses,1600);
     else if(chosen==noGlasses) setAction(Action::RemoveGlasses,2600);
     else if(chosen==cold) { emotion_="cold"; setAction(Action::Shiver,2200); showBubble(uiText("Brrr… warm paws, please.","好冷……给我暖暖爪子。"),3600); }
-    else if(chosen==sleep) setAction(Action::Sleep);
+    else if(chosen==sleep) {
+        behavior_.onRested();
+        emotion_="sleepy";
+        setAction(Action::Sleep);
+        const auto life=behavior_.snapshot();
+        showBubble(uiText(
+            QStringLiteral("Resting now. Energy %1 · HP %2.").arg(life.energy).arg(life.health),
+            QStringLiteral("开始休息。精力 %1 · 生命 %2。").arg(life.energy).arg(life.health)),3600);
+    }
     else if(chosen==headTilt) { emotion_="curious"; setAction(Action::HeadTilt,1700); }
     else if(chosen==nod) { emotion_="content"; setAction(Action::Nod,1300); }
     else if(chosen==paw) { emotion_="friendly"; setAction(Action::Paw,1600); }
