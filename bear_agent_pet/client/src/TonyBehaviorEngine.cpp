@@ -16,8 +16,18 @@ void TonyBehaviorEngine::addBondXp(int amount) {
     bondXp_ = qBound(0, bondXp_ + amount, 4900);
 }
 
+void TonyBehaviorEngine::refreshCondition() {
+    if(!underWeather_ && health_ < 30.0 && (satiety_ < 22.0 || warmth_ < 28.0))
+        underWeather_ = true;
+
+    if(underWeather_ && health_ >= 58.0 && satiety_ >= 45.0 &&
+       warmth_ >= 45.0 && energy_ >= 45.0)
+        underWeather_ = false;
+}
+
 void TonyBehaviorEngine::restore(QSettings &settings) {
     bondXp_ = qBound(0, settings.value(QString(kPrefix) + "bond_xp", bondXp_).toInt(), 4900);
+    underWeather_ = settings.value(QString(kPrefix) + "under_weather", underWeather_).toBool();
     health_ = clamp100(settings.value(QString(kPrefix) + "health", health_).toDouble());
     energy_ = clamp100(settings.value(QString(kPrefix) + "energy", energy_).toDouble());
     satiety_ = clamp100(settings.value(QString(kPrefix) + "satiety", satiety_).toDouble());
@@ -25,10 +35,12 @@ void TonyBehaviorEngine::restore(QSettings &settings) {
     affection_ = clamp100(settings.value(QString(kPrefix) + "affection", affection_).toDouble());
     loneliness_ = clamp100(settings.value(QString(kPrefix) + "loneliness", loneliness_).toDouble());
     curiosity_ = clamp100(settings.value(QString(kPrefix) + "curiosity", curiosity_).toDouble());
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::save(QSettings &settings) const {
     settings.setValue(QString(kPrefix) + "bond_xp", bondXp_);
+    settings.setValue(QString(kPrefix) + "under_weather", underWeather_);
     settings.setValue(QString(kPrefix) + "health", health_);
     settings.setValue(QString(kPrefix) + "energy", energy_);
     settings.setValue(QString(kPrefix) + "satiety", satiety_);
@@ -46,6 +58,7 @@ void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby,
     energy_ += (agentBusy ? -0.32 : (night ? -0.13 : -0.06)) * minutes;
     satiety_ -= (night ? 0.022 : (agentBusy ? 0.055 : 0.040)) * minutes;
     if(satiety_ < 25.0) energy_ -= 0.055 * minutes;
+    if(underWeather_) energy_ -= 0.080 * minutes;
     warmth_ += (night ? -0.20 : -0.12) * minutes;
     loneliness_ += (userNearby ? -0.30 : 0.18) * minutes;
     curiosity_ += (agentBusy ? -0.12 : 0.18) * minutes;
@@ -75,6 +88,7 @@ void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby,
     affection_ = clamp100(affection_);
     loneliness_ = clamp100(loneliness_);
     curiosity_ = clamp100(curiosity_);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onPetted() {
@@ -103,12 +117,37 @@ void TonyBehaviorEngine::onConversation() {
 }
 
 void TonyBehaviorEngine::onFed() {
-    addBondXp(1);
-    satiety_ = clamp100(satiety_ + 28.0);
-    health_ = clamp100(health_ + 1.0);
-    energy_ = clamp100(energy_ + 2.0);
-    warmth_ = clamp100(warmth_ + 1.0);
-    loneliness_ = clamp100(loneliness_ - 2.0);
+    onFed(Food::Snack);
+}
+
+void TonyBehaviorEngine::onFed(Food food) {
+    switch(food) {
+    case Food::Snack:
+        addBondXp(1);
+        satiety_ = clamp100(satiety_ + 28.0);
+        health_ = clamp100(health_ + 1.0);
+        energy_ = clamp100(energy_ + 2.0);
+        warmth_ = clamp100(warmth_ + 1.0);
+        loneliness_ = clamp100(loneliness_ - 2.0);
+        break;
+    case Food::Meal:
+        addBondXp(2);
+        satiety_ = clamp100(satiety_ + 45.0);
+        health_ = clamp100(health_ + 2.0);
+        energy_ = clamp100(energy_ + 4.0);
+        warmth_ = clamp100(warmth_ + 2.0);
+        loneliness_ = clamp100(loneliness_ - 3.0);
+        break;
+    case Food::WarmDrink:
+        addBondXp(1);
+        satiety_ = clamp100(satiety_ + 16.0);
+        health_ = clamp100(health_ + 2.5);
+        energy_ = clamp100(energy_ + 1.0);
+        warmth_ = clamp100(warmth_ + 12.0);
+        loneliness_ = clamp100(loneliness_ - 2.0);
+        break;
+    }
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onRested() {
@@ -116,6 +155,7 @@ void TonyBehaviorEngine::onRested() {
     energy_ = clamp100(energy_ + 9.0);
     warmth_ = clamp100(warmth_ + 2.0);
     satiety_ = clamp100(satiety_ - 1.0);
+    refreshCondition();
 }
 
 void TonyBehaviorEngine::onDragged(bool rough) {
@@ -137,6 +177,10 @@ TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
     auto *rng = QRandomGenerator::global();
     const bool night = hour >= 23 || hour < 7;
 
+    if(underWeather_ && rng->bounded(100) < 72) {
+        onRested();
+        return Impulse::Sleep;
+    }
     if(health_ < 38.0 && rng->bounded(100) < 88) {
         onRested();
         return Impulse::Sleep;
@@ -177,8 +221,14 @@ TonyBehaviorEngine::Snapshot TonyBehaviorEngine::snapshot() const {
     out.affection = qRound(affection_);
     out.loneliness = qRound(loneliness_);
     out.curiosity = qRound(curiosity_);
+    if(out.level < 5) out.growthStage = "pup";
+    else if(out.level < 15) out.growthStage = "explorer";
+    else if(out.level < 30) out.growthStage = "companion";
+    else out.growthStage = "veteran";
+    out.underWeather = underWeather_;
 
     if(health_ < 18.0) out.mood = "critical";
+    else if(underWeather_) out.mood = "unwell";
     else if(health_ < 35.0) out.mood = "weak";
     else if(warmth_ < 35.0) out.mood = "cold";
     else if(satiety_ < 25.0) out.mood = "hungry";
