@@ -155,8 +155,8 @@ PetWindow::PetWindow(QWidget *parent)
     connect(&lifeTimer_, &QTimer::timeout, this, &PetWindow::tickLife);
     lifeTimer_.start();
 
-    // Desktop sensing runs at 4 Hz: quick enough to notice cursor sweeps without
-    // turning foreground-window checks into a busy loop.
+    // Desktop sensing runs at about 5.5 Hz: responsive enough to catch cursor
+    // sweeps and 2D movement without turning foreground checks into a busy loop.
     desktopTimer_.setInterval(180);
     connect(&desktopTimer_, &QTimer::timeout, this, &PetWindow::tickDesktop);
     desktopTimer_.start();
