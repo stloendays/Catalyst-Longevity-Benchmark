@@ -36,6 +36,9 @@ bool testBehaviorDefaultsAndInteractions() {
     ok &= expect(state.level == 1, "default bond level");
     ok &= expect(state.bondXp == 0, "default bond xp");
     ok &= expect(state.growthStage == QStringLiteral("pup"), "default growth stage");
+    ok &= expect(state.personality == QStringLiteral("balanced"), "default personality is balanced");
+    ok &= expect(state.favoriteFood == QStringLiteral("none"), "default favorite food is unknown");
+    ok &= expect(state.achievements.isEmpty(), "default achievements are empty");
     ok &= expect(!state.underWeather, "default condition is healthy");
     ok &= expect(state.energy == 78, "default energy");
     ok &= expect(state.satiety == 72, "default satiety");
@@ -176,6 +179,7 @@ bool testGrowthFoodAndCondition(const QString &settingsPath) {
     ok &= expect(state.health == 58, "repeated rest reaches recovery health threshold");
     ok &= expect(state.satiety == 45, "rest consumes a small amount of fullness");
     ok &= expect(!state.underWeather, "care condition clears only after full recovery thresholds");
+    ok &= expect(state.achievements.contains(QStringLiteral("recovered")), "full recovery unlocks recovery achievement");
 
     TonyBehaviorEngine warmDrink;
     warmDrink.onFed(TonyBehaviorEngine::Food::WarmDrink);
@@ -206,6 +210,63 @@ bool testGrowthFoodAndCondition(const QString &settingsPath) {
     ok &= expect(veteran.snapshot().level == 30, "1450 bond xp reaches level 30");
     ok &= expect(veteran.snapshot().growthStage == QStringLiteral("veteran"), "level 30 enters veteran stage");
 
+    return ok;
+}
+
+bool testPersonalityPreferencesAndAchievements(const QString &settingsPath) {
+    bool ok = true;
+
+    TonyBehaviorEngine playful;
+    for(int i=0;i<5;++i) playful.onPlayed();
+    auto state=playful.snapshot();
+    ok &= expect(state.personality == QStringLiteral("playful"), "repeated play creates playful personality");
+    ok &= expect(state.playfulnessScore == 20, "play score accumulates deterministically");
+    ok &= expect(state.achievements.contains(QStringLiteral("performer")), "five play sessions unlock performer achievement");
+
+    TonyBehaviorEngine scholar;
+    for(int i=0;i<5;++i) scholar.onStudied();
+    state=scholar.snapshot();
+    ok &= expect(state.personality == QStringLiteral("scholar"), "repeated study creates scholar personality");
+    ok &= expect(state.scholarScore == 20, "scholar score accumulates deterministically");
+    ok &= expect(state.achievements.contains(QStringLiteral("scholar")), "five study sessions unlock scholar achievement");
+
+    TonyBehaviorEngine social;
+    for(int i=0;i<4;++i) social.onHugged();
+    state=social.snapshot();
+    ok &= expect(state.personality == QStringLiteral("social"), "repeated hugs create social personality");
+    ok &= expect(state.sociabilityScore == 12, "social score accumulates from hugs");
+
+    TonyBehaviorEngine calm;
+    for(int i=0;i<4;++i) calm.onRested();
+    state=calm.snapshot();
+    ok &= expect(state.personality == QStringLiteral("calm"), "repeated rest creates calm personality");
+    ok &= expect(state.calmScore == 8, "calm score accumulates from rest");
+
+    TonyBehaviorEngine preference;
+    for(int i=0;i<3;++i) preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
+    state=preference.snapshot();
+    ok &= expect(state.favoriteFood == QStringLiteral("warm_drink"), "three consistent feeds establish a favorite");
+    ok &= expect(state.achievements.contains(QStringLiteral("favorite_found")), "favorite food discovery unlocks achievement");
+    for(int i=0;i<7;++i) preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
+    state=preference.snapshot();
+    ok &= expect(state.achievements.contains(QStringLiteral("caregiver")), "ten feeds unlock caregiver achievement");
+
+    TonyBehaviorEngine bonded;
+    for(int i=0;i<5;++i) bonded.onHugged();
+    state=bonded.snapshot();
+    ok &= expect(state.bondXp == 10, "five hugs build ten bond xp");
+    ok &= expect(state.achievements.contains(QStringLiteral("first_bond")), "ten bond xp unlocks first-bond achievement");
+
+    QSettings persisted(settingsPath,QSettings::IniFormat);
+    persisted.clear();
+    preference.save(persisted);
+    persisted.sync();
+    TonyBehaviorEngine restored;
+    restored.restore(persisted);
+    state=restored.snapshot();
+    ok &= expect(state.favoriteFood == QStringLiteral("warm_drink"), "favorite food persists across restore");
+    ok &= expect(state.calmScore == 10, "feeding-derived calm score persists across restore");
+    ok &= expect(state.achievements.contains(QStringLiteral("caregiver")), "achievement flags persist across restore");
     return ok;
 }
 
@@ -367,6 +428,7 @@ int main(int argc, char **argv) {
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
     ok &= testHungerMoodAndFeeding(temp.filePath(QStringLiteral("hunger.ini")));
     ok &= testGrowthFoodAndCondition(temp.filePath(QStringLiteral("growth-care.ini")));
+    ok &= testPersonalityPreferencesAndAchievements(temp.filePath(QStringLiteral("personality.ini")));
     ok &= testResponseRouterVitalityAndCare();
     ok &= testMemoryStore();
     ok &= testConversationStore();
