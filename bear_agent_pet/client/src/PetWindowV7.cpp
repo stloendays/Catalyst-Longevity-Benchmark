@@ -1325,7 +1325,7 @@ void PetWindow::moveToRestCorner(){
     move(x,y);
     savePosition();
     autoRested_=true;
-    behavior_.onRested();
+    behavior_.onPassiveRested();
     emotion_="sleepy";
     setAction(Action::Sleep,0);
     tray_.setToolTip("Tony · sleeping in a quiet corner");
