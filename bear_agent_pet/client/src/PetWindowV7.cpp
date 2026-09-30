@@ -826,8 +826,10 @@ void PetWindow::runIdleMoment(){
 
     // Growth is visible in autonomous behavior without removing any manual
     // controls. Advanced tricks remain rare so Tony does not become distracting.
+    const int learnedTrickChance=life.personality=="playful" ? 16 :
+                                 life.personality=="scholar" ? 5 : 8;
     if(!life.underWeather && life.energy>=55 && life.satiety>=35 && life.level>=3 &&
-       QRandomGenerator::global()->bounded(100)<8) {
+       QRandomGenerator::global()->bounded(100)<learnedTrickChance) {
         if(life.level>=12) {
             emotion_="happy";
             playActionSequence({"wave","spin","dance"},{"friendly","playful","happy"},{600,900,1500});
@@ -1323,7 +1325,7 @@ void PetWindow::moveToRestCorner(){
     move(x,y);
     savePosition();
     autoRested_=true;
-    behavior_.onRested();
+    behavior_.onPassiveRested();
     emotion_="sleepy";
     setAction(Action::Sleep,0);
     tray_.setToolTip("Tony · sleeping in a quiet corner");
@@ -1677,11 +1679,17 @@ void PetWindow::showLifeStatus(){
         s.growthStage=="explorer" ? uiText("Explorer","探索期") :
         s.growthStage=="companion" ? uiText("Companion","伙伴期") :
         uiText("Veteran","成熟期");
+    const QString personality=
+        s.personality=="playful" ? uiText("Playful","活泼") :
+        s.personality=="social" ? uiText("Social","黏人") :
+        s.personality=="scholar" ? uiText("Scholar","好学") :
+        s.personality=="calm" ? uiText("Calm","安静") :
+        uiText("Balanced","均衡");
     const QString vitals=uiText(
-        QStringLiteral("%1 · Lv %2 · HP %3 · Energy %4 · Fullness %5 · Bond %6/50")
-            .arg(stage).arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel),
-        QStringLiteral("%1 · Lv %2 · 生命 %3 · 精力 %4 · 饱食 %5 · 羁绊 %6/50")
-            .arg(stage).arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel));
+        QStringLiteral("%1 · Lv %2 · HP %3 · Energy %4 · Fullness %5 · Bond %6/50 · %7")
+            .arg(stage).arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel).arg(personality),
+        QStringLiteral("%1 · Lv %2 · 生命 %3 · 精力 %4 · 饱食 %5 · 羁绊 %6/50 · %7")
+            .arg(stage).arg(s.level).arg(s.health).arg(s.energy).arg(s.satiety).arg(xpIntoLevel).arg(personality));
     if(s.mood=="critical") {
         emotion_="worried"; setAction(Action::Dizzy,2400);
         showBubble(uiText(
@@ -1858,7 +1866,7 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     auto feedWarmDrink=feedMenu->addAction(uiText("Warm drink","热饮"));
     auto feeling=m.addAction(uiText("How are you feeling?","Tony 现在怎么样？"));
 
-    auto *growthMenu=m.addMenu(uiText("Growth & tricks","成长与特技"));
+    auto *growthMenu=m.addMenu(uiText("Growth, personality & tricks","成长、性格与特技"));
     const QString growthStage=
         lifeMenu.growthStage=="pup" ? uiText("Pup","幼犬") :
         lifeMenu.growthStage=="explorer" ? uiText("Explorer","探索期") :
@@ -1869,6 +1877,49 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
         uiText(QStringLiteral("%1 · Lv %2 · Bond %3/50").arg(growthStage).arg(lifeMenu.level).arg(growthXp),
                QStringLiteral("%1 · Lv %2 · 羁绊 %3/50").arg(growthStage).arg(lifeMenu.level).arg(growthXp)));
     growthInfo->setEnabled(false);
+    const QString personalityInfoText=
+        lifeMenu.personality=="playful" ? uiText("Playful","活泼") :
+        lifeMenu.personality=="social" ? uiText("Social","黏人") :
+        lifeMenu.personality=="scholar" ? uiText("Scholar","好学") :
+        lifeMenu.personality=="calm" ? uiText("Calm","安静") :
+        uiText("Balanced","均衡");
+    const QString favoriteFoodText=
+        lifeMenu.favoriteFood=="snack" ? uiText("Small snack","小零食") :
+        lifeMenu.favoriteFood=="meal" ? uiText("Proper meal","正餐") :
+        lifeMenu.favoriteFood=="warm_drink" ? uiText("Warm drink","热饮") :
+        lifeMenu.favoriteFood=="mixed" ? uiText("Mixed","都喜欢") :
+        uiText("Not formed yet","尚未形成");
+    auto personalityInfo=growthMenu->addAction(
+        uiText(QStringLiteral("Personality · %1").arg(personalityInfoText),
+               QStringLiteral("性格 · %1").arg(personalityInfoText)));
+    personalityInfo->setEnabled(false);
+    auto favoriteInfo=growthMenu->addAction(
+        uiText(QStringLiteral("Favorite food · %1").arg(favoriteFoodText),
+               QStringLiteral("食物偏好 · %1").arg(favoriteFoodText)));
+    favoriteInfo->setEnabled(false);
+
+    auto *achievementMenu=growthMenu->addMenu(
+        uiText(QStringLiteral("Achievements · %1").arg(lifeMenu.achievements.size()),
+               QStringLiteral("成就 · %1").arg(lifeMenu.achievements.size())));
+    if(lifeMenu.achievements.isEmpty()) {
+        auto none=achievementMenu->addAction(uiText("No achievements yet","还没有解锁成就"));
+        none->setEnabled(false);
+    } else {
+        for(const auto &id:lifeMenu.achievements) {
+            QString label=id;
+            if(id=="first_bond") label=uiText("First Bond","初次羁绊");
+            else if(id=="explorer") label=uiText("Explorer","进入探索期");
+            else if(id=="companion") label=uiText("Companion","成为伙伴");
+            else if(id=="veteran") label=uiText("Veteran","成熟陪伴");
+            else if(id=="caregiver") label=uiText("Caregiver","细心照顾");
+            else if(id=="performer") label=uiText("Performer","小小表演家");
+            else if(id=="scholar") label=uiText("Scholar","学习搭子");
+            else if(id=="recovered") label=uiText("Recovered Together","一起恢复");
+            else if(id=="favorite_found") label=uiText("Favorite Found","发现最爱");
+            auto row=achievementMenu->addAction(label);
+            row->setEnabled(false);
+        }
+    }
     growthMenu->addSeparator();
     auto trickZoomies=growthMenu->addAction(uiText("Zoomies combo · Lv 3","撒欢组合 · Lv 3"));
     auto trickSpin=growthMenu->addAction(uiText("Spin combo · Lv 5","旋转组合 · Lv 5"));
@@ -2050,21 +2101,25 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==taskbarHome) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); dockToTaskbar(); }
     else if(chosen==nextDisplay) { perchOnActiveWindow_=false; QSettings().setValue("desktop/perch_on_active_window",false); moveToNextScreen(); }
     else if(chosen==trickZoomies) {
+        behavior_.onPlayed();
         emotion_="playful";
         playActionSequence({"head_tilt","hop","paw"},{"curious","happy","friendly"},{550,850,900});
         showBubble(uiText("Zoomies combo unlocked!","撒欢组合启动！"),3000);
     }
     else if(chosen==trickSpin) {
+        behavior_.onPlayed();
         emotion_="playful";
         playActionSequence({"paw","spin","nod"},{"friendly","playful","content"},{650,1200,650});
         showBubble(uiText("Spin combo!","旋转组合！"),3000);
     }
     else if(chosen==trickDance) {
+        behavior_.onPlayed();
         emotion_="happy";
         playActionSequence({"hop","dance","celebrate"},{"happy","happy","happy"},{700,1600,1000});
         showBubble(uiText("Happy dance combo!","开心舞组合！"),3400);
     }
     else if(chosen==trickVictory) {
+        behavior_.onPlayed();
         emotion_="happy";
         playActionSequence({"wave","spin","dance","celebrate"},{"friendly","playful","happy","happy"},{650,950,1500,1000});
         showBubble(uiText("Victory combo!","胜利组合！"),3800);
@@ -2090,9 +2145,9 @@ void PetWindow::contextMenuEvent(QContextMenuEvent *e){
     else if(chosen==nod) { emotion_="content"; setAction(Action::Nod,1300); }
     else if(chosen==paw) { emotion_="friendly"; setAction(Action::Paw,1600); }
     else if(chosen==sniff) { emotion_="curious"; setAction(Action::Sniff,1900); }
-    else if(chosen==hop) { emotion_="happy"; setAction(Action::Hop,1700); }
-    else if(chosen==spin) { emotion_="playful"; setAction(Action::Spin,1800); }
-    else if(chosen==dance) { emotion_="happy"; setAction(Action::Dance,2600); }
+    else if(chosen==hop) { behavior_.onPlayed(); emotion_="happy"; setAction(Action::Hop,1700); }
+    else if(chosen==spin) { behavior_.onPlayed(); emotion_="playful"; setAction(Action::Spin,1800); }
+    else if(chosen==dance) { behavior_.onPlayed(); emotion_="happy"; setAction(Action::Dance,2600); }
     else if(chosen==quit) qApp->quit();
 }
 
@@ -2150,6 +2205,9 @@ void PetWindow::submitTonyPrompt(const QString &text){
         else if(decision.intent==QStringLiteral("feed_meal")) behavior_.onFed(TonyBehaviorEngine::Food::Meal);
         else if(decision.intent==QStringLiteral("feed_warm_drink")) behavior_.onFed(TonyBehaviorEngine::Food::WarmDrink);
         else if(decision.intent==QStringLiteral("sleep")) behavior_.onRested();
+        else if(decision.intent==QStringLiteral("study")) behavior_.onStudied();
+        else if(decision.intent.startsWith(QStringLiteral("trick_")) &&
+                decision.intent!=QStringLiteral("trick_locked")) behavior_.onPlayed();
         emotion_=decision.emotion.isEmpty() ? QStringLiteral("friendly") : decision.emotion;
         if(decision.hasActionSequence())
             playActionSequence(decision.actionSequence,decision.emotionSequence,decision.sequenceDurationsMs);

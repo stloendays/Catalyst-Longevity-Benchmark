@@ -108,20 +108,26 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
         "LOCAL_TIME: %3\n"
         "PET_STAGE: %4\n"
         "PET_LEVEL: %5\n"
-        "PET_MOOD: %6\n"
-        "PET_HP: %7\n"
-        "PET_ENERGY: %8\n"
-        "PET_FULLNESS: %9\n"
-        "PET_UNDER_WEATHER: %10\n"
-        "UPCOMING_REMINDERS:\n%11\n"
-        "SAVED_NEWS_SOURCE: %12\n"
-        "SAVED_NEWS_HEADLINE: %13");
+        "PET_PERSONALITY: %6\n"
+        "PET_FAVORITE_FOOD: %7\n"
+        "PET_ACHIEVEMENTS: %8\n"
+        "PET_MOOD: %9\n"
+        "PET_HP: %10\n"
+        "PET_ENERGY: %11\n"
+        "PET_FULLNESS: %12\n"
+        "PET_UNDER_WEATHER: %13\n"
+        "UPCOMING_REMINDERS:\n%14\n"
+        "SAVED_NEWS_SOURCE: %15\n"
+        "SAVED_NEWS_HEADLINE: %16");
     prompt = prompt
         .arg(period)
         .arg(zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"))
         .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
         .arg(life.growthStage)
         .arg(QString::number(life.level))
+        .arg(life.personality)
+        .arg(life.favoriteFood)
+        .arg(life.achievements.isEmpty() ? QStringLiteral("none") : life.achievements.join(QStringLiteral(",")))
         .arg(life.mood)
         .arg(QString::number(life.health))
         .arg(QString::number(life.energy))
