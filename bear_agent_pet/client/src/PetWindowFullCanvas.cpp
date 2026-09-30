@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QPainter>
 #include <QPaintEvent>
+#include <QSettings>
 #include <QtMath>
 
 namespace {
@@ -202,7 +203,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
         QRectF fill=bar.adjusted(2,2,-2,-2);
         fill.setWidth(fill.width()*qBound(0,life.health,100)/100.0);
         QColor hpColor(62,190,92,220);
-        if(life.health<60) hpColor=QColor(232,172,54,225);
+        if(life.health<60 || life.satiety<30) hpColor=QColor(232,172,54,225);
         if(life.health<30) hpColor=QColor(220,76,76,230);
         p.setBrush(hpColor);
         p.drawRoundedRect(fill,3,3);
@@ -211,9 +212,12 @@ void PetWindow::paintEvent(QPaintEvent*) {
         f.setBold(true);
         f.setPointSize(8);
         p.setFont(f);
+        const QString language=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString().toLower();
+        const QString label=language.startsWith(QStringLiteral("zh"))
+            ? QStringLiteral("HP %1 · 饱食 %2").arg(life.health).arg(life.satiety)
+            : QStringLiteral("HP %1 · FOOD %2").arg(life.health).arg(life.satiety);
         p.drawText(QRectF(bar.left(),bar.bottom()+1,bar.width(),15),
-                   Qt::AlignHCenter|Qt::AlignTop,
-                   QStringLiteral("HP %1 · FOOD %2").arg(life.health).arg(life.satiety));
+                   Qt::AlignHCenter|Qt::AlignTop,label);
         p.restore();
     }
 
