@@ -236,6 +236,11 @@ void TonyBehaviorEngine::onFed() {
 }
 
 void TonyBehaviorEngine::onFed(Food food) {
+    const QString favoriteBefore=favoriteFoodName();
+    const bool preferredBefore=
+        (food==Food::Snack && favoriteBefore=="snack") ||
+        (food==Food::Meal && favoriteBefore=="meal") ||
+        (food==Food::WarmDrink && favoriteBefore=="warm_drink");
     calmXp_=clampCounter(calmXp_+1);
     switch(food) {
     case Food::Snack:
@@ -265,6 +270,10 @@ void TonyBehaviorEngine::onFed(Food food) {
         warmth_ = clamp100(warmth_ + 12.0);
         loneliness_ = clamp100(loneliness_ - 2.0);
         break;
+    }
+    if(preferredBefore) {
+        addBondXp(1);
+        affection_=clamp100(affection_+2.0);
     }
     refreshCondition();
 }
