@@ -192,8 +192,8 @@ void PetWindow::paintEvent(QPaintEvent*) {
     // Keep the canvas uncluttered in normal use. HP appears on hover, and
     // automatically when Tony is below 60 so a low-health state is never hidden.
     const auto life=behavior_.snapshot();
-    if(hovered_ || life.health<60) {
-        const QRectF bar(width()/2.0-58.0,8.0,116.0,10.0);
+    if(hovered_ || life.health<60 || life.satiety<30) {
+        const QRectF bar(width()/2.0-68.0,8.0,136.0,10.0);
         p.save();
         p.setRenderHint(QPainter::Antialiasing,true);
         p.setPen(Qt::NoPen);
@@ -213,7 +213,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
         p.setFont(f);
         p.drawText(QRectF(bar.left(),bar.bottom()+1,bar.width(),15),
                    Qt::AlignHCenter|Qt::AlignTop,
-                   QStringLiteral("HP %1").arg(life.health));
+                   QStringLiteral("HP %1 · FOOD %2").arg(life.health).arg(life.satiety));
         p.restore();
     }
 
