@@ -2,6 +2,7 @@
 #include "TonyBehaviorEngine.h"
 #include "TonyConversationStore.h"
 #include "TonyMemoryStore.h"
+#include "TonyResponseRouter.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -141,6 +142,29 @@ bool testHungerMoodAndFeeding(const QString &settingsPath) {
     return ok;
 }
 
+bool testResponseRouterVitalityAndCare() {
+    TonyBehaviorEngine engine;
+    const auto state = engine.snapshot();
+    TonyResponseRouter router;
+    bool ok = true;
+
+    const auto status = router.resolve(QStringLiteral("你怎么样"), QStringLiteral("zh"), false, state);
+    ok &= expect(status.handledLocally(), "status is handled locally");
+    ok &= expect(status.intent == QStringLiteral("status"), "status intent is stable");
+    ok &= expect(status.reply.contains(QStringLiteral("生命 100")), "status reply contains HP");
+    ok &= expect(status.reply.contains(QStringLiteral("饱食 72")), "status reply contains satiety");
+    ok &= expect(status.reply.contains(QStringLiteral("Lv 1")), "status reply contains level");
+
+    const auto feed = router.resolve(QStringLiteral("给你零食"), QStringLiteral("zh"), false, state);
+    ok &= expect(feed.handledLocally(), "explicit feeding is local");
+    ok &= expect(feed.intent == QStringLiteral("feed"), "explicit feeding gets feed intent");
+
+    const auto sleep = router.resolve(QStringLiteral("晚安"), QStringLiteral("zh"), false, state);
+    ok &= expect(sleep.handledLocally(), "sleep is local");
+    ok &= expect(sleep.intent == QStringLiteral("sleep"), "sleep intent remains stable");
+    return ok;
+}
+
 bool testMemoryStore() {
     auto &memory = TonyMemoryStore::instance();
     memory.clear();
@@ -258,6 +282,7 @@ int main(int argc, char **argv) {
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
     ok &= testHungerMoodAndFeeding(temp.filePath(QStringLiteral("hunger.ini")));
+    ok &= testResponseRouterVitalityAndCare();
     ok &= testMemoryStore();
     ok &= testConversationStore();
     ok &= testLocalReminderManager();
