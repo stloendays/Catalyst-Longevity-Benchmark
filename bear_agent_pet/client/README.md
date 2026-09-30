@@ -4,6 +4,22 @@ Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side ag
 
 Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their own pet artwork and declarative `pet.json`, validate/package it as `.tonypet`, and preview the pet in the same desktop runtime while keeping Tony as the safe default.
 
+## Tony 1.1.7 personality and progression
+
+- adds a persistent long-term temperament model with four learned tendencies: **playful**, **social**, **scholar**, and **calm**;
+- Tony remains **balanced** until one tendency has accumulated enough evidence and is clearly stronger than the others, avoiding personality flips from one interaction;
+- petting, hugging, conversation, play, study, feeding, rest and gentle movement shape different temperament scores over time;
+- long-term personality changes autonomous behavior: playful Tony moves more, social Tony checks in more often, scholar Tony studies more, and calm Tony favors quiet companionship;
+- adds persistent food-preference learning from the foods actually given to Tony; repeated consistent feeding can establish a favorite;
+- feeding an already-established favorite gives a small extra affection and bond reward;
+- adds persistent achievements for bond growth, growth stages, feeding/care, performance, study, recovery and discovering a favorite food;
+- **Growth, personality & tricks** now shows current temperament, learned food preference and unlocked achievements;
+- chat understands questions such as **“你什么性格 / what's your personality?”**, **“你喜欢吃什么 / favorite food?”**, and **“你有什么成就 / achievements?”**;
+- Today shows personality and achievement count alongside stage, level, HP and fullness;
+- Daily Brief receives personality, favorite-food and achievement context;
+- existing 1.1.6 life settings and Agent/custom-pet contracts remain intact; all new persisted fields are additive under `tony/life/`;
+- regression tests cover personality formation, preference learning, favorite-food bonuses, achievements, chat routes and persistence across restore.
+
 ## Tony 1.1.6 growth and care
 
 - adds four visible growth stages derived from persistent bond level: **Pup**, **Explorer**, **Companion**, and **Veteran**;
