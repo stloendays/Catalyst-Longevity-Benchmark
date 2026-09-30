@@ -58,7 +58,7 @@ void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby,
     if(satiety_ < 18.0) healthDrain += (18.0 - satiety_) * 0.008;
     if(healthDrain > 0.0) {
         health_ -= healthDrain * minutes;
-    } else if(energy_ > 52.0 && warmth_ > 48.0 && loneliness_ < 65.0) {
+    } else if(energy_ > 52.0 && satiety_ > 35.0 && warmth_ > 48.0 && loneliness_ < 65.0) {
         health_ += 0.04 * minutes;
     }
 
