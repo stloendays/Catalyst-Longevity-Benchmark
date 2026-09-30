@@ -32,6 +32,8 @@ bool testBehaviorDefaultsAndInteractions() {
     auto state = engine.snapshot();
     bool ok = true;
     ok &= expect(state.health == 100, "default health");
+    ok &= expect(state.level == 1, "default bond level");
+    ok &= expect(state.bondXp == 0, "default bond xp");
     ok &= expect(state.energy == 78, "default energy");
     ok &= expect(state.satiety == 72, "default satiety");
     ok &= expect(state.warmth == 68, "default warmth");
@@ -57,6 +59,13 @@ bool testBehaviorDefaultsAndInteractions() {
     ok &= expect(state.satiety == 100, "feeding raises satiety");
     ok &= expect(state.health == 97, "feeding restores a little health");
     ok &= expect(state.energy == 77, "feeding restores energy");
+    ok &= expect(state.bondXp == 3, "hug and feeding accumulate bond xp");
+
+    engine.onRested();
+    state = engine.snapshot();
+    ok &= expect(state.health == 99, "rest restores health");
+    ok &= expect(state.energy == 86, "rest restores energy");
+    ok &= expect(state.satiety == 99, "rest consumes a little satiety");
     return ok;
 }
 
@@ -81,6 +90,7 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     ok &= expectNear(persisted.value(QStringLiteral("tony/life/curiosity")).toDouble(), 58.18, 1e-6,
                      "idle daytime minute raises curiosity deterministically");
 
+    persisted.setValue(QStringLiteral("tony/life/bond_xp"), 99999);
     persisted.setValue(QStringLiteral("tony/life/health"), -50.0);
     persisted.setValue(QStringLiteral("tony/life/energy"), 250.0);
     persisted.setValue(QStringLiteral("tony/life/satiety"), 130.0);
@@ -93,6 +103,8 @@ bool testBehaviorTickAndClamp(const QString &settingsPath) {
     TonyBehaviorEngine restored;
     restored.restore(persisted);
     const auto clamped = restored.snapshot();
+    ok &= expect(clamped.level == 99, "restore clamps bond level to 99");
+    ok &= expect(clamped.bondXp == 4900, "restore clamps bond xp");
     ok &= expect(clamped.health == 0, "restore clamps health to 0");
     ok &= expect(clamped.energy == 100, "restore clamps energy to 100");
     ok &= expect(clamped.satiety == 100, "restore clamps satiety to 100");
