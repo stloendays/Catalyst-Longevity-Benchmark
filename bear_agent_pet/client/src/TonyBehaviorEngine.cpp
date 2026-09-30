@@ -12,7 +12,12 @@ double TonyBehaviorEngine::clamp100(double value) {
     return qBound(0.0, value, 100.0);
 }
 
+void TonyBehaviorEngine::addBondXp(int amount) {
+    bondXp_ = qBound(0, bondXp_ + amount, 4900);
+}
+
 void TonyBehaviorEngine::restore(QSettings &settings) {
+    bondXp_ = qBound(0, settings.value(QString(kPrefix) + "bond_xp", bondXp_).toInt(), 4900);
     health_ = clamp100(settings.value(QString(kPrefix) + "health", health_).toDouble());
     energy_ = clamp100(settings.value(QString(kPrefix) + "energy", energy_).toDouble());
     satiety_ = clamp100(settings.value(QString(kPrefix) + "satiety", satiety_).toDouble());
@@ -23,6 +28,7 @@ void TonyBehaviorEngine::restore(QSettings &settings) {
 }
 
 void TonyBehaviorEngine::save(QSettings &settings) const {
+    settings.setValue(QString(kPrefix) + "bond_xp", bondXp_);
     settings.setValue(QString(kPrefix) + "health", health_);
     settings.setValue(QString(kPrefix) + "energy", energy_);
     settings.setValue(QString(kPrefix) + "satiety", satiety_);
@@ -72,6 +78,7 @@ void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby,
 }
 
 void TonyBehaviorEngine::onPetted() {
+    addBondXp(1);
     health_ = clamp100(health_ + 0.6);
     affection_ = clamp100(affection_ + 4.0);
     loneliness_ = clamp100(loneliness_ - 7.0);
@@ -79,6 +86,7 @@ void TonyBehaviorEngine::onPetted() {
 }
 
 void TonyBehaviorEngine::onHugged() {
+    addBondXp(2);
     health_ = clamp100(health_ + 1.5);
     affection_ = clamp100(affection_ + 7.0);
     loneliness_ = clamp100(loneliness_ - 14.0);
@@ -87,6 +95,7 @@ void TonyBehaviorEngine::onHugged() {
 }
 
 void TonyBehaviorEngine::onConversation() {
+    addBondXp(2);
     health_ = clamp100(health_ + 0.3);
     affection_ = clamp100(affection_ + 1.0);
     loneliness_ = clamp100(loneliness_ - 6.0);
@@ -94,11 +103,19 @@ void TonyBehaviorEngine::onConversation() {
 }
 
 void TonyBehaviorEngine::onFed() {
+    addBondXp(1);
     satiety_ = clamp100(satiety_ + 28.0);
     health_ = clamp100(health_ + 1.0);
     energy_ = clamp100(energy_ + 2.0);
     warmth_ = clamp100(warmth_ + 1.0);
     loneliness_ = clamp100(loneliness_ - 2.0);
+}
+
+void TonyBehaviorEngine::onRested() {
+    health_ = clamp100(health_ + 2.0);
+    energy_ = clamp100(energy_ + 9.0);
+    warmth_ = clamp100(warmth_ + 2.0);
+    satiety_ = clamp100(satiety_ - 1.0);
 }
 
 void TonyBehaviorEngine::onDragged(bool rough) {
@@ -109,6 +126,7 @@ void TonyBehaviorEngine::onDragged(bool rough) {
 }
 
 void TonyBehaviorEngine::onPaulaMention() {
+    addBondXp(1);
     health_ = clamp100(health_ + 0.4);
     affection_ = clamp100(affection_ + 2.0);
     loneliness_ = clamp100(loneliness_ - 2.0);
@@ -120,13 +138,11 @@ TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
     const bool night = hour >= 23 || hour < 7;
 
     if(health_ < 38.0 && rng->bounded(100) < 88) {
-        health_ = clamp100(health_ + 3.0);
-        energy_ = clamp100(energy_ + 5.0);
-        warmth_ = clamp100(warmth_ + 2.0);
+        onRested();
         return Impulse::Sleep;
     }
     if(night && energy_ < 46.0 && rng->bounded(100) < 78) {
-        energy_ = clamp100(energy_ + 8.0);
+        onRested();
         return Impulse::Sleep;
     }
     if(warmth_ < 35.0 && rng->bounded(100) < 82) return Impulse::Shiver;
@@ -153,6 +169,8 @@ TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
 TonyBehaviorEngine::Snapshot TonyBehaviorEngine::snapshot() const {
     Snapshot out;
     out.health = qRound(health_);
+    out.level = qMin(99, 1 + bondXp_ / 50);
+    out.bondXp = bondXp_;
     out.energy = qRound(energy_);
     out.satiety = qRound(satiety_);
     out.warmth = qRound(warmth_);
@@ -160,7 +178,8 @@ TonyBehaviorEngine::Snapshot TonyBehaviorEngine::snapshot() const {
     out.loneliness = qRound(loneliness_);
     out.curiosity = qRound(curiosity_);
 
-    if(health_ < 35.0) out.mood = "weak";
+    if(health_ < 18.0) out.mood = "critical";
+    else if(health_ < 35.0) out.mood = "weak";
     else if(warmth_ < 35.0) out.mood = "cold";
     else if(satiety_ < 25.0) out.mood = "hungry";
     else if(energy_ < 32.0) out.mood = "sleepy";
