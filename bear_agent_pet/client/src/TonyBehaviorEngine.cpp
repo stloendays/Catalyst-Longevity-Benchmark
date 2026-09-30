@@ -200,6 +200,8 @@ void TonyBehaviorEngine::tick(qint64 elapsedMs, bool agentBusy, bool userNearby,
 
 void TonyBehaviorEngine::onPetted() {
     addBondXp(1);
+    socialXp_=clampCounter(socialXp_+2);
+    calmXp_=clampCounter(calmXp_+1);
     health_ = clamp100(health_ + 0.6);
     affection_ = clamp100(affection_ + 4.0);
     loneliness_ = clamp100(loneliness_ - 7.0);
@@ -209,6 +211,8 @@ void TonyBehaviorEngine::onPetted() {
 
 void TonyBehaviorEngine::onHugged() {
     addBondXp(2);
+    socialXp_=clampCounter(socialXp_+3);
+    calmXp_=clampCounter(calmXp_+1);
     health_ = clamp100(health_ + 1.5);
     affection_ = clamp100(affection_ + 7.0);
     loneliness_ = clamp100(loneliness_ - 14.0);
@@ -219,6 +223,7 @@ void TonyBehaviorEngine::onHugged() {
 
 void TonyBehaviorEngine::onConversation() {
     addBondXp(2);
+    socialXp_=clampCounter(socialXp_+1);
     health_ = clamp100(health_ + 0.3);
     affection_ = clamp100(affection_ + 1.0);
     loneliness_ = clamp100(loneliness_ - 6.0);
@@ -231,8 +236,10 @@ void TonyBehaviorEngine::onFed() {
 }
 
 void TonyBehaviorEngine::onFed(Food food) {
+    calmXp_=clampCounter(calmXp_+1);
     switch(food) {
     case Food::Snack:
+        snackCount_=clampCounter(snackCount_+1);
         addBondXp(1);
         satiety_ = clamp100(satiety_ + 28.0);
         health_ = clamp100(health_ + 1.0);
@@ -241,6 +248,7 @@ void TonyBehaviorEngine::onFed(Food food) {
         loneliness_ = clamp100(loneliness_ - 2.0);
         break;
     case Food::Meal:
+        mealCount_=clampCounter(mealCount_+1);
         addBondXp(2);
         satiety_ = clamp100(satiety_ + 45.0);
         health_ = clamp100(health_ + 2.0);
@@ -249,6 +257,7 @@ void TonyBehaviorEngine::onFed(Food food) {
         loneliness_ = clamp100(loneliness_ - 3.0);
         break;
     case Food::WarmDrink:
+        warmDrinkCount_=clampCounter(warmDrinkCount_+1);
         addBondXp(1);
         satiety_ = clamp100(satiety_ + 16.0);
         health_ = clamp100(health_ + 2.5);
@@ -261,6 +270,7 @@ void TonyBehaviorEngine::onFed(Food food) {
 }
 
 void TonyBehaviorEngine::onRested() {
+    calmXp_=clampCounter(calmXp_+2);
     health_ = clamp100(health_ + 2.0);
     energy_ = clamp100(energy_ + 9.0);
     warmth_ = clamp100(warmth_ + 2.0);
@@ -268,7 +278,26 @@ void TonyBehaviorEngine::onRested() {
     refreshCondition();
 }
 
+void TonyBehaviorEngine::onPlayed() {
+    addBondXp(1);
+    playfulXp_=clampCounter(playfulXp_+4);
+    playCount_=clampCounter(playCount_+1);
+    energy_=clamp100(energy_-1.0);
+    curiosity_=clamp100(curiosity_+2.0);
+    refreshAchievements();
+}
+
+void TonyBehaviorEngine::onStudied() {
+    addBondXp(1);
+    scholarXp_=clampCounter(scholarXp_+4);
+    studyCount_=clampCounter(studyCount_+1);
+    curiosity_=clamp100(curiosity_-4.0);
+    energy_=clamp100(energy_-0.5);
+    refreshAchievements();
+}
+
 void TonyBehaviorEngine::onDragged(bool rough) {
+    if(!rough) playfulXp_=clampCounter(playfulXp_+1);
     health_ = clamp100(health_ - (rough ? 6.0 : 0.5));
     curiosity_ = clamp100(curiosity_ + (rough ? 6.0 : 3.0));
     energy_ = clamp100(energy_ - (rough ? 4.0 : 1.0));
@@ -278,6 +307,7 @@ void TonyBehaviorEngine::onDragged(bool rough) {
 
 void TonyBehaviorEngine::onPaulaMention() {
     addBondXp(1);
+    socialXp_=clampCounter(socialXp_+1);
     health_ = clamp100(health_ + 0.4);
     affection_ = clamp100(affection_ + 2.0);
     loneliness_ = clamp100(loneliness_ - 2.0);
@@ -311,6 +341,12 @@ TonyBehaviorEngine::Impulse TonyBehaviorEngine::chooseIdleImpulse(int hour) {
         return Impulse::Study;
     }
 
+    const QString personality=personalityName();
+    if(personality=="playful" && energy_>48.0 && rng->bounded(100)<22) return Impulse::Walk;
+    if(personality=="social" && rng->bounded(100)<22) return Impulse::Wave;
+    if(personality=="scholar" && energy_>38.0 && rng->bounded(100)<24) return Impulse::Study;
+    if(personality=="calm" && rng->bounded(100)<24) return Impulse::Stretch;
+
     const int r = rng->bounded(100);
     if(r < 68) return Impulse::None;
     if(r < 75) return Impulse::Stretch;
@@ -333,6 +369,13 @@ TonyBehaviorEngine::Snapshot TonyBehaviorEngine::snapshot() const {
     out.affection = qRound(affection_);
     out.loneliness = qRound(loneliness_);
     out.curiosity = qRound(curiosity_);
+    out.playfulnessScore = playfulXp_;
+    out.sociabilityScore = socialXp_;
+    out.scholarScore = scholarXp_;
+    out.calmScore = calmXp_;
+    out.personality = personalityName();
+    out.favoriteFood = favoriteFoodName();
+    out.achievements = achievementNames();
     if(out.level < 5) out.growthStage = "pup";
     else if(out.level < 15) out.growthStage = "explorer";
     else if(out.level < 30) out.growthStage = "companion";
