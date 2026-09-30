@@ -21,6 +21,7 @@ public:
     };
 
     struct Snapshot {
+        int health{0};
         int energy{0};
         int warmth{0};
         int affection{0};
@@ -45,6 +46,7 @@ public:
 private:
     static double clamp100(double value);
 
+    double health_{100.0};
     double energy_{78.0};
     double warmth_{68.0};
     double affection_{62.0};
