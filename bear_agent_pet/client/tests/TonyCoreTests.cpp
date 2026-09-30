@@ -238,11 +238,16 @@ bool testPersonalityPreferencesAndAchievements(const QString &settingsPath) {
     ok &= expect(state.personality == QStringLiteral("social"), "repeated hugs create social personality");
     ok &= expect(state.sociabilityScore == 12, "social score accumulates from hugs");
 
+    TonyBehaviorEngine passiveRest;
+    passiveRest.onPassiveRested();
+    state=passiveRest.snapshot();
+    ok &= expect(state.calmScore == 0, "automatic/passive rest does not shape personality");
+
     TonyBehaviorEngine calm;
     for(int i=0;i<4;++i) calm.onRested();
     state=calm.snapshot();
-    ok &= expect(state.personality == QStringLiteral("calm"), "repeated rest creates calm personality");
-    ok &= expect(state.calmScore == 8, "calm score accumulates from rest");
+    ok &= expect(state.personality == QStringLiteral("calm"), "repeated active care rest creates calm personality");
+    ok &= expect(state.calmScore == 8, "calm score accumulates from active rest");
 
     TonyBehaviorEngine preference;
     for(int i=0;i<3;++i) preference.onFed(TonyBehaviorEngine::Food::WarmDrink);
