@@ -60,6 +60,7 @@ public:
     void onFed();
     void onFed(Food food);
     void onRested();
+    void onPassiveRested();
     void onPlayed();
     void onStudied();
     void onDragged(bool rough);
@@ -72,6 +73,7 @@ private:
     static double clamp100(double value);
     static int clampCounter(int value);
     void addBondXp(int amount);
+    void applyRest(bool shapePersonality);
     void refreshCondition(bool countRecovery=true);
     void refreshAchievements();
     QString personalityName() const;
