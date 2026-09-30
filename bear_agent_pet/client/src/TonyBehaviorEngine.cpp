@@ -56,6 +56,7 @@ QString TonyBehaviorEngine::favoriteFoodName() const {
     const int total=snackCount_+mealCount_+warmDrinkCount_;
     if(total<3) return QStringLiteral("none");
     const int best=qMax(snackCount_,qMax(mealCount_,warmDrinkCount_));
+    if(best<3 || best*2<=total) return QStringLiteral("mixed");
     int ties=0;
     if(snackCount_==best) ++ties;
     if(mealCount_==best) ++ties;
