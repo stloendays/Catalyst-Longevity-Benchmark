@@ -96,7 +96,7 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
     setAction(Action::Study, 0);
 
     const auto life=behavior_.snapshot();
-    const QString prompt = QStringLiteral(
+    QString prompt = QStringLiteral(
         "[TONY_DAILY_BRIEF]\n"
         "Create a concise %1 briefing for the desktop-pet user. "
         "Use only the supplied local time, reminder list, pet state and saved headline. "
