@@ -194,7 +194,7 @@ void PetWindow::paintEvent(QPaintEvent*) {
     // automatically when Tony is below 60 so a low-health state is never hidden.
     const auto life=behavior_.snapshot();
     if(hovered_ || life.health<60 || life.satiety<30) {
-        const QRectF bar(width()/2.0-68.0,8.0,136.0,10.0);
+        const QRectF bar(width()/2.0-80.0,8.0,160.0,10.0);
         p.save();
         p.setRenderHint(QPainter::Antialiasing,true);
         p.setPen(Qt::NoPen);
@@ -214,8 +214,8 @@ void PetWindow::paintEvent(QPaintEvent*) {
         p.setFont(f);
         const QString language=QSettings().value(QStringLiteral("ui/language"),QStringLiteral("en")).toString().toLower();
         const QString label=language.startsWith(QStringLiteral("zh"))
-            ? QStringLiteral("HP %1 · 饱食 %2").arg(life.health).arg(life.satiety)
-            : QStringLiteral("HP %1 · FOOD %2").arg(life.health).arg(life.satiety);
+            ? QStringLiteral("LV %1 · HP %2 · 饱食 %3").arg(life.level).arg(life.health).arg(life.satiety)
+            : QStringLiteral("LV %1 · HP %2 · FOOD %3").arg(life.level).arg(life.health).arg(life.satiety);
         p.drawText(QRectF(bar.left(),bar.bottom()+1,bar.width(),15),
                    Qt::AlignHCenter|Qt::AlignTop,label);
         p.restore();
