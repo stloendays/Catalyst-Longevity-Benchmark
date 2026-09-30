@@ -23,6 +23,8 @@ public:
 
     struct Snapshot {
         int health{0};
+        int level{1};
+        int bondXp{0};
         int energy{0};
         int satiety{0};
         int warmth{0};
@@ -40,6 +42,7 @@ public:
     void onHugged();
     void onConversation();
     void onFed();
+    void onRested();
     void onDragged(bool rough);
     void onPaulaMention();
 
@@ -48,7 +51,9 @@ public:
 
 private:
     static double clamp100(double value);
+    void addBondXp(int amount);
 
+    int bondXp_{0};
     double health_{100.0};
     double energy_{78.0};
     double satiety_{72.0};
