@@ -284,6 +284,29 @@ bool testResponseRouterVitalityAndCare() {
     ok &= expect(status.reply.contains(QStringLiteral("Lv 1")), "status reply contains level");
     ok &= expect(status.reply.contains(QStringLiteral("幼犬")), "status reply contains growth stage");
     ok &= expect(status.reply.contains(QStringLiteral("状态：健康")), "status reply contains care condition");
+    ok &= expect(status.reply.contains(QStringLiteral("性格：均衡")), "status reply contains personality");
+
+    auto personalizedState=state;
+    personalizedState.personality=QStringLiteral("playful");
+    personalizedState.playfulnessScore=20;
+    personalizedState.sociabilityScore=3;
+    personalizedState.scholarScore=1;
+    personalizedState.calmScore=2;
+    personalizedState.favoriteFood=QStringLiteral("warm_drink");
+    personalizedState.achievements={QStringLiteral("first_bond"),QStringLiteral("performer")};
+
+    const auto personality = router.resolve(QStringLiteral("你什么性格"), QStringLiteral("zh"), false, personalizedState);
+    ok &= expect(personality.intent == QStringLiteral("personality"), "personality question gets personality intent");
+    ok &= expect(personality.reply.contains(QStringLiteral("活泼")), "personality reply uses current dominant trait");
+    ok &= expect(personality.reply.contains(QStringLiteral("玩心 20")), "personality reply includes learned scores");
+
+    const auto favorite = router.resolve(QStringLiteral("你喜欢吃什么"), QStringLiteral("zh"), false, personalizedState);
+    ok &= expect(favorite.intent == QStringLiteral("favorite_food"), "favorite-food question gets dedicated intent");
+    ok &= expect(favorite.reply.contains(QStringLiteral("热饮")), "favorite-food reply uses learned preference");
+
+    const auto achievements = router.resolve(QStringLiteral("你有什么成就"), QStringLiteral("zh"), false, personalizedState);
+    ok &= expect(achievements.intent == QStringLiteral("achievements"), "achievement question gets dedicated intent");
+    ok &= expect(achievements.reply.contains(QStringLiteral("2 个成就")), "achievement reply reports unlocked count");
 
     const auto feed = router.resolve(QStringLiteral("给你零食"), QStringLiteral("zh"), false, state);
     ok &= expect(feed.handledLocally(), "explicit feeding is local");
