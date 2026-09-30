@@ -252,13 +252,25 @@ void TodayDialog::rebuildText() {
             life.growthStage=="explorer" ? QStringLiteral("Explorer") :
             life.growthStage=="companion" ? QStringLiteral("Companion") :
             QStringLiteral("Veteran");
+        const QString personalityZh=
+            life.personality=="playful" ? QStringLiteral("活泼") :
+            life.personality=="social" ? QStringLiteral("黏人") :
+            life.personality=="scholar" ? QStringLiteral("好学") :
+            life.personality=="calm" ? QStringLiteral("安静") :
+            QStringLiteral("均衡");
+        const QString personalityEn=
+            life.personality=="playful" ? QStringLiteral("Playful") :
+            life.personality=="social" ? QStringLiteral("Social") :
+            life.personality=="scholar" ? QStringLiteral("Scholar") :
+            life.personality=="calm" ? QStringLiteral("Calm") :
+            QStringLiteral("Balanced");
         summaryLabel_->setText(
-            zh ? QStringLiteral("%1 · Lv %2 · 生命 %3 · 饱食 %4%5\n今天有 %6 个待提醒事项，%7 条本地对话记录。")
-                     .arg(stageZh).arg(life.level).arg(life.health).arg(life.satiety)
+            zh ? QStringLiteral("%1 · Lv %2 · %3 · 生命 %4 · 饱食 %5 · 成就 %6%7\n今天有 %8 个待提醒事项，%9 条本地对话记录。")
+                     .arg(stageZh).arg(life.level).arg(personalityZh).arg(life.health).arg(life.satiety).arg(life.achievements.size())
                      .arg(life.underWeather ? QStringLiteral(" · 需要照顾") : QString())
                      .arg(reminderCount).arg(historyCount)
-               : QStringLiteral("%1 · Lv %2 · HP %3 · Fullness %4%5\n%6 upcoming reminder(s), %7 local conversation entries.")
-                     .arg(stageEn).arg(life.level).arg(life.health).arg(life.satiety)
+               : QStringLiteral("%1 · Lv %2 · %3 · HP %4 · Fullness %5 · Achievements %6%7\n%8 upcoming reminder(s), %9 local conversation entries.")
+                     .arg(stageEn).arg(life.level).arg(personalityEn).arg(life.health).arg(life.satiety).arg(life.achievements.size())
                      .arg(life.underWeather ? QStringLiteral(" · Needs care") : QString())
                      .arg(reminderCount).arg(historyCount));
     } else {
