@@ -274,11 +274,14 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
             {"晚安。我会安静待在这里。","好……Tony 也有点困了。"},{"sleep","yawn"},"sleepy",3800);
 
     if(hasAny(p,{"状态","心情","status","mood","你怎么样"})) {
-        const QString en=QString("Energy %1, warmth %2, affection %3, loneliness %4, curiosity %5. Mood: %6.")
-            .arg(state.energy).arg(state.warmth).arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(state.mood);
-        const QString cn=QString("现在的 Tony：精力 %1，温暖 %2，亲密 %3，孤独 %4，好奇 %5。心情是 %6。")
-            .arg(state.energy).arg(state.warmth).arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(state.mood);
-        return fixed("status",{en},{cn},{"head_tilt","nod"},"neutral",3500);
+        const int xpIntoLevel=state.level>=99 ? 50 : (state.bondXp%50);
+        const QString en=QString("Lv %1, HP %2, energy %3, fullness %4, warmth %5, affection %6, loneliness %7, curiosity %8, bond %9/50. Mood: %10.")
+            .arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(state.mood);
+        const QString cn=QString("现在的 Tony：Lv %1，生命 %2，精力 %3，饱食 %4，温暖 %5，亲密 %6，孤独 %7，好奇 %8，羁绊 %9/50。心情是 %10。")
+            .arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(state.mood);
+        return fixed("status",{en},{cn},{"head_tilt","nod"},"neutral",4200);
     }
 
     if(hasAny(p,{"谢谢","thank you","thanks"}))
@@ -298,6 +301,10 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
     if(hasAny(p,{"你好帅","真帅","可爱","cute","handsome","good boy"}))
         return sequence("compliment",{"I know... but hearing it still works.","Careful. Compliments may cause dancing."},{"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},
             {"blush","hop","dance"},{"shy","happy","happy"},{650,750,1500},"happy",3500);
+
+    if(hasAny(p,{"给你零食","给你吃","喂你","喂tony","feed you","give you a snack","have a snack"}))
+        return sequence("feed",{"Snack accepted. Thank you.","Okay, Tony is having the snack."},{"零食收到啦，谢谢。","好，Tony 开始吃小零食。"},
+            {"sniff","paw","hop"},{"curious","happy","happy"},{650,900,650},"happy",3100);
 
     if(hasAny(p,{"饿不饿","吃饭","零食","food","snack","hungry"}))
         return sequence("food",{"Did someone say snack?","I should investigate that smell."},{"刚才是不是有人说零食？","我得去闻闻是什么味道。"},
