@@ -4,6 +4,22 @@ Tony is a C++20 + Qt 6 Windows desktop companion connected to the server-side ag
 
 Tony is also evolving into an **Agent Pet Runtime**: creators can prepare their own pet artwork and declarative `pet.json`, validate/package it as `.tonypet`, and preview the pet in the same desktop runtime while keeping Tony as the safe default.
 
+## Tony 1.1.6 growth and care
+
+- adds four visible growth stages derived from persistent bond level: **Pup**, **Explorer**, **Companion**, and **Veteran**;
+- adds new level-gated combo tricks at Lv.3, Lv.5, Lv.8 and Lv.12 without removing any pre-existing manual action;
+- learned tricks can occasionally appear in healthy autonomous behavior, so growth changes how Tony behaves rather than only changing a number;
+- upgrades feeding from one generic snack into **small snack**, **proper meal**, and **warm drink**, each with different fullness, HP, energy and warmth effects;
+- adds a persistent **under-the-weather** care condition that only appears after meaningful low-health plus hunger/cold stress and clears only after recovery thresholds are met;
+- care state immediately reacts to petting, hugging, conversation, food, rest and rough dragging;
+- autonomous companion logic now prioritizes critical HP, recovery, hunger and weakness before normal chatter or playful behavior;
+- the vitality HUD shows growth stage and a care indicator, and stays visible while Tony needs care;
+- local status replies now include growth stage and care condition;
+- natural-language care routes distinguish snacks, proper meals and warm drinks;
+- “show me a trick / 表演特技” selects the highest combo Tony has actually learned;
+- Daily Brief now receives Tony's stage, level, HP, energy, fullness and care condition in addition to mood;
+- core regression tests cover growth thresholds, food effects, recovery conditions, care routing and trick unlocks.
+
 ## Tony 1.1.5 vitality and agility
 
 - adds a persistent **HP / health** stat alongside energy, warmth, affection, loneliness and curiosity;

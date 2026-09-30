@@ -95,7 +95,8 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
     emotion_ = QStringLiteral("focused");
     setAction(Action::Study, 0);
 
-    const QString prompt = QStringLiteral(
+    const auto life=behavior_.snapshot();
+    QString prompt = QStringLiteral(
         "[TONY_DAILY_BRIEF]\n"
         "Create a concise %1 briefing for the desktop-pet user. "
         "Use only the supplied local time, reminder list, pet state and saved headline. "
@@ -105,20 +106,30 @@ void PetWindow::requestDailyBrief(const QString &periodRaw,
         "Keep the briefing practical, warm, and under 120 words. "
         "Use at most 4 short bullets. Reply in %2.\n"
         "LOCAL_TIME: %3\n"
-        "PET_MOOD: %4\n"
-        "PET_ENERGY: %5\n"
-        "UPCOMING_REMINDERS:\n%6\n"
-        "SAVED_NEWS_SOURCE: %7\n"
-        "SAVED_NEWS_HEADLINE: %8")
-        .arg(
-            period,
-            zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"),
-            QDateTime::currentDateTime().toString(Qt::ISODate),
-            behavior_.snapshot().mood,
-            QString::number(behavior_.snapshot().energy),
-            reminderLines.isEmpty() ? QStringLiteral("- none") : reminderLines.join(QStringLiteral("\n")),
-            cleanNewsSource.isEmpty() ? QStringLiteral("none") : cleanNewsSource,
-            cleanNewsTitle.isEmpty() ? QStringLiteral("none") : cleanNewsTitle);
+        "PET_STAGE: %4\n"
+        "PET_LEVEL: %5\n"
+        "PET_MOOD: %6\n"
+        "PET_HP: %7\n"
+        "PET_ENERGY: %8\n"
+        "PET_FULLNESS: %9\n"
+        "PET_UNDER_WEATHER: %10\n"
+        "UPCOMING_REMINDERS:\n%11\n"
+        "SAVED_NEWS_SOURCE: %12\n"
+        "SAVED_NEWS_HEADLINE: %13");
+    prompt = prompt
+        .arg(period)
+        .arg(zh ? QStringLiteral("Simplified Chinese") : QStringLiteral("English"))
+        .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
+        .arg(life.growthStage)
+        .arg(QString::number(life.level))
+        .arg(life.mood)
+        .arg(QString::number(life.health))
+        .arg(QString::number(life.energy))
+        .arg(QString::number(life.satiety))
+        .arg(life.underWeather ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(reminderLines.isEmpty() ? QStringLiteral("- none") : reminderLines.join(QStringLiteral("\n")))
+        .arg(cleanNewsSource.isEmpty() ? QStringLiteral("none") : cleanNewsSource)
+        .arg(cleanNewsTitle.isEmpty() ? QStringLiteral("none") : cleanNewsTitle);
 
     AppLogger::recordOperatorEvent(
         QStringLiteral("daily_brief_requested"),

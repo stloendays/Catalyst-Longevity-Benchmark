@@ -42,6 +42,46 @@ Decision makeDecision(const TonyBehaviorEngine::Snapshot &life,
     auto *rng=QRandomGenerator::global();
     const bool night=hour>=23 || hour<7;
 
+    if(life.health<=18) {
+        return {
+            QStringLiteral("autonomous_critical"),QStringLiteral("dizzy"),QStringLiteral("worried"),2400,5200,
+            {QStringLiteral("I am really low on energy right now. Food, warmth and rest would help."),
+             QStringLiteral("Tony needs a quiet recovery moment.")},
+            {QStringLiteral("Tony 现在状态很低，需要吃东西、保暖和休息。"),
+             QStringLiteral("Tony 需要安静恢复一下。")}
+        };
+    }
+
+    if(life.underWeather) {
+        return {
+            QStringLiteral("autonomous_unwell"),QStringLiteral("sleep"),QStringLiteral("worried"),2600,5000,
+            {QStringLiteral("I am a little under the weather. A warm drink and rest would be nice."),
+             QStringLiteral("I think I should take it easy for a while.")},
+            {QStringLiteral("Tony 有点不舒服，热饮和休息会很有帮助。"),
+             QStringLiteral("我想先安静休息一会儿。")}
+        };
+    }
+
+    if(life.satiety<=24 && rng->bounded(100)<86) {
+        return {
+            QStringLiteral("autonomous_hungry"),QStringLiteral("sniff"),QStringLiteral("hopeful"),2100,4600,
+            {QStringLiteral("I think my snack detector is reporting low fullness."),
+             QStringLiteral("A small snack or proper meal would be appreciated.")},
+            {QStringLiteral("Tony 的零食雷达提示：饱食度有点低。"),
+             QStringLiteral("可以来一点零食，或者吃顿正餐吗？")}
+        };
+    }
+
+    if(life.health<=34 && rng->bounded(100)<84) {
+        return {
+            QStringLiteral("autonomous_weak"),QStringLiteral("sleep"),QStringLiteral("sleepy"),2500,4700,
+            {QStringLiteral("I am going to rest instead of doing tricks for a bit."),
+             QStringLiteral("Low-HP mode. Quiet recovery first.")},
+            {QStringLiteral("生命值有点低，Tony 先不表演了，休息一下。"),
+             QStringLiteral("低生命状态，先安静恢复。")}
+        };
+    }
+
     if(night) {
         return {
             QStringLiteral("autonomous_night"),QStringLiteral("yawn"),QStringLiteral("sleepy"),2200,4300,
@@ -265,8 +305,13 @@ void TonyAutonomousCompanion::tick() {
         QJsonObject{
             {QStringLiteral("mode"),currentMode},
             {QStringLiteral("mood"),life.mood},
+            {QStringLiteral("level"),life.level},
+            {QStringLiteral("growth_stage"),life.growthStage},
+            {QStringLiteral("health"),life.health},
             {QStringLiteral("energy"),life.energy},
+            {QStringLiteral("satiety"),life.satiety},
             {QStringLiteral("warmth"),life.warmth},
+            {QStringLiteral("under_weather"),life.underWeather},
             {QStringLiteral("loneliness"),life.loneliness},
             {QStringLiteral("curiosity"),life.curiosity}
         });

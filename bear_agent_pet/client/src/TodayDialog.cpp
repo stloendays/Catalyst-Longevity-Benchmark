@@ -240,11 +240,32 @@ void TodayDialog::rebuildText() {
 
     const int reminderCount = pet_ ? pet_->localReminders().size() : 0;
     const int historyCount = pet_ ? pet_->recentConversation().size() : 0;
-    summaryLabel_->setText(
-        zh ? QStringLiteral("Tony 把今天常用的信息收在这里：%1 个待提醒事项，%2 条本地对话记录。")
-                 .arg(reminderCount).arg(historyCount)
-           : QStringLiteral("Tony keeps today's essentials here: %1 upcoming reminder(s), %2 local conversation entries.")
-                 .arg(reminderCount).arg(historyCount));
+    if(pet_) {
+        const auto life=pet_->autonomySnapshot();
+        const QString stageZh=
+            life.growthStage=="pup" ? QStringLiteral("幼犬") :
+            life.growthStage=="explorer" ? QStringLiteral("探索期") :
+            life.growthStage=="companion" ? QStringLiteral("伙伴期") :
+            QStringLiteral("成熟期");
+        const QString stageEn=
+            life.growthStage=="pup" ? QStringLiteral("Pup") :
+            life.growthStage=="explorer" ? QStringLiteral("Explorer") :
+            life.growthStage=="companion" ? QStringLiteral("Companion") :
+            QStringLiteral("Veteran");
+        summaryLabel_->setText(
+            zh ? QStringLiteral("%1 · Lv %2 · 生命 %3 · 饱食 %4%5\n今天有 %6 个待提醒事项，%7 条本地对话记录。")
+                     .arg(stageZh).arg(life.level).arg(life.health).arg(life.satiety)
+                     .arg(life.underWeather ? QStringLiteral(" · 需要照顾") : QString())
+                     .arg(reminderCount).arg(historyCount)
+               : QStringLiteral("%1 · Lv %2 · HP %3 · Fullness %4%5\n%6 upcoming reminder(s), %7 local conversation entries.")
+                     .arg(stageEn).arg(life.level).arg(life.health).arg(life.satiety)
+                     .arg(life.underWeather ? QStringLiteral(" · Needs care") : QString())
+                     .arg(reminderCount).arg(historyCount));
+    } else {
+        summaryLabel_->setText(
+            zh ? QStringLiteral("Tony 今日信息暂不可用。")
+               : QStringLiteral("Tony's daily status is unavailable."));
+    }
 
     chat_->setText(zh ? QStringLiteral("和 Tony 聊天") : QStringLiteral("Chat"));
     morningBrief_->setText(zh ? QStringLiteral("早间简报") : QStringLiteral("Morning Brief"));

@@ -275,12 +275,24 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
 
     if(hasAny(p,{"状态","心情","status","mood","你怎么样"})) {
         const int xpIntoLevel=state.level>=99 ? 50 : (state.bondXp%50);
-        const QString en=QString("Lv %1, HP %2, energy %3, fullness %4, warmth %5, affection %6, loneliness %7, curiosity %8, bond %9/50. Mood: %10.")
-            .arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
-            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(state.mood);
-        const QString cn=QString("现在的 Tony：Lv %1，生命 %2，精力 %3，饱食 %4，温暖 %5，亲密 %6，孤独 %7，好奇 %8，羁绊 %9/50。心情是 %10。")
-            .arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
-            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(state.mood);
+        const QString stageEn=
+            state.growthStage=="pup" ? QStringLiteral("Pup") :
+            state.growthStage=="explorer" ? QStringLiteral("Explorer") :
+            state.growthStage=="companion" ? QStringLiteral("Companion") :
+            QStringLiteral("Veteran");
+        const QString stageCn=
+            state.growthStage=="pup" ? QStringLiteral("幼犬") :
+            state.growthStage=="explorer" ? QStringLiteral("探索期") :
+            state.growthStage=="companion" ? QStringLiteral("伙伴期") :
+            QStringLiteral("成熟期");
+        const QString conditionEn=state.underWeather ? QStringLiteral("under the weather") : QStringLiteral("healthy");
+        const QString conditionCn=state.underWeather ? QStringLiteral("有点不舒服") : QStringLiteral("健康");
+        const QString en=QString("%1, Lv %2, HP %3, energy %4, fullness %5, warmth %6, affection %7, loneliness %8, curiosity %9, bond %10/50. Condition: %11. Mood: %12.")
+            .arg(stageEn).arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(conditionEn).arg(state.mood);
+        const QString cn=QString("现在的 Tony：%1，Lv %2，生命 %3，精力 %4，饱食 %5，温暖 %6，亲密 %7，孤独 %8，好奇 %9，羁绊 %10/50。状态：%11。心情：%12。")
+            .arg(stageCn).arg(state.level).arg(state.health).arg(state.energy).arg(state.satiety).arg(state.warmth)
+            .arg(state.affection).arg(state.loneliness).arg(state.curiosity).arg(xpIntoLevel).arg(conditionCn).arg(state.mood);
         out.route=Route::LocalFixed;
         out.intent=QStringLiteral("status");
         out.reply=language.trimmed().toLower().startsWith(QStringLiteral("zh")) ? cn : en;
@@ -308,9 +320,34 @@ TonyResponseRouter::Decision TonyResponseRouter::resolve(
         return sequence("compliment",{"I know... but hearing it still works.","Careful. Compliments may cause dancing."},{"我知道……但听到还是会开心。","小心，夸多了 Tony 会跳舞。"},
             {"blush","hop","dance"},{"shy","happy","happy"},{650,750,1500},"happy",3500);
 
+    if(hasAny(p,{"热饮","热牛奶","热水","warm drink","warm milk"}))
+        return sequence("feed_warm_drink",{"Warm drink accepted. That helps.","Nice and warm. Thank you."},{"热饮收到啦，暖和多了。","好暖，谢谢。"},
+            {"sniff","stretch","nod"},{"curious","content","content"},{650,1100,650},"content",3200);
+
+    if(hasAny(p,{"正餐","一顿饭","吃正餐","proper meal","full meal","dinner"}))
+        return sequence("feed_meal",{"A proper meal? Yes please.","That is exactly what I needed."},{"正餐！这个很需要。","这顿饭来得正好。"},
+            {"sniff","hop","paw"},{"curious","happy","happy"},{650,850,800},"happy",3300);
+
     if(hasAny(p,{"给你零食","给你吃","喂你","喂tony","feed you","give you a snack","have a snack"}))
         return sequence("feed",{"Snack accepted. Thank you.","Okay, Tony is having the snack."},{"零食收到啦，谢谢。","好，Tony 开始吃小零食。"},
             {"sniff","paw","hop"},{"curious","happy","happy"},{650,900,650},"happy",3100);
+
+    if(hasAny(p,{"表演特技","来个特技","表演一下","show me a trick","do a trick","trick"})) {
+        if(state.level>=12)
+            return sequence("trick_victory",{"Victory combo!","Watch the full combo."},{"胜利组合！","看完整组合。"},
+                {"wave","spin","dance","celebrate"},{"friendly","playful","happy","happy"},{650,950,1500,1000},"happy",4100);
+        if(state.level>=8)
+            return sequence("trick_dance",{"Happy dance combo!","I learned this one."},{"开心舞组合！","这个我学会了。"},
+                {"hop","dance","celebrate"},{"happy","happy","happy"},{700,1600,1000},"happy",3600);
+        if(state.level>=5)
+            return sequence("trick_spin",{"Spin combo!","Okay, watch this."},{"旋转组合！","好，看这个。"},
+                {"paw","spin","nod"},{"friendly","playful","content"},{650,1200,650},"playful",3300);
+        if(state.level>=3)
+            return sequence("trick_zoomies",{"Zoomies combo!","I can do this one now."},{"撒欢组合！","这个我现在会了。"},
+                {"head_tilt","hop","paw"},{"curious","happy","friendly"},{550,850,900},"playful",3200);
+        return sequence("trick_locked",{"I'm still learning. My first combo unlocks at Lv 3."},{"我还在学。第一个组合特技会在 Lv 3 解锁。"},
+            {"head_tilt","paw"},{"curious","friendly"},{650,800},"curious",3200);
+    }
 
     if(hasAny(p,{"饿不饿","吃饭","零食","food","snack","hungry"}))
         return sequence("food",{"Did someone say snack?","I should investigate that smell."},{"刚才是不是有人说零食？","我得去闻闻是什么味道。"},

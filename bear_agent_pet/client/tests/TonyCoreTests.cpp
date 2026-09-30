@@ -35,6 +35,8 @@ bool testBehaviorDefaultsAndInteractions() {
     ok &= expect(state.health == 100, "default health");
     ok &= expect(state.level == 1, "default bond level");
     ok &= expect(state.bondXp == 0, "default bond xp");
+    ok &= expect(state.growthStage == QStringLiteral("pup"), "default growth stage");
+    ok &= expect(!state.underWeather, "default condition is healthy");
     ok &= expect(state.energy == 78, "default energy");
     ok &= expect(state.satiety == 72, "default satiety");
     ok &= expect(state.warmth == 68, "default warmth");
@@ -142,6 +144,71 @@ bool testHungerMoodAndFeeding(const QString &settingsPath) {
     return ok;
 }
 
+bool testGrowthFoodAndCondition(const QString &settingsPath) {
+    QSettings settings(settingsPath, QSettings::IniFormat);
+    bool ok = true;
+
+    settings.clear();
+    settings.setValue(QStringLiteral("tony/life/health"), 26.0);
+    settings.setValue(QStringLiteral("tony/life/energy"), 60.0);
+    settings.setValue(QStringLiteral("tony/life/satiety"), 15.0);
+    settings.setValue(QStringLiteral("tony/life/warmth"), 60.0);
+    settings.setValue(QStringLiteral("tony/life/affection"), 62.0);
+    settings.setValue(QStringLiteral("tony/life/loneliness"), 18.0);
+    settings.setValue(QStringLiteral("tony/life/curiosity"), 58.0);
+    settings.sync();
+
+    TonyBehaviorEngine recovering;
+    recovering.restore(settings);
+    auto state = recovering.snapshot();
+    ok &= expect(state.underWeather, "low health plus hunger triggers under-weather condition");
+    ok &= expect(state.mood == QStringLiteral("unwell"), "under-weather condition takes mood priority");
+
+    recovering.onFed(TonyBehaviorEngine::Food::Meal);
+    state = recovering.snapshot();
+    ok &= expect(state.satiety == 60, "meal adds 45 satiety");
+    ok &= expect(state.health == 28, "meal restores health");
+    ok &= expect(state.energy == 64, "meal restores energy");
+    ok &= expect(state.underWeather, "one meal does not instantly clear recovery condition");
+
+    for(int i=0; i<15; ++i) recovering.onRested();
+    state = recovering.snapshot();
+    ok &= expect(state.health == 58, "repeated rest reaches recovery health threshold");
+    ok &= expect(state.satiety == 45, "rest consumes a small amount of fullness");
+    ok &= expect(!state.underWeather, "care condition clears only after full recovery thresholds");
+
+    TonyBehaviorEngine warmDrink;
+    warmDrink.onFed(TonyBehaviorEngine::Food::WarmDrink);
+    state = warmDrink.snapshot();
+    ok &= expect(state.satiety == 88, "warm drink adds 16 satiety");
+    ok &= expect(state.warmth == 80, "warm drink strongly restores warmth");
+    ok &= expect(state.bondXp == 1, "warm drink care adds bond xp");
+
+    settings.clear();
+    settings.setValue(QStringLiteral("tony/life/bond_xp"), 200);
+    settings.sync();
+    TonyBehaviorEngine explorer;
+    explorer.restore(settings);
+    ok &= expect(explorer.snapshot().level == 5, "200 bond xp reaches level 5");
+    ok &= expect(explorer.snapshot().growthStage == QStringLiteral("explorer"), "level 5 enters explorer stage");
+
+    settings.setValue(QStringLiteral("tony/life/bond_xp"), 700);
+    settings.sync();
+    TonyBehaviorEngine companion;
+    companion.restore(settings);
+    ok &= expect(companion.snapshot().level == 15, "700 bond xp reaches level 15");
+    ok &= expect(companion.snapshot().growthStage == QStringLiteral("companion"), "level 15 enters companion stage");
+
+    settings.setValue(QStringLiteral("tony/life/bond_xp"), 1450);
+    settings.sync();
+    TonyBehaviorEngine veteran;
+    veteran.restore(settings);
+    ok &= expect(veteran.snapshot().level == 30, "1450 bond xp reaches level 30");
+    ok &= expect(veteran.snapshot().growthStage == QStringLiteral("veteran"), "level 30 enters veteran stage");
+
+    return ok;
+}
+
 bool testResponseRouterVitalityAndCare() {
     TonyBehaviorEngine engine;
     const auto state = engine.snapshot();
@@ -154,10 +221,27 @@ bool testResponseRouterVitalityAndCare() {
     ok &= expect(status.reply.contains(QStringLiteral("生命 100")), "status reply contains HP");
     ok &= expect(status.reply.contains(QStringLiteral("饱食 72")), "status reply contains satiety");
     ok &= expect(status.reply.contains(QStringLiteral("Lv 1")), "status reply contains level");
+    ok &= expect(status.reply.contains(QStringLiteral("幼犬")), "status reply contains growth stage");
+    ok &= expect(status.reply.contains(QStringLiteral("状态：健康")), "status reply contains care condition");
 
     const auto feed = router.resolve(QStringLiteral("给你零食"), QStringLiteral("zh"), false, state);
     ok &= expect(feed.handledLocally(), "explicit feeding is local");
     ok &= expect(feed.intent == QStringLiteral("feed"), "explicit feeding gets feed intent");
+
+    const auto meal = router.resolve(QStringLiteral("给你正餐"), QStringLiteral("zh"), false, state);
+    ok &= expect(meal.intent == QStringLiteral("feed_meal"), "meal phrasing gets meal intent");
+
+    const auto warmDrink = router.resolve(QStringLiteral("给你热饮"), QStringLiteral("zh"), false, state);
+    ok &= expect(warmDrink.intent == QStringLiteral("feed_warm_drink"), "warm drink phrasing gets warm-drink intent");
+
+    const auto lockedTrick = router.resolve(QStringLiteral("表演特技"), QStringLiteral("zh"), false, state);
+    ok &= expect(lockedTrick.intent == QStringLiteral("trick_locked"), "level-one trick request stays locked");
+
+    auto advancedState = state;
+    advancedState.level = 12;
+    advancedState.growthStage = QStringLiteral("explorer");
+    const auto advancedTrick = router.resolve(QStringLiteral("表演特技"), QStringLiteral("zh"), false, advancedState);
+    ok &= expect(advancedTrick.intent == QStringLiteral("trick_victory"), "level-twelve trick request unlocks victory combo");
 
     const auto sleep = router.resolve(QStringLiteral("晚安"), QStringLiteral("zh"), false, state);
     ok &= expect(sleep.handledLocally(), "sleep is local");
@@ -282,6 +366,7 @@ int main(int argc, char **argv) {
     ok &= testBehaviorDefaultsAndInteractions();
     ok &= testBehaviorTickAndClamp(temp.filePath(QStringLiteral("behavior.ini")));
     ok &= testHungerMoodAndFeeding(temp.filePath(QStringLiteral("hunger.ini")));
+    ok &= testGrowthFoodAndCondition(temp.filePath(QStringLiteral("growth-care.ini")));
     ok &= testResponseRouterVitalityAndCare();
     ok &= testMemoryStore();
     ok &= testConversationStore();
