@@ -443,7 +443,7 @@ void applyWindowPolish(catalyst::MainWindow& window) {
     }
 }
 
-} // namespace
+} // 匿名命名空间
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);

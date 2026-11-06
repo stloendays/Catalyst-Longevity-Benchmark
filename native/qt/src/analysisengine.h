@@ -17,4 +17,4 @@ public:
     static QString thresholdText(const ThresholdObservation& observation);
 };
 
-} // namespace catalyst
+} // catalyst 命名空间

@@ -24,7 +24,7 @@ std::optional<double> performanceAt(const QVector<Record>& rows, double timeHour
     return std::nullopt;
 }
 
-} // namespace
+} // 匿名命名空间
 
 ThresholdObservation AnalysisEngine::thresholdObservation(
     const QVector<double>& timeHours,
@@ -153,8 +153,7 @@ AnalysisResult AnalysisEngine::analyze(const QVector<Record>& records) {
         }
     }
 
-    // A shared-time leader is a direct cross-catalyst ranking claim. Suppress
-    // it whenever explicit experimental conditions make the comparison unsafe.
+    // 共同时间点的领先判断属于跨催化剂比较；实验条件不一致时，不显示这个结论。
     if (result.conditionAudit.blocksDirectRanking()) {
         result.latestSharedLeader.clear();
     }
@@ -179,4 +178,4 @@ QString AnalysisEngine::thresholdText(const ThresholdObservation& observation) {
     return QStringLiteral("—");
 }
 
-} // namespace catalyst
+} // catalyst 命名空间

@@ -10,8 +10,7 @@ namespace catalyst {
 
 class CsvReader {
 public:
-    // Historical class name retained for source compatibility. readFile now
-    // accepts both delimited CSV data and native .xlsx workbooks.
+    // 类名暂时保留，避免影响现有调用；目前也支持读取 xlsx 文件。
     static QVector<Record> readFile(const QString& path, QString* errorMessage = nullptr);
     static QVector<Record> demoData();
 
@@ -21,4 +20,4 @@ private:
     static QVector<Record> readXlsxFile(const QString& path, QString* errorMessage);
 };
 
-} // namespace catalyst
+} // catalyst 命名空间

@@ -37,8 +37,7 @@ enum class AdvicePriority {
 };
 
 struct ExperimentPlanningConstraints {
-    // 0 means automatic/no user-specified planning cap. These values are
-    // scheduling constraints, not reactor safety limits.
+    // 设为 0 表示不额外限制计划时长；这里的数值只用于安排采样，不代表反应器安全上限。
     double maxAdditionalHoursPerStage = 0.0;
     double minSamplingIntervalHours = 0.0;
 };
@@ -81,4 +80,4 @@ public:
     static QString advicePriorityText(AdvicePriority priority);
 };
 
-} // namespace catalyst
+} // catalyst 命名空间

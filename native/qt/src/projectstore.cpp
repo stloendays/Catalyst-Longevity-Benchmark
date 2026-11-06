@@ -65,7 +65,7 @@ bool ensureEvidenceColumns(QSqlDatabase& db, QString* errorMessage) {
     return true;
 }
 
-} // namespace
+} // 匿名命名空间
 
 bool ProjectStore::saveProject(
     const QString& path,
@@ -313,8 +313,7 @@ bool ProjectStore::loadProject(
                     }
                 }
 
-                // Evidence is additive under schema version 1. Old projects that
-                // predate the table or page column remain valid.
+                // 证据资料表和页面字段都是后加的，旧项目没有这些内容也能继续读取。
                 if (ok && tableExists(db, QStringLiteral("evidence_items"))) {
                     const bool hasSourcePage = columnExists(
                         db, QStringLiteral("evidence_items"), QStringLiteral("source_page"));
@@ -364,4 +363,4 @@ bool ProjectStore::loadProject(
     return success;
 }
 
-} // namespace catalyst
+} // catalyst 命名空间

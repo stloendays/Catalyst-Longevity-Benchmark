@@ -10,8 +10,7 @@ namespace catalyst {
 
 class ProjectStore {
 public:
-    // Keep schema version 1 backward compatible. Evidence extensions are
-    // additive columns/tables so older .clrproj files remain readable.
+    // 证据资料相关字段采用增量方式添加，旧版项目文件仍可正常打开。
     static constexpr int SchemaVersion = 1;
 
     static bool saveProject(
@@ -37,4 +36,4 @@ public:
         QString* errorMessage = nullptr);
 };
 
-} // namespace catalyst
+} // catalyst 命名空间

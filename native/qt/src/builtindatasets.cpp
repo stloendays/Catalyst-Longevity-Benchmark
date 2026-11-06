@@ -117,7 +117,7 @@ QVector<Record> dataQualityCheck() {
     return records;
 }
 
-} // namespace
+} // 匿名命名空间
 
 QVector<BuiltInDataset> BuiltInDatasets::all() {
     return {
@@ -159,4 +159,4 @@ QVector<BuiltInDataset> BuiltInDatasets::all() {
     };
 }
 
-} // namespace catalyst
+} // catalyst 命名空间
